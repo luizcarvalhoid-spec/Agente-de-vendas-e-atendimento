@@ -1,10 +1,17 @@
 import { buildApp } from './app.js'
-
-const app = buildApp({ logger: true })
+import { ConfigError, loadConfig, loadLocalEnvFile } from './config/env.js'
 
 try {
-  await app.listen({ host: '127.0.0.1', port: 3333 })
+  loadLocalEnvFile()
+  const config = loadConfig(process.env)
+  const app = buildApp({ config, fastify: { logger: true } })
+
+  await app.listen({ host: '127.0.0.1', port: config.port })
 } catch (error) {
-  app.log.error(error)
+  if (error instanceof ConfigError) {
+    console.error(error.message, { fields: error.fields })
+  } else {
+    console.error('Falha ao iniciar a API.')
+  }
   process.exitCode = 1
 }

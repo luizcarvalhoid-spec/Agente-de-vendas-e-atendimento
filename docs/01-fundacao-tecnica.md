@@ -146,13 +146,63 @@ O navegador integrado não conseguiu acessar o servidor local e retornou `net::E
 
 ## 1.4 — Integração de desenvolvimento
 
-- [ ] Criar cliente HTTP mínimo no frontend com URL da API via `VITE_API_URL` (somente endereço público, nunca segredo).
-- [ ] Exibir estado amigável se a API estiver indisponível em um teste isolado; não integrar ainda o chat.
-- [ ] Registrar comandos de inicialização do frontend e backend em documentação curta.
-- [ ] Fazer teste local de requisição `Frontend → Backend /api/health`.
+- [x] Criar cliente HTTP mínimo no frontend com URL da API via `VITE_API_URL` (somente endereço público, nunca segredo).
+- [x] Exibir estado amigável se a API estiver indisponível em um teste isolado; não integrar ainda o chat.
+- [x] Registrar comandos de inicialização do frontend e backend em documentação curta.
+- [x] Fazer teste local de requisição `Frontend → Backend /api/health`.
 
 **Aceite:** integração HTTP funciona localmente, sem backend exposto no bundle como segredo, e passos de execução são reproduzíveis.  
 **Sugestão de commit:** `chore: connect frontend to API base URL`.
+
+### Execução local
+
+Use Node.js `>=22` e pnpm `11.25.0` via Corepack. Os pacotes continuam independentes e devem ser instalados e iniciados em terminais separados.
+
+1. Em `Backend/`, copie `.env.example` para `.env`, execute `corepack pnpm@11.25.0 install --frozen-lockfile` e `npm run dev`.
+2. Em `Frontend/`, copie `.env.example` para `.env`, execute `corepack pnpm@11.25.0 install --frozen-lockfile` e `npm run dev -- --host localhost --port 5173 --strictPort`.
+3. Abra `http://localhost:5173` e confirme o indicador “API disponível”. O health check pode ser consultado diretamente em `http://127.0.0.1:3333/api/health`.
+
+`VITE_API_URL=http://127.0.0.1:3333` é o endereço público acessado pelo navegador. `FRONTEND_ORIGIN=http://localhost:5173` é a origem que o backend autoriza no CORS. Se o Vite for aberto em `http://127.0.0.1:5173`, altere também `FRONTEND_ORIGIN` para esse valor exato. Mudanças em `.env` exigem reiniciar o respectivo servidor, e o backend deve ser iniciado dentro de `Backend/` porque carrega `.env` relativamente ao diretório de execução.
+
+Em caso de “API indisponível”, confirme se os dois processos estão ativos, se a porta 3333 responde, se `VITE_API_URL` contém apenas uma origem HTTP/HTTPS e se a origem exibida pelo Vite coincide exatamente com `FRONTEND_ORIGIN`. O uso de `--strictPort` impede que uma porta alternativa cause falha de CORS silenciosa.
+
+### Registro da entrega 1.4 — 06/11/2026
+
+**Status:** concluída; integração, verificações automatizadas, smoke test e inspeção visual assistida aprovados.
+
+**Alterações e decisões**
+
+- Criado cliente baseado no `fetch` nativo, sem dependências adicionais, com tratamento separado de configuração, rede, status HTTP e resposta incompatível.
+- Espelhados somente os contratos atuais `HealthResponse` e `ApiError`, com validação manual do JSON recebido; o frontend não importa código do backend.
+- `VITE_API_URL` aceita somente uma origem HTTP/HTTPS sem credenciais, caminho, query ou fragmento. Ausência ou valor inválido produz o estado “API indisponível” sem interromper a vitrine.
+- O diagnóstico é renderizado por `App.tsx` apenas quando `import.meta.env.DEV` é verdadeiro, usa `pointer-events: none` e permanece isolado de `CategoryPage.tsx` e do chat.
+- A consulta possui timeout de 5 segundos e cleanup com `AbortController`; desmontagens do `StrictMode` não atualizam estado nem geram falso erro visual.
+- `Frontend/.env.example` contém somente o endereço público da API. Nenhuma variável privada ou credencial foi adicionada ao frontend.
+- Não foi criado novo ADR: a solução aplica a independência entre os pacotes definida no ADR-001.
+
+**Verificações automatizadas**
+
+| Comando ou verificação | Resultado |
+| --- | --- |
+| Instalação congelada em `Frontend/` e `Backend/` | Sucesso com pnpm 11.25.0; lockfiles permaneceram inalterados. |
+| `tsc -p tsconfig.app.json --noEmit` | Sucesso no frontend. |
+| `npm run lint` em `Frontend/` | Sucesso; zero erros e avisos. |
+| `npm run build` em `Frontend/` | Sucesso; Vite compilou 1.522 módulos. |
+| `npm test` em `Backend/` | Sucesso; os 22 testes existentes passaram. |
+| `npm run build` em `Backend/` | Sucesso. |
+| Smoke HTTP real com origem `http://localhost:5173` | HTTP 200, contrato esperado e `Access-Control-Allow-Origin` correto. |
+| Varredura de arquivos e bundle | Nenhuma credencial encontrada; o diagnóstico de desenvolvimento não aparece no bundle de produção. |
+
+**Verificações manuais assistidas no navegador**
+
+- Com `VITE_API_URL` ausente e a API parada, a vitrine continuou funcional e exibiu “API indisponível”.
+- Com frontend e backend ativos, a requisição real chegou a `/api/health` com HTTP 200 e o indicador exibiu “API disponível”.
+- Em viewport móvel de 375 × 812, não houve rolagem horizontal nem sobreposição entre diagnóstico e chat; o diagnóstico permaneceu sem interceptar eventos.
+- A interface existente, os oito produtos, filtros, imagens e botão do chat permaneceram visíveis nos estados disponível e indisponível.
+
+**Observação do ambiente**
+
+A porta 5173 estava ocupada durante a inspeção e o processo responsável não foi alterado. A validação visual foi executada temporariamente em `127.0.0.1:4173`, com `FRONTEND_ORIGIN` correspondente; o smoke de CORS também validou separadamente a origem documentada `http://localhost:5173`.
 
 ## Fora de escopo
 

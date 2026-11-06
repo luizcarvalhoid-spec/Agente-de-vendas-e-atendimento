@@ -102,14 +102,47 @@ O navegador integrado não conseguiu acessar o servidor local e retornou `net::E
 
 ## 1.3 — Contratos e validação
 
-- [ ] Escolher a forma simples de compartilhar contratos: tipos espelhados e documentados ou `shared/` somente se necessário.
-- [ ] Instalar Zod no backend para validar entradas da API, dados dos produtos e saída das ferramentas.
-- [ ] Definir padrão JSON para erros (`code`, `message`) e status HTTP.
-- [ ] Definir configuração central de ambiente (`PORT`, `FRONTEND_ORIGIN`, `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`) sem valores reais versionados.
-- [ ] Criar `Backend/.env.example` e revisar `.gitignore` para `.env`, `.env.*` (exceto exemplos), logs, `node_modules` e `dist`.
+- [x] Escolher a forma simples de compartilhar contratos: tipos espelhados e documentados ou `shared/` somente se necessário.
+- [x] Instalar Zod no backend para validar entradas da API, dados dos produtos e saída das ferramentas.
+- [x] Definir padrão JSON para erros (`code`, `message`) e status HTTP.
+- [x] Definir configuração central de ambiente (`PORT`, `FRONTEND_ORIGIN`, `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`) sem valores reais versionados.
+- [x] Criar `Backend/.env.example` e revisar `.gitignore` para `.env`, `.env.*` (exceto exemplos), logs, `node_modules` e `dist`.
 
 **Aceite:** variáveis obrigatórias são validadas; nenhuma chave vai para `VITE_*` ou bundle do navegador; exemplos permitem configurar o projeto.  
 **Sugestão de commit:** `chore(api): add contracts and env validation`.
+
+### Registro da entrega 1.3 — 06/11/2026
+
+**Status:** concluída; contratos atuais, configuração, erros, testes, build e smoke tests aprovados.
+
+**Alterações e decisões**
+
+- Adicionado `zod@4.6.7` somente ao backend e atualizado `engines.node` para `>=22`.
+- Mantidos contratos no backend, com tipos inferidos dos schemas Zod; não foi criado pacote `shared/` nem alterado o frontend.
+- Criados os contratos atuais `HealthResponse` e `ApiError`; schemas de catálogo, FAQ e ferramentas serão criados apenas com seus respectivos módulos.
+- `buildApp()` agora exige `AppConfig` por injeção explícita e não lê `process.env` durante imports.
+- `PORT` e `FRONTEND_ORIGIN` possuem padrões locais validados. As variáveis OpenRouter são opcionais nesta fase, mas precisam ser fornecidas em conjunto.
+- `FRONTEND_ORIGIN` aceita somente uma origem HTTP/HTTPS, sem caminho, query, fragmento ou credenciais.
+- Padronizadas respostas `{ code, message }` para validação (400), rota inexistente (404), outros erros 4xx e erros internos (500).
+- Mensagens de Zod, Fastify e exceções inesperadas não são devolvidas ao cliente.
+- Criado `Backend/.env.example` sem valores reais e ampliado `.gitignore` para variações de `.env` e logs, preservando arquivos de exemplo.
+- Não foi criado novo ADR: as mudanças implementam a independência e a arquitetura modular já aceitas no ADR-001.
+
+**Comandos e resultados**
+
+| Comando | Resultado |
+| --- | --- |
+| `corepack pnpm@11.25.0 install --frozen-lockfile` | Sucesso após atualizar o lockfile com Zod. |
+| `npm test` | Sucesso; typecheck e 22 testes passaram, incluindo os 4 testes anteriores. |
+| `npm run build` | Sucesso; TypeScript gerou o backend compilado em `dist/`. |
+| Smoke test de `dist/server.js` sem credenciais OpenRouter | Sucesso; HTTP 200 e JSON esperado em `127.0.0.1:3333`. |
+| Startup com configuração OpenRouter incompleta | Bloqueado com código 1; mensagem sanitizada e valor secreto sentinela ausente da saída. |
+
+**Pendências deliberadas**
+
+- O frontend espelhará somente o contrato mínimo necessário quando o cliente HTTP for criado na tarefa 1.4.
+- Schemas de produtos, FAQ e ferramentas serão implementados junto aos dados e endpoints reais de suas etapas.
+- A chave e o modelo OpenRouter só se tornarão obrigatórios quando a integração real for implementada, sem expor segredos no navegador.
 
 ## 1.4 — Integração de desenvolvimento
 

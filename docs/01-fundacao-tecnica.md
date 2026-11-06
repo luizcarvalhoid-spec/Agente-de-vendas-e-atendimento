@@ -58,14 +58,47 @@ O navegador integrado não conseguiu acessar o servidor local e retornou `net::E
 
 ## 1.2 — Criar backend Fastify e TypeScript
 
-- [ ] Criar `Backend/` sem substituir `Frontend/`.
-- [ ] Configurar TypeScript, Fastify, `tsx` para desenvolvimento e scripts `dev`, `build`, `start`, `test`.
-- [ ] Implementar `GET /api/health` retornando status e versão de demonstração.
-- [ ] Configurar CORS para a origem local do Vite, sem wildcard indiscriminado.
-- [ ] Separar módulos por finalidade (`catalog`, `faq`, `agent`, `telemetry` conforme surgirem), sem arquiteturas genéricas.
+- [x] Criar `Backend/` sem substituir `Frontend/`.
+- [x] Configurar TypeScript, Fastify, `tsx` para desenvolvimento e scripts `dev`, `build`, `start`, `test`.
+- [x] Implementar `GET /api/health` retornando status e versão de demonstração.
+- [x] Configurar CORS para a origem local do Vite, sem wildcard indiscriminado.
+- [x] Separar módulos por finalidade (`catalog`, `faq`, `agent`, `telemetry` conforme surgirem), sem arquiteturas genéricas.
 
 **Aceite:** API sobe localmente e `GET /api/health` retorna HTTP 200; backend compila.  
 **Sugestão de commit:** `feat(api): bootstrap Fastify service`.
+
+### Registro da entrega 1.2 — 06/11/2026
+
+**Status:** concluída; implementação, testes automatizados, build e smoke test aprovados.
+
+**Alterações e decisões**
+
+- Criado backend independente em `Backend/`, sem alterações funcionais no frontend.
+- Adotados Fastify 5, TypeScript com ESM `NodeNext` e `tsx` para desenvolvimento e testes.
+- Separadas a composição da aplicação (`app.ts`) e a abertura da porta (`server.ts`) para permitir testes sem socket.
+- Implementado `GET /api/health` com status, nome do serviço e versão explicitamente demonstrativa.
+- CORS limitado a `http://localhost:5173` e `http://127.0.0.1:5173`, sem wildcard ou credenciais.
+- Registrado o [ADR-001](./decisions/ADR-001-backend-modular-fastify.md) para a arquitetura modular monolítica.
+- Autorizado somente o script de instalação do `esbuild`, dependência do `tsx`, por meio de `Backend/pnpm-workspace.yaml`.
+
+**Dependências resolvidas no lockfile**
+
+- Produção: `fastify@5.12.8` e `@fastify/cors@11.4.1`.
+- Desenvolvimento: `typescript@5.9.3`, `tsx@4.23.15` e `@types/node@24.19.2`.
+
+**Comandos e resultados**
+
+| Comando | Resultado |
+| --- | --- |
+| `corepack pnpm@11.25.0 install --frozen-lockfile` | Sucesso; lockfile validado e `esbuild` construído com autorização restrita. |
+| `npm test` | Sucesso; 4 testes passaram: contrato health, origem permitida, origem bloqueada e preflight CORS. |
+| `npm run build` | Sucesso; TypeScript gerou `dist/server.js`. |
+| Smoke test de `dist/server.js` em `127.0.0.1:3333` | Sucesso; HTTP 200 e JSON esperado, seguido do encerramento do processo. |
+
+**Pendências deliberadas**
+
+- Configuração validada de ambiente, Zod e padrão de erros permanecem na tarefa 1.3.
+- Não foram adicionados autenticação, multi-tenancy, banco, Docker, microsserviços ou infraestrutura remota.
 
 ## 1.3 — Contratos e validação
 

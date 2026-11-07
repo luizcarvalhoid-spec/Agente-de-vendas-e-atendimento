@@ -14,6 +14,7 @@ import { ZodError } from 'zod'
 
 import { validateCatalog } from '../src/catalog/catalog-validator.js'
 import {
+  commercialProductSchema,
   imageReferenceSchema,
   productCatalogSchema,
   productSchema,
@@ -24,8 +25,18 @@ function makeProduct(overrides: Record<string, unknown> = {}) {
     id: 1,
     slug: 'shampoo-anticaspa-hidrasplash',
     name: 'Shampoo Anticaspa HidraSplash',
+    brand: 'HidraSplash',
+    isDemo: true,
+    dataClassification: {
+      commercial: 'fictional-demo',
+      compatibility: 'commercial-positioning',
+      formulation: 'synthetic-test-data',
+      safety: 'not-evaluated',
+    },
     category: 'shampoos',
     subcategory: 'anticaspa',
+    applicationArea: 'hair',
+    productKind: 'single',
     description:
       'Shampoo de demonstração para limpeza do couro cabeludo e cuidado dos fios.',
     shortDescription: 'Limpeza equilibrada para uma rotina de cuidado diário.',
@@ -34,6 +45,12 @@ function makeProduct(overrides: Record<string, unknown> = {}) {
     image: 'images/shampoo-anticaspa.jpg',
     images: ['images/shampoo-anticaspa-verso.webp'],
     stock: 18,
+    netContent: { value: 250, unit: 'ml' },
+    variant: {
+      name: 'Coco & Blueberry',
+      profile: 'hidratacao-equilibrada',
+      sensoryNotes: ['Coco', 'Blueberry'],
+    },
     tags: ['anticaspa', 'limpeza-equilibrada'],
     indications: ['Cuidado de couro cabeludo com tendência à oleosidade.'],
     hairTypes: ['todos'],
@@ -52,6 +69,33 @@ function makeProduct(overrides: Record<string, unknown> = {}) {
     ],
     rating: 4.5,
     reviews: 128,
+    ...overrides,
+  }
+}
+
+function makeBodyProduct(overrides: Record<string, unknown> = {}) {
+  const hairProduct = makeProduct()
+  const {
+    hairTypes: _hairTypes,
+    scalpTypes: _scalpTypes,
+    concerns: _concerns,
+    ...commonProduct
+  } = hairProduct
+
+  return {
+    ...commonProduct,
+    id: 15,
+    slug: 'sabonete-vegetal-avela',
+    name: 'Sabonete Vegetal Avelã',
+    category: 'sabonetes',
+    subcategory: 'barra',
+    applicationArea: 'body',
+    image: 'images/sabonete-avela.jpg',
+    netContent: { value: 90, unit: 'g' },
+    variant: { name: 'Avelã', profile: 'aconchegante' },
+    soapForm: 'bar',
+    skinTypes: ['todos'],
+    bodyConcerns: ['limpeza-suave'],
     ...overrides,
   }
 }
@@ -103,7 +147,210 @@ test('product schema accepts complete details and normalizes identifiers', () =>
 
   assert.equal(product.slug, 'shampoo-anticaspa-hidrasplash')
   assert.deepEqual(product.tags, ['anticaspa', 'limpeza-equilibrada'])
-  assert.equal(product.ingredients[0]?.id, 'piritionato-de-zinco')
+  assert.equal(product.ingredients?.[0]?.id, 'piritionato-de-zinco')
+})
+
+test('schema separates hair products from body products', async (t) => {
+  assert.equal(productSchema.safeParse(makeBodyProduct()).success, true)
+
+  await t.test('body product rejects hair compatibility fields', () => {
+    assertIssueAt(
+      productSchema.safeParse(
+        makeBodyProduct({ hairTypes: ['todos'] }),
+      ),
+      [],
+    )
+  })
+
+  await t.test('hair product rejects body compatibility fields', () => {
+    assertIssueAt(
+      productSchema.safeParse(
+        makeProduct({ skinTypes: ['todos'] }),
+      ),
+      [],
+    )
+  })
+
+  await t.test('application area must match category', () => {
+    assertIssueAt(
+      productSchema.safeParse(
+        makeProduct({ category: 'sabonetes', subcategory: 'barra' }),
+      ),
+      ['applicationArea'],
+    )
+  })
+})
+
+test('kit is one commercial product with structured contents', async (t) => {
+  const {
+    ingredients: _ingredients,
+    usage: _usage,
+    restrictions: _restrictions,
+    warnings: _warnings,
+    contraindications: _contraindications,
+    ...kitBase
+  } = makeProduct({
+    id: 7,
+    slug: 'kit-shampoo-condicionador',
+    subcategory: 'kit',
+    productKind: 'kit',
+  })
+  const formulation = {
+    basis: 'synthetic-test-data',
+    ingredients: [{ id: 'glicerina', name: 'Glicerina' }],
+    usage: 'Modo de uso demonstrativo e geral.',
+    restrictions: [],
+    warnings: ['Dados sintéticos; segurança não avaliada.'],
+    contraindications: [],
+  }
+  const kit = {
+    ...kitBase,
+    kitContents: [
+      {
+        name: 'Shampoo demonstrativo',
+        quantity: 1,
+        netContent: { value: 100, unit: 'ml' },
+        formulation,
+      },
+      {
+        name: 'Condicionador demonstrativo',
+        quantity: 1,
+        netContent: { value: 100, unit: 'ml' },
+        formulation: {
+          ...formulation,
+          ingredients: [
+            { id: 'alcool-cetoestearilico', name: 'Álcool cetoestearílico' },
+          ],
+        },
+      },
+    ],
+  }
+
+  assert.equal(productSchema.safeParse(kit).success, true)
+
+  await t.test('kit without contents', () => {
+    assertIssueAt(
+      productSchema.safeParse({
+        ...kit,
+        kitContents: undefined,
+      }),
+      ['kitContents'],
+    )
+  })
+
+  await t.test('single product with kit contents', () => {
+    assertIssueAt(
+      productSchema.safeParse({
+        ...kit,
+        subcategory: 'uso-diario',
+        productKind: 'single',
+      }),
+      ['kitContents'],
+    )
+  })
+
+  await t.test('kit rejects one aggregated formulation', () => {
+    assertIssueAt(
+      productSchema.safeParse({
+        ...kit,
+        ingredients: [{ id: 'glicerina', name: 'Glicerina' }],
+        usage: 'Uso agregado inválido.',
+        restrictions: [],
+        warnings: ['Aviso agregado inválido.'],
+        contraindications: [],
+      }),
+      ['ingredients'],
+    )
+  })
+})
+
+test('commercial draft is valid but publication rejects missing reviewed fields', () => {
+  const {
+    ingredients: _ingredients,
+    usage: _usage,
+    restrictions: _restrictions,
+    warnings: _warnings,
+    contraindications: _contraindications,
+    ...commercialDraft
+  } = makeProduct()
+
+  commercialDraft.dataClassification = {
+    commercial: 'fictional-demo',
+    compatibility: 'commercial-positioning',
+    formulation: 'not-provided',
+    safety: 'not-evaluated',
+  }
+
+  assert.equal(commercialProductSchema.safeParse(commercialDraft).success, true)
+  assert.equal(productSchema.safeParse(commercialDraft).success, false)
+})
+
+test('data classification distinguishes commercial, synthetic and unevaluated data', async (t) => {
+  await t.test('published product requires synthetic formulation data', () => {
+    assertIssueAt(
+      productSchema.safeParse(
+        makeProduct({
+          dataClassification: {
+            commercial: 'fictional-demo',
+            compatibility: 'commercial-positioning',
+            formulation: 'not-provided',
+            safety: 'not-evaluated',
+          },
+        }),
+      ),
+      ['dataClassification', 'formulation'],
+    )
+  })
+
+  await t.test('synthetic formulation requires structured ingredients', () => {
+    assertIssueAt(
+      productSchema.safeParse(makeProduct({ ingredients: undefined })),
+      ['ingredients'],
+    )
+  })
+
+  await t.test('formulation cannot be presented as verified', () => {
+    assertIssueAt(
+      productSchema.safeParse(
+        makeProduct({
+          dataClassification: {
+            commercial: 'fictional-demo',
+            compatibility: 'commercial-positioning',
+            formulation: 'verified',
+            safety: 'not-evaluated',
+          },
+        }),
+      ),
+      ['dataClassification', 'formulation'],
+    )
+  })
+
+  await t.test('safety cannot be presented as evaluated', () => {
+    assertIssueAt(
+      productSchema.safeParse(
+        makeProduct({
+          dataClassification: {
+            commercial: 'fictional-demo',
+            compatibility: 'commercial-positioning',
+            formulation: 'synthetic-test-data',
+            safety: 'evaluated',
+          },
+        }),
+      ),
+      ['dataClassification', 'safety'],
+    )
+  })
+
+  await t.test('empty restrictions do not remove the unevaluated safety marker', () => {
+    const result = productSchema.safeParse(
+      makeProduct({ restrictions: [], contraindications: [] }),
+    )
+
+    assert.equal(result.success, true)
+    if (!result.success) return
+    assert.equal(result.data.dataClassification.safety, 'not-evaluated')
+    assert.ok((result.data.warnings?.length ?? 0) > 0)
+  })
 })
 
 test('required product lists cannot be empty', async (t) => {
@@ -115,6 +362,7 @@ test('required product lists cannot be empty', async (t) => {
     'concerns',
     'benefits',
     'ingredients',
+    'warnings',
   ]
 
   for (const field of requiredLists) {
@@ -127,7 +375,7 @@ test('required product lists cannot be empty', async (t) => {
 
   assert.equal(
     productSchema.safeParse(
-      makeProduct({ restrictions: [], warnings: [], contraindications: [] }),
+      makeProduct({ restrictions: [], contraindications: [] }),
     ).success,
     true,
   )

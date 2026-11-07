@@ -1,0 +1,2527 @@
+[
+  {
+    "id": 1,
+    "slug": "shampoo-anticaspa-coco-blueberry",
+    "name": "Shampoo Anticaspa Coco & Blueberry — Nível 1",
+    "brand": "HidraSplash",
+    "visibleLabelBrand": "HIDRASPLASH",
+    "isDemo": true,
+    "category": "shampoos",
+    "subcategory": "anticaspa",
+    "applicationArea": "hair",
+    "productKind": "single",
+    "description": "Produto demonstrativo com perfil comercial de cuidado anticaspa e sensação de hidratação para uma rotina equilibrada.",
+    "shortDescription": "Posicionamento anticaspa demonstrativo com perfil de conforto e hidratação.",
+    "price": 44.9,
+    "originalPrice": 59.9,
+    "image": "images/shampoo-anticaspa-coco-blueberry.jpg",
+    "stock": 18,
+    "netContent": {
+      "value": 250,
+      "unit": "ml"
+    },
+    "variant": {
+      "name": "Coco & Blueberry — Nível 1",
+      "profile": "hidratacao-equilibrada",
+      "sensoryNotes": [
+        "Coco",
+        "Blueberry"
+      ]
+    },
+    "tags": [
+      "anticaspa",
+      "nivel-1",
+      "hidratacao",
+      "coco-blueberry"
+    ],
+    "indications": [
+      "Consumidores que buscam cuidado cosmético anticaspa com perfil hidratante."
+    ],
+    "benefits": [
+      "Promove sensação de limpeza equilibrada sem posicionamento terapêutico."
+    ],
+    "hairTypes": [
+      "todos"
+    ],
+    "scalpTypes": [
+      "normal",
+      "seco"
+    ],
+    "concerns": [
+      "caspa",
+      "ressecamento"
+    ],
+    "dataClassification": {
+      "commercial": "fictional-demo",
+      "compatibility": "commercial-positioning",
+      "formulation": "synthetic-test-data",
+      "safety": "not-evaluated"
+    },
+    "ingredients": [
+      {
+        "id": "coco-glucosideo",
+        "name": "Coco-glucosídeo"
+      },
+      {
+        "id": "cocamidopropil-betaina",
+        "name": "Cocamidopropil betaína"
+      },
+      {
+        "id": "glicerina",
+        "name": "Glicerina"
+      },
+      {
+        "id": "pantenol",
+        "name": "Pantenol"
+      },
+      {
+        "id": "piroctona-olamina",
+        "name": "Piroctona olamina"
+      },
+      {
+        "id": "fragrancia-coco-blueberry",
+        "name": "Fragrância Coco & Blueberry"
+      }
+    ],
+    "usage": "Aplicar nos cabelos molhados, massagear suavemente e enxaguar. Orientação sintética de demonstração, sem frequência ou tempo de contato definidos.",
+    "restrictions": [],
+    "warnings": [
+      "Dados sintéticos de demonstração; não representam a formulação fotografada.",
+      "Informações de segurança não avaliadas; não utilizar para orientar alergias ou segurança dermatológica.",
+      "Uso externo demonstrativo. Evite contato com olhos e mucosas.",
+      "Interrompa o uso em caso de irritação e procure orientação profissional."
+    ],
+    "contraindications": []
+  },
+  {
+    "id": 2,
+    "slug": "shampoo-antiqueda-cafeina-biotina",
+    "name": "Shampoo Fortalecimento Cafeína & Biotina",
+    "brand": "HidraSplash",
+    "visibleLabelBrand": "HIDRASPLASH",
+    "isDemo": true,
+    "category": "shampoos",
+    "subcategory": "antiqueda",
+    "applicationArea": "hair",
+    "productKind": "single",
+    "description": "Produto demonstrativo voltado à rotina cosmética de cabelos frágeis, com comunicação conservadora de fortalecimento dos fios.",
+    "shortDescription": "Cuidado cosmético para fios frágeis e sujeitos à quebra.",
+    "price": 52.9,
+    "originalPrice": 69.9,
+    "image": "images/shampoo-antiqueda-cafeina-biotina.jpg",
+    "stock": 14,
+    "netContent": {
+      "value": 340,
+      "unit": "ml"
+    },
+    "variant": {
+      "name": "Cafeína & Biotina",
+      "profile": "fortalecimento"
+    },
+    "tags": [
+      "fortalecimento",
+      "fios-frageis",
+      "antiqueda"
+    ],
+    "indications": [
+      "Cabelos frágeis com preocupação cosmética de quebra."
+    ],
+    "benefits": [
+      "Auxilia na percepção de fios mais cuidados durante a lavagem."
+    ],
+    "hairTypes": [
+      "todos"
+    ],
+    "scalpTypes": [
+      "normal"
+    ],
+    "concerns": [
+      "queda-e-quebra",
+      "danos"
+    ],
+    "dataClassification": {
+      "commercial": "fictional-demo",
+      "compatibility": "commercial-positioning",
+      "formulation": "synthetic-test-data",
+      "safety": "not-evaluated"
+    },
+    "ingredients": [
+      {
+        "id": "sodium-cocoyl-glutamate",
+        "name": "Sodium cocoyl glutamate"
+      },
+      {
+        "id": "cocamidopropil-betaina",
+        "name": "Cocamidopropil betaína"
+      },
+      {
+        "id": "glicerina",
+        "name": "Glicerina"
+      },
+      {
+        "id": "pantenol",
+        "name": "Pantenol"
+      },
+      {
+        "id": "proteina-de-arroz-hidrolisada",
+        "name": "Proteína de arroz hidrolisada"
+      },
+      {
+        "id": "cafeina",
+        "name": "Cafeína"
+      },
+      {
+        "id": "biotina",
+        "name": "Biotina"
+      }
+    ],
+    "usage": "Aplicar nos cabelos molhados, massagear suavemente e enxaguar. Orientação sintética de demonstração, sem frequência ou tempo de contato definidos.",
+    "restrictions": [],
+    "warnings": [
+      "Dados sintéticos de demonstração; não representam a formulação fotografada.",
+      "Informações de segurança não avaliadas; não utilizar para orientar alergias ou segurança dermatológica.",
+      "Uso externo demonstrativo. Evite contato com olhos e mucosas.",
+      "Interrompa o uso em caso de irritação e procure orientação profissional."
+    ],
+    "contraindications": []
+  },
+  {
+    "id": 3,
+    "slug": "shampoo-antirresiduos-aloe-bambu",
+    "name": "Shampoo Antirresíduos Aloe & Bambu",
+    "brand": "HidraSplash",
+    "visibleLabelBrand": "HIDRA",
+    "isDemo": true,
+    "category": "shampoos",
+    "subcategory": "antirresiduos",
+    "applicationArea": "hair",
+    "productKind": "single",
+    "description": "Produto demonstrativo com posicionamento de limpeza profunda para rotinas com acúmulo de finalizadores e outros resíduos cosméticos.",
+    "shortDescription": "Limpeza profunda para sensação de leveza nos fios.",
+    "price": 39.9,
+    "image": "images/shampoo-antirresiduos-aloe-bambu.jpg",
+    "stock": 21,
+    "variant": {
+      "name": "Aloe & Bambu",
+      "profile": "limpeza-profunda",
+      "sensoryNotes": [
+        "Frescor vegetal"
+      ]
+    },
+    "tags": [
+      "antirresiduos",
+      "limpeza-profunda",
+      "frescor"
+    ],
+    "indications": [
+      "Rotinas capilares com percepção de acúmulo de produtos."
+    ],
+    "benefits": [
+      "Proporciona sensação de limpeza e leveza."
+    ],
+    "hairTypes": [
+      "todos"
+    ],
+    "scalpTypes": [
+      "normal",
+      "oleoso"
+    ],
+    "concerns": [
+      "acumulo-de-residuos",
+      "oleosidade"
+    ],
+    "dataClassification": {
+      "commercial": "fictional-demo",
+      "compatibility": "commercial-positioning",
+      "formulation": "synthetic-test-data",
+      "safety": "not-evaluated"
+    },
+    "ingredients": [
+      {
+        "id": "sodium-coco-sulfate",
+        "name": "Sodium coco-sulfate"
+      },
+      {
+        "id": "cocamidopropil-betaina",
+        "name": "Cocamidopropil betaína"
+      },
+      {
+        "id": "citrato-de-sodio",
+        "name": "Citrato de sódio"
+      },
+      {
+        "id": "glicerina",
+        "name": "Glicerina"
+      },
+      {
+        "id": "extrato-de-aloe-vera",
+        "name": "Extrato de Aloe vera"
+      },
+      {
+        "id": "extrato-de-bambu",
+        "name": "Extrato de bambu"
+      }
+    ],
+    "usage": "Aplicar nos cabelos molhados, massagear suavemente e enxaguar. Orientação sintética de demonstração, sem frequência ou tempo de contato definidos.",
+    "restrictions": [],
+    "warnings": [
+      "Dados sintéticos de demonstração; não representam a formulação fotografada.",
+      "Informações de segurança não avaliadas; não utilizar para orientar alergias ou segurança dermatológica.",
+      "Uso externo demonstrativo. Evite contato com olhos e mucosas.",
+      "Interrompa o uso em caso de irritação e procure orientação profissional."
+    ],
+    "contraindications": []
+  },
+  {
+    "id": 4,
+    "slug": "shampoo-controle-oleosidade-limao-menta",
+    "name": "Shampoo Controle de Oleosidade Limão & Menta",
+    "brand": "HidraSplash",
+    "visibleLabelBrand": "MADEINMINAS PROFESSIONAL",
+    "isDemo": true,
+    "category": "shampoos",
+    "subcategory": "controle-de-oleosidade",
+    "applicationArea": "hair",
+    "productKind": "single",
+    "description": "Produto demonstrativo para consumidores que preferem limpeza intensa e sensação refrescante em cabelos com tendência à oleosidade.",
+    "shortDescription": "Limpeza refrescante para cabelos com tendência à oleosidade.",
+    "price": 42.9,
+    "originalPrice": 54.9,
+    "image": "images/shampoo-controle-oleosidade-limao-menta.jpg",
+    "stock": 16,
+    "netContent": {
+      "value": 340,
+      "unit": "ml"
+    },
+    "variant": {
+      "name": "Limão & Menta",
+      "profile": "frescor-citrico",
+      "sensoryNotes": [
+        "Cítrico",
+        "Refrescante"
+      ]
+    },
+    "tags": [
+      "oleosidade",
+      "limpeza",
+      "frescor-citrico"
+    ],
+    "indications": [
+      "Cabelos e couro cabeludo com tendência à oleosidade."
+    ],
+    "benefits": [
+      "Mantém sensação de frescor após a lavagem."
+    ],
+    "hairTypes": [
+      "todos"
+    ],
+    "scalpTypes": [
+      "oleoso"
+    ],
+    "concerns": [
+      "oleosidade"
+    ],
+    "dataClassification": {
+      "commercial": "fictional-demo",
+      "compatibility": "commercial-positioning",
+      "formulation": "synthetic-test-data",
+      "safety": "not-evaluated"
+    },
+    "ingredients": [
+      {
+        "id": "sodium-cocoyl-glutamate",
+        "name": "Sodium cocoyl glutamate"
+      },
+      {
+        "id": "cocamidopropil-betaina",
+        "name": "Cocamidopropil betaína"
+      },
+      {
+        "id": "zinco-pca",
+        "name": "Zinco PCA"
+      },
+      {
+        "id": "niacinamida",
+        "name": "Niacinamida"
+      },
+      {
+        "id": "glicerina",
+        "name": "Glicerina"
+      },
+      {
+        "id": "fragrancia-citrica-mentolada",
+        "name": "Fragrância cítrica mentolada"
+      }
+    ],
+    "usage": "Aplicar nos cabelos molhados, massagear suavemente e enxaguar. Orientação sintética de demonstração, sem frequência ou tempo de contato definidos.",
+    "restrictions": [],
+    "warnings": [
+      "Dados sintéticos de demonstração; não representam a formulação fotografada.",
+      "Informações de segurança não avaliadas; não utilizar para orientar alergias ou segurança dermatológica.",
+      "Uso externo demonstrativo. Evite contato com olhos e mucosas.",
+      "Interrompa o uso em caso de irritação e procure orientação profissional."
+    ],
+    "contraindications": []
+  },
+  {
+    "id": 5,
+    "slug": "shampoo-revitalizante-aloe-bambu",
+    "name": "Shampoo Revitalizante Aloe & Bambu",
+    "brand": "HidraSplash",
+    "visibleLabelBrand": "HIDRASPLASH",
+    "isDemo": true,
+    "category": "shampoos",
+    "subcategory": "uso-diario",
+    "applicationArea": "hair",
+    "productKind": "single",
+    "description": "Produto demonstrativo de uso cotidiano com perfil de frescor e revitalização para cabelos normais a oleosos.",
+    "shortDescription": "Frescor e leveza para uma rotina capilar cotidiana.",
+    "price": 47.9,
+    "originalPrice": 59.9,
+    "image": "images/shampoo-revitalizante-aloe-bambu.jpg",
+    "stock": 19,
+    "netContent": {
+      "value": 250,
+      "unit": "ml"
+    },
+    "variant": {
+      "name": "Aloe & Bambu",
+      "profile": "revitalizacao",
+      "sensoryNotes": [
+        "Frescor vegetal"
+      ]
+    },
+    "tags": [
+      "revitalizante",
+      "uso-diario",
+      "leveza"
+    ],
+    "indications": [
+      "Cabelos normais a oleosos que buscam leveza no cuidado cotidiano."
+    ],
+    "benefits": [
+      "Oferece sensação de limpeza e revitalização."
+    ],
+    "hairTypes": [
+      "todos"
+    ],
+    "scalpTypes": [
+      "normal",
+      "oleoso"
+    ],
+    "concerns": [
+      "oleosidade",
+      "falta-de-brilho"
+    ],
+    "dataClassification": {
+      "commercial": "fictional-demo",
+      "compatibility": "commercial-positioning",
+      "formulation": "synthetic-test-data",
+      "safety": "not-evaluated"
+    },
+    "ingredients": [
+      {
+        "id": "decyl-glucosideo",
+        "name": "Decyl glucoside"
+      },
+      {
+        "id": "cocamidopropil-betaina",
+        "name": "Cocamidopropil betaína"
+      },
+      {
+        "id": "glicerina",
+        "name": "Glicerina"
+      },
+      {
+        "id": "betaina",
+        "name": "Betaína"
+      },
+      {
+        "id": "pantenol",
+        "name": "Pantenol"
+      },
+      {
+        "id": "extrato-de-aloe-vera",
+        "name": "Extrato de Aloe vera"
+      },
+      {
+        "id": "extrato-de-bambu",
+        "name": "Extrato de bambu"
+      }
+    ],
+    "usage": "Aplicar nos cabelos molhados, massagear suavemente e enxaguar. Orientação sintética de demonstração, sem frequência ou tempo de contato definidos.",
+    "restrictions": [],
+    "warnings": [
+      "Dados sintéticos de demonstração; não representam a formulação fotografada.",
+      "Informações de segurança não avaliadas; não utilizar para orientar alergias ou segurança dermatológica.",
+      "Uso externo demonstrativo. Evite contato com olhos e mucosas.",
+      "Interrompa o uso em caso de irritação e procure orientação profissional."
+    ],
+    "contraindications": []
+  },
+  {
+    "id": 6,
+    "slug": "shampoo-hidratante-cachos-e-crespos",
+    "name": "Shampoo Hidratante Cachos & Crespos",
+    "brand": "HidraSplash",
+    "visibleLabelBrand": "MADEINMINAS PROFESSIONAL",
+    "isDemo": true,
+    "category": "shampoos",
+    "subcategory": "cachos",
+    "applicationArea": "hair",
+    "productKind": "single",
+    "description": "Produto demonstrativo para cabelos cacheados e crespos, com foco comercial em hidratação, definição e cuidado sem pesar.",
+    "shortDescription": "Hidratação e definição para cabelos cacheados e crespos.",
+    "price": 48.9,
+    "image": "images/shampoo-cachos-hidratante.jpg",
+    "stock": 17,
+    "netContent": {
+      "value": 340,
+      "unit": "ml"
+    },
+    "variant": {
+      "name": "Hidratação Intensa",
+      "profile": "cachos-hidratados"
+    },
+    "tags": [
+      "cachos",
+      "crespos",
+      "hidratacao"
+    ],
+    "indications": [
+      "Cabelos cacheados e crespos com busca por hidratação."
+    ],
+    "benefits": [
+      "Favorece a percepção de cachos mais macios e definidos."
+    ],
+    "hairTypes": [
+      "cacheados",
+      "crespos"
+    ],
+    "scalpTypes": [
+      "normal",
+      "seco"
+    ],
+    "concerns": [
+      "ressecamento",
+      "definicao-de-cachos",
+      "frizz"
+    ],
+    "dataClassification": {
+      "commercial": "fictional-demo",
+      "compatibility": "commercial-positioning",
+      "formulation": "synthetic-test-data",
+      "safety": "not-evaluated"
+    },
+    "ingredients": [
+      {
+        "id": "decyl-glucosideo",
+        "name": "Decyl glucoside"
+      },
+      {
+        "id": "cocamidopropil-betaina",
+        "name": "Cocamidopropil betaína"
+      },
+      {
+        "id": "glicerina",
+        "name": "Glicerina"
+      },
+      {
+        "id": "betaina",
+        "name": "Betaína"
+      },
+      {
+        "id": "pantenol",
+        "name": "Pantenol"
+      },
+      {
+        "id": "oleo-de-babacu",
+        "name": "Óleo de babaçu"
+      },
+      {
+        "id": "poliquaternio-10",
+        "name": "Poliquatérnio-10"
+      }
+    ],
+    "usage": "Aplicar nos cabelos molhados, massagear suavemente e enxaguar. Orientação sintética de demonstração, sem frequência ou tempo de contato definidos.",
+    "restrictions": [],
+    "warnings": [
+      "Dados sintéticos de demonstração; não representam a formulação fotografada.",
+      "Informações de segurança não avaliadas; não utilizar para orientar alergias ou segurança dermatológica.",
+      "Uso externo demonstrativo. Evite contato com olhos e mucosas.",
+      "Interrompa o uso em caso de irritação e procure orientação profissional."
+    ],
+    "contraindications": []
+  },
+  {
+    "id": 7,
+    "slug": "kit-shampoo-condicionador-rotina-equilibrada",
+    "name": "Kit Shampoo + Condicionador Rotina Equilibrada",
+    "brand": "HidraSplash",
+    "visibleLabelBrand": "HIDRA",
+    "isDemo": true,
+    "category": "shampoos",
+    "subcategory": "kit",
+    "applicationArea": "hair",
+    "productKind": "kit",
+    "description": "Kit demonstrativo com shampoo e condicionador em apresentação compacta para uma rotina capilar coordenada.",
+    "shortDescription": "Dupla compacta para limpeza e condicionamento na mesma rotina.",
+    "price": 69.9,
+    "originalPrice": 89.9,
+    "image": "images/kit-shampoo-condicionador.jpg",
+    "stock": 10,
+    "variant": {
+      "name": "Rotina Equilibrada",
+      "profile": "dupla-capilar",
+      "sensoryNotes": [
+        "Perfil herbal"
+      ]
+    },
+    "kitContents": [
+      {
+        "name": "Shampoo Rotina Equilibrada",
+        "quantity": 1,
+        "netContent": {
+          "value": 100,
+          "unit": "ml"
+        },
+        "formulation": {
+          "basis": "synthetic-test-data",
+          "ingredients": [
+            {
+              "id": "decyl-glucosideo",
+              "name": "Decyl glucoside"
+            },
+            {
+              "id": "cocamidopropil-betaina",
+              "name": "Cocamidopropil betaína"
+            },
+            {
+              "id": "glicerina",
+              "name": "Glicerina"
+            },
+            {
+              "id": "pantenol",
+              "name": "Pantenol"
+            }
+          ],
+          "usage": "Aplicar o shampoo nos cabelos molhados, massagear suavemente e enxaguar. Orientação sintética sem frequência definida.",
+          "restrictions": [],
+          "warnings": [
+            "Dados sintéticos de demonstração; não representam a formulação fotografada.",
+            "Informações de segurança não avaliadas; não utilizar para orientar alergias ou segurança dermatológica.",
+            "Uso externo demonstrativo. Evite contato com olhos e mucosas.",
+            "Interrompa o uso em caso de irritação e procure orientação profissional."
+          ],
+          "contraindications": []
+        }
+      },
+      {
+        "name": "Condicionador Rotina Equilibrada",
+        "quantity": 1,
+        "netContent": {
+          "value": 100,
+          "unit": "ml"
+        },
+        "formulation": {
+          "basis": "synthetic-test-data",
+          "ingredients": [
+            {
+              "id": "alcool-cetoestearilico",
+              "name": "Álcool cetoestearílico"
+            },
+            {
+              "id": "behentrimonium-methosulfate",
+              "name": "Behentrimonium methosulfate"
+            },
+            {
+              "id": "glicerina",
+              "name": "Glicerina"
+            },
+            {
+              "id": "pantenol",
+              "name": "Pantenol"
+            }
+          ],
+          "usage": "Aplicar o condicionador nos comprimentos após a lavagem e enxaguar. Orientação sintética sem tempo de contato definido.",
+          "restrictions": [],
+          "warnings": [
+            "Dados sintéticos de demonstração; não representam a formulação fotografada.",
+            "Informações de segurança não avaliadas; não utilizar para orientar alergias ou segurança dermatológica.",
+            "Uso externo demonstrativo. Evite contato com olhos e mucosas.",
+            "Interrompa o uso em caso de irritação e procure orientação profissional."
+          ],
+          "contraindications": []
+        }
+      }
+    ],
+    "tags": [
+      "kit",
+      "shampoo-condicionador",
+      "rotina-capilar"
+    ],
+    "indications": [
+      "Consumidores que procuram uma dupla compacta de cuidado capilar."
+    ],
+    "benefits": [
+      "Reúne duas etapas complementares em um único produto comercial."
+    ],
+    "hairTypes": [
+      "todos"
+    ],
+    "scalpTypes": [
+      "normal"
+    ],
+    "concerns": [
+      "ressecamento"
+    ],
+    "dataClassification": {
+      "commercial": "fictional-demo",
+      "compatibility": "commercial-positioning",
+      "formulation": "synthetic-test-data",
+      "safety": "not-evaluated"
+    }
+  },
+  {
+    "id": 8,
+    "slug": "shampoo-controle-oleosidade-lavanda-alecrim",
+    "name": "Shampoo Controle de Oleosidade Lavanda & Alecrim",
+    "brand": "HidraSplash",
+    "visibleLabelBrand": "MADEINMINAS PROFESSIONAL",
+    "isDemo": true,
+    "category": "shampoos",
+    "subcategory": "controle-de-oleosidade",
+    "applicationArea": "hair",
+    "productKind": "single",
+    "description": "Produto demonstrativo para cabelos oleosos, combinando posicionamento de controle de oleosidade com perfil sensorial herbal.",
+    "shortDescription": "Controle de oleosidade com perfil sensorial herbal.",
+    "price": 44.9,
+    "originalPrice": 56.9,
+    "image": "images/shampoo-controle-oleosidade-lavanda-alecrim.jpg",
+    "stock": 15,
+    "netContent": {
+      "value": 340,
+      "unit": "ml"
+    },
+    "variant": {
+      "name": "Lavanda & Alecrim",
+      "profile": "herbal-equilibrante",
+      "sensoryNotes": [
+        "Lavanda",
+        "Herbal"
+      ]
+    },
+    "tags": [
+      "oleosidade",
+      "lavanda",
+      "perfil-herbal"
+    ],
+    "indications": [
+      "Cabelos com tendência à oleosidade e preferência por perfil herbal."
+    ],
+    "benefits": [
+      "Oferece sensação de limpeza com experiência aromática suave."
+    ],
+    "hairTypes": [
+      "todos"
+    ],
+    "scalpTypes": [
+      "oleoso"
+    ],
+    "concerns": [
+      "oleosidade"
+    ],
+    "dataClassification": {
+      "commercial": "fictional-demo",
+      "compatibility": "commercial-positioning",
+      "formulation": "synthetic-test-data",
+      "safety": "not-evaluated"
+    },
+    "ingredients": [
+      {
+        "id": "sodium-cocoyl-glutamate",
+        "name": "Sodium cocoyl glutamate"
+      },
+      {
+        "id": "cocamidopropil-betaina",
+        "name": "Cocamidopropil betaína"
+      },
+      {
+        "id": "zinco-pca",
+        "name": "Zinco PCA"
+      },
+      {
+        "id": "glicerina",
+        "name": "Glicerina"
+      },
+      {
+        "id": "niacinamida",
+        "name": "Niacinamida"
+      },
+      {
+        "id": "fragrancia-herbal",
+        "name": "Fragrância herbal"
+      }
+    ],
+    "usage": "Aplicar nos cabelos molhados, massagear suavemente e enxaguar. Orientação sintética de demonstração, sem frequência ou tempo de contato definidos.",
+    "restrictions": [],
+    "warnings": [
+      "Dados sintéticos de demonstração; não representam a formulação fotografada.",
+      "Informações de segurança não avaliadas; não utilizar para orientar alergias ou segurança dermatológica.",
+      "Uso externo demonstrativo. Evite contato com olhos e mucosas.",
+      "Interrompa o uso em caso de irritação e procure orientação profissional."
+    ],
+    "contraindications": []
+  },
+  {
+    "id": 9,
+    "slug": "shampoo-anticaspa-coco-nivel-2",
+    "name": "Shampoo Anticaspa Coco — Nível 2",
+    "brand": "HidraSplash",
+    "visibleLabelBrand": "HIDRASPLASH",
+    "isDemo": true,
+    "category": "shampoos",
+    "subcategory": "anticaspa",
+    "applicationArea": "hair",
+    "productKind": "single",
+    "description": "Produto demonstrativo anticaspa com perfil comercial de limpeza mais intensa para cabelos normais a oleosos; nível não indica potência terapêutica.",
+    "shortDescription": "Perfil anticaspa de limpeza intensa e frescor.",
+    "price": 46.9,
+    "originalPrice": 61.9,
+    "image": "images/shampoo-anticaspa-coco-nivel-2.jpg",
+    "stock": 12,
+    "netContent": {
+      "value": 250,
+      "unit": "ml"
+    },
+    "variant": {
+      "name": "Coco — Nível 2",
+      "profile": "limpeza-intensa",
+      "sensoryNotes": [
+        "Coco",
+        "Frescor"
+      ]
+    },
+    "tags": [
+      "anticaspa",
+      "nivel-2",
+      "limpeza-intensa"
+    ],
+    "indications": [
+      "Consumidores que preferem sensação de limpeza mais intensa."
+    ],
+    "benefits": [
+      "Proporciona sensação de limpeza profunda e frescor."
+    ],
+    "hairTypes": [
+      "todos"
+    ],
+    "scalpTypes": [
+      "normal",
+      "oleoso"
+    ],
+    "concerns": [
+      "caspa",
+      "oleosidade"
+    ],
+    "dataClassification": {
+      "commercial": "fictional-demo",
+      "compatibility": "commercial-positioning",
+      "formulation": "synthetic-test-data",
+      "safety": "not-evaluated"
+    },
+    "ingredients": [
+      {
+        "id": "sodium-coco-sulfate",
+        "name": "Sodium coco-sulfate"
+      },
+      {
+        "id": "cocamidopropil-betaina",
+        "name": "Cocamidopropil betaína"
+      },
+      {
+        "id": "piroctona-olamina",
+        "name": "Piroctona olamina"
+      },
+      {
+        "id": "zinco-pca",
+        "name": "Zinco PCA"
+      },
+      {
+        "id": "glicerina",
+        "name": "Glicerina"
+      },
+      {
+        "id": "fragrancia-de-coco",
+        "name": "Fragrância de coco"
+      }
+    ],
+    "usage": "Aplicar nos cabelos molhados, massagear suavemente e enxaguar. Orientação sintética de demonstração, sem frequência ou tempo de contato definidos.",
+    "restrictions": [],
+    "warnings": [
+      "Dados sintéticos de demonstração; não representam a formulação fotografada.",
+      "Informações de segurança não avaliadas; não utilizar para orientar alergias ou segurança dermatológica.",
+      "Uso externo demonstrativo. Evite contato com olhos e mucosas.",
+      "Interrompa o uso em caso de irritação e procure orientação profissional."
+    ],
+    "contraindications": []
+  },
+  {
+    "id": 10,
+    "slug": "shampoo-anticaspa-equilibrio-alecrim-cha-verde",
+    "name": "Shampoo Anticaspa Equilíbrio Alecrim & Chá Verde",
+    "brand": "HidraSplash",
+    "visibleLabelBrand": "HIDRASPLASH",
+    "isDemo": true,
+    "category": "shampoos",
+    "subcategory": "anticaspa",
+    "applicationArea": "hair",
+    "productKind": "single",
+    "description": "Produto demonstrativo anticaspa com perfil equilibrante e experiência sensorial herbal para uma rotina de limpeza regular.",
+    "shortDescription": "Equilíbrio anticaspa com perfil herbal.",
+    "price": 49.9,
+    "originalPrice": 64.9,
+    "image": "images/shampoo-anticaspa-equilibrio-alecrim-cha-verde.jpg",
+    "stock": 13,
+    "netContent": {
+      "value": 250,
+      "unit": "ml"
+    },
+    "variant": {
+      "name": "Alecrim & Chá Verde",
+      "profile": "equilibrio-herbal",
+      "sensoryNotes": [
+        "Alecrim",
+        "Chá verde"
+      ]
+    },
+    "tags": [
+      "anticaspa",
+      "equilibrio",
+      "perfil-herbal"
+    ],
+    "indications": [
+      "Consumidores que buscam cuidado anticaspa com perfil equilibrante."
+    ],
+    "benefits": [
+      "Combina sensação de limpeza com experiência herbal."
+    ],
+    "hairTypes": [
+      "todos"
+    ],
+    "scalpTypes": [
+      "normal",
+      "oleoso"
+    ],
+    "concerns": [
+      "caspa",
+      "oleosidade"
+    ],
+    "dataClassification": {
+      "commercial": "fictional-demo",
+      "compatibility": "commercial-positioning",
+      "formulation": "synthetic-test-data",
+      "safety": "not-evaluated"
+    },
+    "ingredients": [
+      {
+        "id": "sodium-cocoyl-glutamate",
+        "name": "Sodium cocoyl glutamate"
+      },
+      {
+        "id": "cocamidopropil-betaina",
+        "name": "Cocamidopropil betaína"
+      },
+      {
+        "id": "piroctona-olamina",
+        "name": "Piroctona olamina"
+      },
+      {
+        "id": "niacinamida",
+        "name": "Niacinamida"
+      },
+      {
+        "id": "glicerina",
+        "name": "Glicerina"
+      },
+      {
+        "id": "extrato-de-cha-verde",
+        "name": "Extrato de chá verde"
+      },
+      {
+        "id": "hidrolato-de-alecrim",
+        "name": "Hidrolato de alecrim"
+      }
+    ],
+    "usage": "Aplicar nos cabelos molhados, massagear suavemente e enxaguar. Orientação sintética de demonstração, sem frequência ou tempo de contato definidos.",
+    "restrictions": [],
+    "warnings": [
+      "Dados sintéticos de demonstração; não representam a formulação fotografada.",
+      "Informações de segurança não avaliadas; não utilizar para orientar alergias ou segurança dermatológica.",
+      "Uso externo demonstrativo. Evite contato com olhos e mucosas.",
+      "Interrompa o uso em caso de irritação e procure orientação profissional."
+    ],
+    "contraindications": []
+  },
+  {
+    "id": 11,
+    "slug": "shampoo-anticaspa-hidratacao-avela",
+    "name": "Shampoo Anticaspa Hidratação Avelã",
+    "brand": "HidraSplash",
+    "visibleLabelBrand": "HIDRASPLASH",
+    "isDemo": true,
+    "category": "shampoos",
+    "subcategory": "anticaspa",
+    "applicationArea": "hair",
+    "productKind": "single",
+    "description": "Produto demonstrativo anticaspa direcionado a consumidores que valorizam sensação de conforto e hidratação durante a limpeza.",
+    "shortDescription": "Cuidado anticaspa com perfil hidratante e acolhedor.",
+    "price": 51.9,
+    "originalPrice": 66.9,
+    "image": "images/shampoo-anticaspa-hidratacao-avela.jpg",
+    "stock": 11,
+    "netContent": {
+      "value": 250,
+      "unit": "ml"
+    },
+    "variant": {
+      "name": "Avelã",
+      "profile": "hidratacao-conforto",
+      "sensoryNotes": [
+        "Avelã",
+        "Aconchegante"
+      ]
+    },
+    "tags": [
+      "anticaspa",
+      "hidratacao",
+      "avela"
+    ],
+    "indications": [
+      "Consumidores com preocupação de caspa e ressecamento percebido."
+    ],
+    "benefits": [
+      "Oferece sensação de conforto e cuidado durante a lavagem."
+    ],
+    "hairTypes": [
+      "todos"
+    ],
+    "scalpTypes": [
+      "seco"
+    ],
+    "concerns": [
+      "caspa",
+      "ressecamento"
+    ],
+    "dataClassification": {
+      "commercial": "fictional-demo",
+      "compatibility": "commercial-positioning",
+      "formulation": "synthetic-test-data",
+      "safety": "not-evaluated"
+    },
+    "ingredients": [
+      {
+        "id": "decyl-glucosideo",
+        "name": "Decyl glucoside"
+      },
+      {
+        "id": "cocamidopropil-betaina",
+        "name": "Cocamidopropil betaína"
+      },
+      {
+        "id": "piroctona-olamina",
+        "name": "Piroctona olamina"
+      },
+      {
+        "id": "glicerina",
+        "name": "Glicerina"
+      },
+      {
+        "id": "pantenol",
+        "name": "Pantenol"
+      },
+      {
+        "id": "oleo-de-avela",
+        "name": "Óleo de avelã"
+      },
+      {
+        "id": "fragrancia-aconchegante",
+        "name": "Fragrância aconchegante"
+      }
+    ],
+    "usage": "Aplicar nos cabelos molhados, massagear suavemente e enxaguar. Orientação sintética de demonstração, sem frequência ou tempo de contato definidos.",
+    "restrictions": [],
+    "warnings": [
+      "Dados sintéticos de demonstração; não representam a formulação fotografada.",
+      "Informações de segurança não avaliadas; não utilizar para orientar alergias ou segurança dermatológica.",
+      "Uso externo demonstrativo. Evite contato com olhos e mucosas.",
+      "Interrompa o uso em caso de irritação e procure orientação profissional."
+    ],
+    "contraindications": []
+  },
+  {
+    "id": 12,
+    "slug": "shampoo-anticaspa-suave-camomila-aloe-vera",
+    "name": "Shampoo Anticaspa Suave Camomila & Aloe Vera",
+    "brand": "HidraSplash",
+    "visibleLabelBrand": "HIDRASPLASH",
+    "isDemo": true,
+    "category": "shampoos",
+    "subcategory": "anticaspa",
+    "applicationArea": "hair",
+    "productKind": "single",
+    "description": "Produto demonstrativo anticaspa com posicionamento de limpeza suave para consumidores que relatam preferência por rotinas delicadas.",
+    "shortDescription": "Posicionamento anticaspa demonstrativo com experiência de limpeza delicada.",
+    "price": 43.9,
+    "originalPrice": 55.9,
+    "image": "images/shampoo-anticaspa-suave-camomila-aloe-vera.jpg",
+    "stock": 20,
+    "netContent": {
+      "value": 250,
+      "unit": "ml"
+    },
+    "variant": {
+      "name": "Camomila & Aloe Vera",
+      "profile": "limpeza-suave",
+      "sensoryNotes": [
+        "Camomila",
+        "Suave"
+      ]
+    },
+    "tags": [
+      "anticaspa",
+      "suave",
+      "rotina-delicada"
+    ],
+    "indications": [
+      "Consumidores que preferem uma experiência de limpeza delicada, sem garantia de compatibilidade com couro sensível."
+    ],
+    "benefits": [
+      "Oferece posicionamento sensorial delicado, sujeito a validação da formulação."
+    ],
+    "hairTypes": [
+      "todos"
+    ],
+    "scalpTypes": [
+      "normal"
+    ],
+    "concerns": [
+      "caspa",
+      "sensibilidade"
+    ],
+    "dataClassification": {
+      "commercial": "fictional-demo",
+      "compatibility": "commercial-positioning",
+      "formulation": "synthetic-test-data",
+      "safety": "not-evaluated"
+    },
+    "ingredients": [
+      {
+        "id": "decyl-glucosideo",
+        "name": "Decyl glucoside"
+      },
+      {
+        "id": "coco-glucosideo",
+        "name": "Coco-glucosídeo"
+      },
+      {
+        "id": "cocamidopropil-betaina",
+        "name": "Cocamidopropil betaína"
+      },
+      {
+        "id": "piroctona-olamina",
+        "name": "Piroctona olamina"
+      },
+      {
+        "id": "betaina",
+        "name": "Betaína"
+      },
+      {
+        "id": "pantenol",
+        "name": "Pantenol"
+      },
+      {
+        "id": "bisabolol",
+        "name": "Bisabolol"
+      },
+      {
+        "id": "extrato-de-aloe-vera",
+        "name": "Extrato de Aloe vera"
+      }
+    ],
+    "usage": "Aplicar nos cabelos molhados, massagear suavemente e enxaguar. Orientação sintética de demonstração, sem frequência ou tempo de contato definidos.",
+    "restrictions": [],
+    "warnings": [
+      "Dados sintéticos de demonstração; não representam a formulação fotografada.",
+      "Informações de segurança não avaliadas; não utilizar para orientar alergias ou segurança dermatológica.",
+      "Uso externo demonstrativo. Evite contato com olhos e mucosas.",
+      "Interrompa o uso em caso de irritação e procure orientação profissional."
+    ],
+    "contraindications": []
+  },
+  {
+    "id": 13,
+    "slug": "shampoo-anticaspa-controle-oleosidade-limao-siciliano-hortela",
+    "name": "Shampoo Anticaspa Controle de Oleosidade Limão Siciliano & Hortelã",
+    "brand": "HidraSplash",
+    "visibleLabelBrand": "HIDRASPLASH",
+    "isDemo": true,
+    "category": "shampoos",
+    "subcategory": "anticaspa",
+    "applicationArea": "hair",
+    "productKind": "single",
+    "description": "Produto demonstrativo anticaspa com perfil de controle de oleosidade e experiência sensorial cítrica e refrescante.",
+    "shortDescription": "Anticaspa refrescante para couro cabeludo com tendência à oleosidade.",
+    "price": 48.9,
+    "originalPrice": 62.9,
+    "image": "images/shampoo-anticaspa-controle-oleosidade-limao-siciliano-hortela.jpg",
+    "stock": 14,
+    "netContent": {
+      "value": 250,
+      "unit": "ml"
+    },
+    "variant": {
+      "name": "Limão Siciliano & Hortelã",
+      "profile": "oleosidade-frescor",
+      "sensoryNotes": [
+        "Cítrico",
+        "Hortelã"
+      ]
+    },
+    "tags": [
+      "anticaspa",
+      "oleosidade",
+      "frescor"
+    ],
+    "indications": [
+      "Consumidores com preocupação simultânea de caspa e oleosidade."
+    ],
+    "benefits": [
+      "Entrega sensação de frescor associada à limpeza."
+    ],
+    "hairTypes": [
+      "todos"
+    ],
+    "scalpTypes": [
+      "oleoso"
+    ],
+    "concerns": [
+      "caspa",
+      "oleosidade"
+    ],
+    "dataClassification": {
+      "commercial": "fictional-demo",
+      "compatibility": "commercial-positioning",
+      "formulation": "synthetic-test-data",
+      "safety": "not-evaluated"
+    },
+    "ingredients": [
+      {
+        "id": "sodium-cocoyl-glutamate",
+        "name": "Sodium cocoyl glutamate"
+      },
+      {
+        "id": "cocamidopropil-betaina",
+        "name": "Cocamidopropil betaína"
+      },
+      {
+        "id": "piroctona-olamina",
+        "name": "Piroctona olamina"
+      },
+      {
+        "id": "zinco-pca",
+        "name": "Zinco PCA"
+      },
+      {
+        "id": "niacinamida",
+        "name": "Niacinamida"
+      },
+      {
+        "id": "mentil-lactato",
+        "name": "Mentil lactato"
+      },
+      {
+        "id": "fragrancia-citrica",
+        "name": "Fragrância cítrica"
+      }
+    ],
+    "usage": "Aplicar nos cabelos molhados, massagear suavemente e enxaguar. Orientação sintética de demonstração, sem frequência ou tempo de contato definidos.",
+    "restrictions": [],
+    "warnings": [
+      "Dados sintéticos de demonstração; não representam a formulação fotografada.",
+      "Informações de segurança não avaliadas; não utilizar para orientar alergias ou segurança dermatológica.",
+      "Uso externo demonstrativo. Evite contato com olhos e mucosas.",
+      "Interrompa o uso em caso de irritação e procure orientação profissional."
+    ],
+    "contraindications": []
+  },
+  {
+    "id": 14,
+    "slug": "shampoo-cachos-definicao-hidratacao",
+    "name": "Shampoo Cachos Definição & Hidratação",
+    "brand": "HidraSplash",
+    "visibleLabelBrand": "MADEINMINAS PROFESSIONAL",
+    "isDemo": true,
+    "category": "shampoos",
+    "subcategory": "cachos",
+    "applicationArea": "hair",
+    "productKind": "single",
+    "description": "Produto demonstrativo para cabelos cacheados e crespos com posicionamento de definição, hidratação e controle visual de frizz.",
+    "shortDescription": "Definição e hidratação para cachos e crespos.",
+    "price": 50.9,
+    "originalPrice": 65.9,
+    "image": "images/shampoo-cachos-definicao-hidratacao.jpg",
+    "stock": 16,
+    "netContent": {
+      "value": 340,
+      "unit": "ml"
+    },
+    "variant": {
+      "name": "Definição & Hidratação",
+      "profile": "cachos-definidos"
+    },
+    "tags": [
+      "cachos",
+      "definicao",
+      "controle-de-frizz"
+    ],
+    "indications": [
+      "Cabelos cacheados e crespos que buscam definição e controle de frizz."
+    ],
+    "benefits": [
+      "Favorece a aparência de cachos definidos e hidratados."
+    ],
+    "hairTypes": [
+      "cacheados",
+      "crespos"
+    ],
+    "scalpTypes": [
+      "normal",
+      "seco"
+    ],
+    "concerns": [
+      "definicao-de-cachos",
+      "frizz",
+      "ressecamento"
+    ],
+    "dataClassification": {
+      "commercial": "fictional-demo",
+      "compatibility": "commercial-positioning",
+      "formulation": "synthetic-test-data",
+      "safety": "not-evaluated"
+    },
+    "ingredients": [
+      {
+        "id": "decyl-glucosideo",
+        "name": "Decyl glucoside"
+      },
+      {
+        "id": "cocamidopropil-betaina",
+        "name": "Cocamidopropil betaína"
+      },
+      {
+        "id": "glicerina",
+        "name": "Glicerina"
+      },
+      {
+        "id": "pantenol",
+        "name": "Pantenol"
+      },
+      {
+        "id": "poliquaternio-10",
+        "name": "Poliquatérnio-10"
+      },
+      {
+        "id": "proteina-de-arroz-hidrolisada",
+        "name": "Proteína de arroz hidrolisada"
+      },
+      {
+        "id": "extrato-de-aloe-vera",
+        "name": "Extrato de Aloe vera"
+      }
+    ],
+    "usage": "Aplicar nos cabelos molhados, massagear suavemente e enxaguar. Orientação sintética de demonstração, sem frequência ou tempo de contato definidos.",
+    "restrictions": [],
+    "warnings": [
+      "Dados sintéticos de demonstração; não representam a formulação fotografada.",
+      "Informações de segurança não avaliadas; não utilizar para orientar alergias ou segurança dermatológica.",
+      "Uso externo demonstrativo. Evite contato com olhos e mucosas.",
+      "Interrompa o uso em caso de irritação e procure orientação profissional."
+    ],
+    "contraindications": []
+  },
+  {
+    "id": 15,
+    "slug": "sabonete-vegetal-avela",
+    "name": "Sabonete Vegetal Avelã",
+    "brand": "HidraSplash",
+    "visibleLabelBrand": "HIDRA",
+    "isDemo": true,
+    "category": "sabonetes",
+    "subcategory": "barra",
+    "applicationArea": "body",
+    "productKind": "single",
+    "description": "Sabonete corporal demonstrativo em barra com identidade sensorial inspirada em avelã para uma rotina de limpeza agradável.",
+    "shortDescription": "Limpeza corporal em barra com perfil sensorial de avelã.",
+    "price": 18.9,
+    "originalPrice": 24.9,
+    "image": "images/sabonete-barra-avela.jpg",
+    "stock": 32,
+    "netContent": {
+      "value": 90,
+      "unit": "g"
+    },
+    "variant": {
+      "name": "Avelã",
+      "profile": "aconchegante",
+      "sensoryNotes": [
+        "Avelã"
+      ]
+    },
+    "soapForm": "bar",
+    "tags": [
+      "sabonete-em-barra",
+      "avela",
+      "limpeza-corporal"
+    ],
+    "indications": [
+      "Rotina demonstrativa de limpeza corporal cotidiana."
+    ],
+    "benefits": [
+      "Proporciona sensação de limpeza e maciez."
+    ],
+    "skinTypes": [
+      "todos"
+    ],
+    "bodyConcerns": [
+      "limpeza-suave",
+      "aspereza"
+    ],
+    "dataClassification": {
+      "commercial": "fictional-demo",
+      "compatibility": "commercial-positioning",
+      "formulation": "synthetic-test-data",
+      "safety": "not-evaluated"
+    },
+    "ingredients": [
+      {
+        "id": "sodium-olivate",
+        "name": "Sodium olivate"
+      },
+      {
+        "id": "sodium-cocoate",
+        "name": "Sodium cocoate"
+      },
+      {
+        "id": "agua",
+        "name": "Água"
+      },
+      {
+        "id": "glicerina",
+        "name": "Glicerina"
+      },
+      {
+        "id": "oleo-de-avela",
+        "name": "Óleo de avelã"
+      },
+      {
+        "id": "fragrancia-aconchegante",
+        "name": "Fragrância aconchegante"
+      }
+    ],
+    "usage": "Aplicar na pele íntegra e úmida e enxaguar. Orientação sintética de demonstração, sem frequência definida.",
+    "restrictions": [],
+    "warnings": [
+      "Dados sintéticos de demonstração; não representam a formulação fotografada.",
+      "Informações de segurança não avaliadas; não utilizar para orientar alergias ou segurança dermatológica.",
+      "Uso externo demonstrativo. Evite contato com olhos e mucosas.",
+      "Interrompa o uso em caso de irritação e procure orientação profissional."
+    ],
+    "contraindications": []
+  },
+  {
+    "id": 16,
+    "slug": "sabonete-vegetal-lavanda",
+    "name": "Sabonete Vegetal Lavanda",
+    "brand": "HidraSplash",
+    "visibleLabelBrand": "HIDRA",
+    "isDemo": true,
+    "category": "sabonetes",
+    "subcategory": "barra",
+    "applicationArea": "body",
+    "productKind": "single",
+    "description": "Sabonete corporal demonstrativo em barra com perfil sensorial floral, posicionado para momentos tranquilos de autocuidado.",
+    "shortDescription": "Limpeza em barra com perfil floral suave.",
+    "price": 19.9,
+    "image": "images/sabonete-barra-lavanda.jpg",
+    "stock": 28,
+    "netContent": {
+      "value": 90,
+      "unit": "g"
+    },
+    "variant": {
+      "name": "Lavanda",
+      "profile": "floral-suave",
+      "sensoryNotes": [
+        "Floral",
+        "Lavanda"
+      ]
+    },
+    "soapForm": "bar",
+    "tags": [
+      "sabonete-em-barra",
+      "lavanda",
+      "perfil-floral"
+    ],
+    "indications": [
+      "Consumidores que preferem experiência sensorial floral na limpeza corporal."
+    ],
+    "benefits": [
+      "Oferece sensação de limpeza com aroma suave."
+    ],
+    "skinTypes": [
+      "todos"
+    ],
+    "bodyConcerns": [
+      "limpeza-suave",
+      "relaxamento"
+    ],
+    "dataClassification": {
+      "commercial": "fictional-demo",
+      "compatibility": "commercial-positioning",
+      "formulation": "synthetic-test-data",
+      "safety": "not-evaluated"
+    },
+    "ingredients": [
+      {
+        "id": "sodium-olivate",
+        "name": "Sodium olivate"
+      },
+      {
+        "id": "sodium-cocoate",
+        "name": "Sodium cocoate"
+      },
+      {
+        "id": "agua",
+        "name": "Água"
+      },
+      {
+        "id": "glicerina",
+        "name": "Glicerina"
+      },
+      {
+        "id": "argila-branca",
+        "name": "Argila branca"
+      },
+      {
+        "id": "fragrancia-floral-lavanda",
+        "name": "Fragrância floral de lavanda"
+      }
+    ],
+    "usage": "Aplicar na pele íntegra e úmida e enxaguar. Orientação sintética de demonstração, sem frequência definida.",
+    "restrictions": [],
+    "warnings": [
+      "Dados sintéticos de demonstração; não representam a formulação fotografada.",
+      "Informações de segurança não avaliadas; não utilizar para orientar alergias ou segurança dermatológica.",
+      "Uso externo demonstrativo. Evite contato com olhos e mucosas.",
+      "Interrompa o uso em caso de irritação e procure orientação profissional."
+    ],
+    "contraindications": []
+  },
+  {
+    "id": 17,
+    "slug": "sabonete-vegetal-limao",
+    "name": "Sabonete Vegetal Limão",
+    "brand": "HidraSplash",
+    "visibleLabelBrand": "HIDRA",
+    "isDemo": true,
+    "category": "sabonetes",
+    "subcategory": "barra",
+    "applicationArea": "body",
+    "productKind": "single",
+    "description": "Sabonete corporal demonstrativo em barra com perfil cítrico e refrescante para a rotina cotidiana.",
+    "shortDescription": "Limpeza corporal em barra com perfil cítrico.",
+    "price": 18.9,
+    "image": "images/sabonete-barra-limao.jpg",
+    "stock": 35,
+    "netContent": {
+      "value": 90,
+      "unit": "g"
+    },
+    "variant": {
+      "name": "Limão",
+      "profile": "citrico-refrescante",
+      "sensoryNotes": [
+        "Cítrico",
+        "Refrescante"
+      ]
+    },
+    "soapForm": "bar",
+    "tags": [
+      "sabonete-em-barra",
+      "limao",
+      "perfil-citrico"
+    ],
+    "indications": [
+      "Consumidores que preferem sensação refrescante na limpeza corporal."
+    ],
+    "benefits": [
+      "Proporciona sensação de limpeza e frescor."
+    ],
+    "skinTypes": [
+      "normal",
+      "oleosa",
+      "mista"
+    ],
+    "bodyConcerns": [
+      "limpeza-suave",
+      "revitalizacao"
+    ],
+    "dataClassification": {
+      "commercial": "fictional-demo",
+      "compatibility": "commercial-positioning",
+      "formulation": "synthetic-test-data",
+      "safety": "not-evaluated"
+    },
+    "ingredients": [
+      {
+        "id": "sodium-olivate",
+        "name": "Sodium olivate"
+      },
+      {
+        "id": "sodium-cocoate",
+        "name": "Sodium cocoate"
+      },
+      {
+        "id": "agua",
+        "name": "Água"
+      },
+      {
+        "id": "glicerina",
+        "name": "Glicerina"
+      },
+      {
+        "id": "citrato-de-sodio",
+        "name": "Citrato de sódio"
+      },
+      {
+        "id": "fragrancia-citrica",
+        "name": "Fragrância cítrica"
+      }
+    ],
+    "usage": "Aplicar na pele íntegra e úmida e enxaguar. Orientação sintética de demonstração, sem frequência definida.",
+    "restrictions": [],
+    "warnings": [
+      "Dados sintéticos de demonstração; não representam a formulação fotografada.",
+      "Informações de segurança não avaliadas; não utilizar para orientar alergias ou segurança dermatológica.",
+      "Uso externo demonstrativo. Evite contato com olhos e mucosas.",
+      "Interrompa o uso em caso de irritação e procure orientação profissional."
+    ],
+    "contraindications": []
+  },
+  {
+    "id": 18,
+    "slug": "sabonete-liquido-limao-verbena",
+    "name": "Sabonete Líquido Limão & Verbena",
+    "brand": "HidraSplash",
+    "isDemo": true,
+    "category": "sabonetes",
+    "subcategory": "liquido",
+    "applicationArea": "body",
+    "productKind": "single",
+    "description": "Sabonete corporal líquido demonstrativo com perfil cítrico e proposta de limpeza confortável para o uso cotidiano.",
+    "shortDescription": "Limpeza líquida com perfil cítrico e confortável.",
+    "price": 29.9,
+    "originalPrice": 36.9,
+    "image": "images/sabonete-liquido-limao-verbena.jpg",
+    "stock": 22,
+    "netContent": {
+      "value": 250,
+      "unit": "ml"
+    },
+    "variant": {
+      "name": "Limão & Verbena",
+      "profile": "citrico-hidratante",
+      "sensoryNotes": [
+        "Limão",
+        "Verbena"
+      ]
+    },
+    "soapForm": "liquid",
+    "tags": [
+      "sabonete-liquido",
+      "limao-verbena",
+      "limpeza-corporal"
+    ],
+    "indications": [
+      "Rotina cotidiana de limpeza corporal em apresentação líquida."
+    ],
+    "benefits": [
+      "Combina praticidade com sensação de limpeza confortável."
+    ],
+    "skinTypes": [
+      "todos"
+    ],
+    "bodyConcerns": [
+      "limpeza-suave",
+      "ressecamento"
+    ],
+    "dataClassification": {
+      "commercial": "fictional-demo",
+      "compatibility": "commercial-positioning",
+      "formulation": "synthetic-test-data",
+      "safety": "not-evaluated"
+    },
+    "ingredients": [
+      {
+        "id": "decyl-glucosideo",
+        "name": "Decyl glucoside"
+      },
+      {
+        "id": "cocamidopropil-betaina",
+        "name": "Cocamidopropil betaína"
+      },
+      {
+        "id": "agua",
+        "name": "Água"
+      },
+      {
+        "id": "glicerina",
+        "name": "Glicerina"
+      },
+      {
+        "id": "betaina",
+        "name": "Betaína"
+      },
+      {
+        "id": "pantenol",
+        "name": "Pantenol"
+      },
+      {
+        "id": "fragrancia-limao-verbena",
+        "name": "Fragrância Limão & Verbena"
+      }
+    ],
+    "usage": "Aplicar na pele íntegra e úmida e enxaguar. Orientação sintética de demonstração, sem frequência definida.",
+    "restrictions": [],
+    "warnings": [
+      "Dados sintéticos de demonstração; não representam a formulação fotografada.",
+      "Informações de segurança não avaliadas; não utilizar para orientar alergias ou segurança dermatológica.",
+      "Uso externo demonstrativo. Evite contato com olhos e mucosas.",
+      "Interrompa o uso em caso de irritação e procure orientação profissional."
+    ],
+    "contraindications": []
+  },
+  {
+    "id": 19,
+    "slug": "sabonete-vegetal-roma",
+    "name": "Sabonete Vegetal Romã",
+    "brand": "HidraSplash",
+    "visibleLabelBrand": "HIDRA",
+    "isDemo": true,
+    "category": "sabonetes",
+    "subcategory": "barra",
+    "applicationArea": "body",
+    "productKind": "single",
+    "description": "Sabonete corporal demonstrativo em barra com identidade frutada de romã e proposta de limpeza cotidiana.",
+    "shortDescription": "Limpeza em barra com perfil frutado de romã.",
+    "price": 20.9,
+    "originalPrice": 25.9,
+    "image": "images/sabonete-barra-roma.jpg",
+    "stock": 26,
+    "netContent": {
+      "value": 90,
+      "unit": "g"
+    },
+    "variant": {
+      "name": "Romã",
+      "profile": "frutado-vibrante",
+      "sensoryNotes": [
+        "Frutado",
+        "Romã"
+      ]
+    },
+    "soapForm": "bar",
+    "tags": [
+      "sabonete-em-barra",
+      "roma",
+      "perfil-frutado"
+    ],
+    "indications": [
+      "Consumidores que preferem perfil frutado na limpeza corporal."
+    ],
+    "benefits": [
+      "Oferece sensação de limpeza com experiência frutada."
+    ],
+    "skinTypes": [
+      "todos"
+    ],
+    "bodyConcerns": [
+      "limpeza-suave",
+      "revitalizacao"
+    ],
+    "dataClassification": {
+      "commercial": "fictional-demo",
+      "compatibility": "commercial-positioning",
+      "formulation": "synthetic-test-data",
+      "safety": "not-evaluated"
+    },
+    "ingredients": [
+      {
+        "id": "sodium-olivate",
+        "name": "Sodium olivate"
+      },
+      {
+        "id": "sodium-cocoate",
+        "name": "Sodium cocoate"
+      },
+      {
+        "id": "agua",
+        "name": "Água"
+      },
+      {
+        "id": "glicerina",
+        "name": "Glicerina"
+      },
+      {
+        "id": "argila-rosa",
+        "name": "Argila rosa"
+      },
+      {
+        "id": "fragrancia-frutada-roma",
+        "name": "Fragrância frutada de romã"
+      }
+    ],
+    "usage": "Aplicar na pele íntegra e úmida e enxaguar. Orientação sintética de demonstração, sem frequência definida.",
+    "restrictions": [],
+    "warnings": [
+      "Dados sintéticos de demonstração; não representam a formulação fotografada.",
+      "Informações de segurança não avaliadas; não utilizar para orientar alergias ou segurança dermatológica.",
+      "Uso externo demonstrativo. Evite contato com olhos e mucosas.",
+      "Interrompa o uso em caso de irritação e procure orientação profissional."
+    ],
+    "contraindications": []
+  },
+  {
+    "id": 20,
+    "slug": "oleo-corporal-hidratacao-capim-limao-amendoas",
+    "name": "Óleo Corporal Hidratação Capim-Limão & Amêndoas",
+    "brand": "HidraSplash",
+    "visibleLabelBrand": "HIDRASPLASH",
+    "isDemo": true,
+    "category": "oleos-corporais",
+    "subcategory": "hidratacao",
+    "applicationArea": "body",
+    "productKind": "single",
+    "description": "Óleo corporal demonstrativo com posicionamento hidratante e perfil sensorial fresco inspirado em capim-limão e amêndoas.",
+    "shortDescription": "Hidratação corporal com perfil fresco e confortável.",
+    "price": 39.9,
+    "originalPrice": 49.9,
+    "image": "images/oleo-corporal-hidratacao-capim-limao-amendoas.jpg",
+    "stock": 18,
+    "variant": {
+      "name": "Capim-Limão & Amêndoas",
+      "profile": "hidratacao-fresca",
+      "sensoryNotes": [
+        "Capim-limão",
+        "Amêndoas"
+      ]
+    },
+    "tags": [
+      "oleo-corporal",
+      "hidratacao",
+      "capim-limao"
+    ],
+    "indications": [
+      "Pele com percepção de ressecamento e preferência por perfil fresco."
+    ],
+    "benefits": [
+      "Favorece a sensação de maciez e cuidado corporal."
+    ],
+    "skinTypes": [
+      "normal",
+      "seca"
+    ],
+    "bodyConcerns": [
+      "ressecamento",
+      "aspereza"
+    ],
+    "dataClassification": {
+      "commercial": "fictional-demo",
+      "compatibility": "commercial-positioning",
+      "formulation": "synthetic-test-data",
+      "safety": "not-evaluated"
+    },
+    "ingredients": [
+      {
+        "id": "triglicerideos-caprilico-caprico",
+        "name": "Triglicerídeos caprílico/cáprico"
+      },
+      {
+        "id": "oleo-de-girassol",
+        "name": "Óleo de girassol"
+      },
+      {
+        "id": "esqualano-vegetal",
+        "name": "Esqualano vegetal"
+      },
+      {
+        "id": "oleo-de-amendoas-doces",
+        "name": "Óleo de amêndoas doces"
+      },
+      {
+        "id": "tocoferol",
+        "name": "Tocoferol"
+      },
+      {
+        "id": "fragrancia-capim-limao",
+        "name": "Fragrância de capim-limão"
+      }
+    ],
+    "usage": "Aplicar pequena quantidade na pele íntegra e espalhar. Orientação sintética de demonstração, sem frequência definida.",
+    "restrictions": [],
+    "warnings": [
+      "Dados sintéticos de demonstração; não representam a formulação fotografada.",
+      "Informações de segurança não avaliadas; não utilizar para orientar alergias ou segurança dermatológica.",
+      "Uso externo demonstrativo. Evite contato com olhos e mucosas.",
+      "Interrompa o uso em caso de irritação e procure orientação profissional."
+    ],
+    "contraindications": []
+  },
+  {
+    "id": 21,
+    "slug": "oleo-corporal-nutricao-avela-baunilha",
+    "name": "Óleo Corporal Nutrição Avelã & Baunilha",
+    "brand": "HidraSplash",
+    "visibleLabelBrand": "HIDRASPLASH",
+    "isDemo": true,
+    "category": "oleos-corporais",
+    "subcategory": "nutricao",
+    "applicationArea": "body",
+    "productKind": "single",
+    "description": "Óleo corporal demonstrativo com perfil nutritivo e experiência sensorial envolvente inspirada em avelã e baunilha.",
+    "shortDescription": "Nutrição corporal com perfil envolvente de avelã e baunilha.",
+    "price": 42.9,
+    "originalPrice": 54.9,
+    "image": "images/oleo-corporal-nutricao-avela-baunilha.jpg",
+    "stock": 15,
+    "variant": {
+      "name": "Avelã & Baunilha",
+      "profile": "nutricao-envolvente",
+      "sensoryNotes": [
+        "Avelã",
+        "Baunilha"
+      ]
+    },
+    "tags": [
+      "oleo-corporal",
+      "nutricao",
+      "avela-baunilha"
+    ],
+    "indications": [
+      "Pele seca ou áspera com preferência por perfil sensorial envolvente."
+    ],
+    "benefits": [
+      "Promove sensação de nutrição e maciez."
+    ],
+    "skinTypes": [
+      "seca"
+    ],
+    "bodyConcerns": [
+      "nutricao",
+      "ressecamento",
+      "aspereza"
+    ],
+    "dataClassification": {
+      "commercial": "fictional-demo",
+      "compatibility": "commercial-positioning",
+      "formulation": "synthetic-test-data",
+      "safety": "not-evaluated"
+    },
+    "ingredients": [
+      {
+        "id": "triglicerideos-caprilico-caprico",
+        "name": "Triglicerídeos caprílico/cáprico"
+      },
+      {
+        "id": "oleo-de-girassol",
+        "name": "Óleo de girassol"
+      },
+      {
+        "id": "oleo-de-avela",
+        "name": "Óleo de avelã"
+      },
+      {
+        "id": "esqualano-vegetal",
+        "name": "Esqualano vegetal"
+      },
+      {
+        "id": "tocoferol",
+        "name": "Tocoferol"
+      },
+      {
+        "id": "fragrancia-baunilha",
+        "name": "Fragrância de baunilha"
+      }
+    ],
+    "usage": "Aplicar pequena quantidade na pele íntegra e espalhar. Orientação sintética de demonstração, sem frequência definida.",
+    "restrictions": [],
+    "warnings": [
+      "Dados sintéticos de demonstração; não representam a formulação fotografada.",
+      "Informações de segurança não avaliadas; não utilizar para orientar alergias ou segurança dermatológica.",
+      "Uso externo demonstrativo. Evite contato com olhos e mucosas.",
+      "Interrompa o uso em caso de irritação e procure orientação profissional."
+    ],
+    "contraindications": []
+  },
+  {
+    "id": 22,
+    "slug": "oleo-corporal-relaxante-lavanda-calendula",
+    "name": "Óleo Corporal Relaxante Lavanda & Calêndula",
+    "brand": "HidraSplash",
+    "visibleLabelBrand": "HIDRASPLASH",
+    "isDemo": true,
+    "category": "oleos-corporais",
+    "subcategory": "relaxamento",
+    "applicationArea": "body",
+    "productKind": "single",
+    "description": "Óleo corporal demonstrativo com perfil sensorial floral pensado para momentos de autocuidado e relaxamento.",
+    "shortDescription": "Cuidado corporal com perfil floral e relaxante.",
+    "price": 41.9,
+    "image": "images/oleo-corporal-relaxante-lavanda-calendula.jpg",
+    "stock": 17,
+    "variant": {
+      "name": "Lavanda & Calêndula",
+      "profile": "relaxamento-floral",
+      "sensoryNotes": [
+        "Lavanda",
+        "Floral"
+      ]
+    },
+    "tags": [
+      "oleo-corporal",
+      "relaxamento",
+      "perfil-floral"
+    ],
+    "indications": [
+      "Rotinas de autocuidado com preferência por perfil floral."
+    ],
+    "benefits": [
+      "Complementa momentos de cuidado corporal com experiência sensorial relaxante."
+    ],
+    "skinTypes": [
+      "normal",
+      "seca"
+    ],
+    "bodyConcerns": [
+      "relaxamento",
+      "ressecamento"
+    ],
+    "dataClassification": {
+      "commercial": "fictional-demo",
+      "compatibility": "commercial-positioning",
+      "formulation": "synthetic-test-data",
+      "safety": "not-evaluated"
+    },
+    "ingredients": [
+      {
+        "id": "triglicerideos-caprilico-caprico",
+        "name": "Triglicerídeos caprílico/cáprico"
+      },
+      {
+        "id": "oleo-de-girassol",
+        "name": "Óleo de girassol"
+      },
+      {
+        "id": "esqualano-vegetal",
+        "name": "Esqualano vegetal"
+      },
+      {
+        "id": "oleo-de-calendula-macerado",
+        "name": "Óleo de calêndula macerado"
+      },
+      {
+        "id": "tocoferol",
+        "name": "Tocoferol"
+      },
+      {
+        "id": "fragrancia-lavanda",
+        "name": "Fragrância de lavanda"
+      }
+    ],
+    "usage": "Aplicar pequena quantidade na pele íntegra e espalhar. Orientação sintética de demonstração, sem frequência definida.",
+    "restrictions": [],
+    "warnings": [
+      "Dados sintéticos de demonstração; não representam a formulação fotografada.",
+      "Informações de segurança não avaliadas; não utilizar para orientar alergias ou segurança dermatológica.",
+      "Uso externo demonstrativo. Evite contato com olhos e mucosas.",
+      "Interrompa o uso em caso de irritação e procure orientação profissional."
+    ],
+    "contraindications": []
+  },
+  {
+    "id": 23,
+    "slug": "oleo-corporal-revigorante-damasco-sandalo",
+    "name": "Óleo Corporal Revigorante Damasco & Sândalo",
+    "brand": "HidraSplash",
+    "visibleLabelBrand": "HIDRASPLASH",
+    "isDemo": true,
+    "category": "oleos-corporais",
+    "subcategory": "revitalizacao",
+    "applicationArea": "body",
+    "productKind": "single",
+    "description": "Óleo corporal demonstrativo com perfil frutado e amadeirado, posicionado para uma experiência sensorial revigorante.",
+    "shortDescription": "Cuidado corporal revigorante com perfil frutado e amadeirado.",
+    "price": 43.9,
+    "originalPrice": 55.9,
+    "image": "images/oleo-corporal-revigorante-damasco-sandalo.jpg",
+    "stock": 13,
+    "variant": {
+      "name": "Damasco & Sândalo",
+      "profile": "revigorante-amadeirado",
+      "sensoryNotes": [
+        "Damasco",
+        "Amadeirado"
+      ]
+    },
+    "tags": [
+      "oleo-corporal",
+      "revigorante",
+      "damasco-sandalo"
+    ],
+    "indications": [
+      "Consumidores que preferem perfis frutados e amadeirados no cuidado corporal."
+    ],
+    "benefits": [
+      "Oferece experiência sensorial marcante e sensação de cuidado."
+    ],
+    "skinTypes": [
+      "normal",
+      "seca"
+    ],
+    "bodyConcerns": [
+      "revitalizacao",
+      "ressecamento"
+    ],
+    "dataClassification": {
+      "commercial": "fictional-demo",
+      "compatibility": "commercial-positioning",
+      "formulation": "synthetic-test-data",
+      "safety": "not-evaluated"
+    },
+    "ingredients": [
+      {
+        "id": "triglicerideos-caprilico-caprico",
+        "name": "Triglicerídeos caprílico/cáprico"
+      },
+      {
+        "id": "oleo-de-girassol",
+        "name": "Óleo de girassol"
+      },
+      {
+        "id": "oleo-de-caroco-de-damasco",
+        "name": "Óleo de caroço de damasco"
+      },
+      {
+        "id": "esqualano-vegetal",
+        "name": "Esqualano vegetal"
+      },
+      {
+        "id": "tocoferol",
+        "name": "Tocoferol"
+      },
+      {
+        "id": "fragrancia-amadeirada-sandalo",
+        "name": "Fragrância amadeirada de sândalo"
+      }
+    ],
+    "usage": "Aplicar pequena quantidade na pele íntegra e espalhar. Orientação sintética de demonstração, sem frequência definida.",
+    "restrictions": [],
+    "warnings": [
+      "Dados sintéticos de demonstração; não representam a formulação fotografada.",
+      "Informações de segurança não avaliadas; não utilizar para orientar alergias ou segurança dermatológica.",
+      "Uso externo demonstrativo. Evite contato com olhos e mucosas.",
+      "Interrompa o uso em caso de irritação e procure orientação profissional."
+    ],
+    "contraindications": []
+  },
+  {
+    "id": 24,
+    "slug": "condicionador-brilho-espelhado-camomila-calendula",
+    "name": "Condicionador Brilho Espelhado Camomila & Calêndula",
+    "brand": "HidraSplash",
+    "visibleLabelBrand": "MADEINMINAS PROFESSIONAL",
+    "isDemo": true,
+    "category": "condicionadores",
+    "subcategory": "hidratacao",
+    "applicationArea": "hair",
+    "productKind": "single",
+    "description": "Condicionador demonstrativo com posicionamento de luminosidade, maciez e acabamento visual para cabelos opacos.",
+    "shortDescription": "Luminosidade e maciez para cabelos com pouco brilho.",
+    "price": 45.9,
+    "originalPrice": 57.9,
+    "image": "images/condicionador-brilho-espelhado-camomila-calendula.jpg",
+    "stock": 18,
+    "netContent": {
+      "value": 340,
+      "unit": "ml"
+    },
+    "variant": {
+      "name": "Camomila & Calêndula",
+      "profile": "brilho-e-maciez",
+      "sensoryNotes": [
+        "Floral suave"
+      ]
+    },
+    "tags": [
+      "condicionador",
+      "brilho",
+      "maciez"
+    ],
+    "indications": [
+      "Cabelos com aparência opaca e busca por maciez."
+    ],
+    "benefits": [
+      "Favorece aparência luminosa e toque macio."
+    ],
+    "hairTypes": [
+      "todos"
+    ],
+    "scalpTypes": [
+      "todos"
+    ],
+    "concerns": [
+      "falta-de-brilho",
+      "ressecamento"
+    ],
+    "dataClassification": {
+      "commercial": "fictional-demo",
+      "compatibility": "commercial-positioning",
+      "formulation": "synthetic-test-data",
+      "safety": "not-evaluated"
+    },
+    "ingredients": [
+      {
+        "id": "alcool-cetoestearilico",
+        "name": "Álcool cetoestearílico"
+      },
+      {
+        "id": "behentrimonium-methosulfate",
+        "name": "Behentrimonium methosulfate"
+      },
+      {
+        "id": "glicerina",
+        "name": "Glicerina"
+      },
+      {
+        "id": "pantenol",
+        "name": "Pantenol"
+      },
+      {
+        "id": "oleo-de-girassol",
+        "name": "Óleo de girassol"
+      },
+      {
+        "id": "extrato-de-camomila",
+        "name": "Extrato de camomila"
+      },
+      {
+        "id": "extrato-de-calendula",
+        "name": "Extrato de calêndula"
+      }
+    ],
+    "usage": "Aplicar nos comprimentos após a lavagem e enxaguar. Orientação sintética de demonstração, sem tempo de contato definido.",
+    "restrictions": [],
+    "warnings": [
+      "Dados sintéticos de demonstração; não representam a formulação fotografada.",
+      "Informações de segurança não avaliadas; não utilizar para orientar alergias ou segurança dermatológica.",
+      "Uso externo demonstrativo. Evite contato com olhos e mucosas.",
+      "Interrompa o uso em caso de irritação e procure orientação profissional."
+    ],
+    "contraindications": []
+  },
+  {
+    "id": 25,
+    "slug": "condicionador-detox-hidratante-hortela-alecrim",
+    "name": "Condicionador Detox Hidratante Hortelã & Alecrim",
+    "brand": "HidraSplash",
+    "visibleLabelBrand": "MADEINMINAS PROFESSIONAL",
+    "isDemo": true,
+    "category": "condicionadores",
+    "subcategory": "hidratacao",
+    "applicationArea": "hair",
+    "productKind": "single",
+    "description": "Condicionador demonstrativo de perfil leve e refrescante para consumidores que evitam sensação de peso nos fios.",
+    "shortDescription": "Hidratação leve com perfil herbal refrescante.",
+    "price": 46.9,
+    "image": "images/condicionador-detox-hidratante-hortela-alecrim.jpg",
+    "stock": 16,
+    "netContent": {
+      "value": 340,
+      "unit": "ml"
+    },
+    "variant": {
+      "name": "Hortelã & Alecrim",
+      "profile": "hidratacao-leve",
+      "sensoryNotes": [
+        "Hortelã",
+        "Herbal"
+      ]
+    },
+    "tags": [
+      "condicionador",
+      "hidratacao-leve",
+      "frescor"
+    ],
+    "indications": [
+      "Cabelos normais a oleosos que buscam condicionamento leve."
+    ],
+    "benefits": [
+      "Ajuda a manter maciez e leveza após a lavagem."
+    ],
+    "hairTypes": [
+      "todos"
+    ],
+    "scalpTypes": [
+      "normal",
+      "oleoso"
+    ],
+    "concerns": [
+      "oleosidade",
+      "ressecamento"
+    ],
+    "dataClassification": {
+      "commercial": "fictional-demo",
+      "compatibility": "commercial-positioning",
+      "formulation": "synthetic-test-data",
+      "safety": "not-evaluated"
+    },
+    "ingredients": [
+      {
+        "id": "alcool-cetoestearilico",
+        "name": "Álcool cetoestearílico"
+      },
+      {
+        "id": "behentrimonium-methosulfate",
+        "name": "Behentrimonium methosulfate"
+      },
+      {
+        "id": "glicerina",
+        "name": "Glicerina"
+      },
+      {
+        "id": "pantenol",
+        "name": "Pantenol"
+      },
+      {
+        "id": "esqualano-vegetal",
+        "name": "Esqualano vegetal"
+      },
+      {
+        "id": "fragrancia-herbal",
+        "name": "Fragrância herbal"
+      }
+    ],
+    "usage": "Aplicar nos comprimentos após a lavagem e enxaguar. Orientação sintética de demonstração, sem tempo de contato definido.",
+    "restrictions": [],
+    "warnings": [
+      "Dados sintéticos de demonstração; não representam a formulação fotografada.",
+      "Informações de segurança não avaliadas; não utilizar para orientar alergias ou segurança dermatológica.",
+      "Uso externo demonstrativo. Evite contato com olhos e mucosas.",
+      "Interrompa o uso em caso de irritação e procure orientação profissional."
+    ],
+    "contraindications": []
+  },
+  {
+    "id": 26,
+    "slug": "condicionador-nutricao-intensa-coco-macadamia",
+    "name": "Condicionador Nutrição Intensa Coco & Macadâmia",
+    "brand": "HidraSplash",
+    "visibleLabelBrand": "MADEINMINAS PROFESSIONAL",
+    "isDemo": true,
+    "category": "condicionadores",
+    "subcategory": "nutricao",
+    "applicationArea": "hair",
+    "productKind": "single",
+    "description": "Condicionador demonstrativo de perfil nutritivo para cabelos ressecados, com foco em maciez e redução visual de frizz.",
+    "shortDescription": "Nutrição intensa e maciez para cabelos ressecados.",
+    "price": 49.9,
+    "originalPrice": 62.9,
+    "image": "images/condicionador-nutricao-intensa-coco-macadamia.jpg",
+    "stock": 14,
+    "netContent": {
+      "value": 340,
+      "unit": "ml"
+    },
+    "variant": {
+      "name": "Coco & Macadâmia",
+      "profile": "nutricao-intensa",
+      "sensoryNotes": [
+        "Coco",
+        "Aconchegante"
+      ]
+    },
+    "tags": [
+      "condicionador",
+      "nutricao",
+      "controle-de-frizz"
+    ],
+    "indications": [
+      "Cabelos secos ou ressecados com frizz percebido."
+    ],
+    "benefits": [
+      "Favorece maciez e aparência disciplinada dos fios."
+    ],
+    "hairTypes": [
+      "lisos",
+      "ondulados",
+      "cacheados",
+      "crespos"
+    ],
+    "scalpTypes": [
+      "normal",
+      "seco"
+    ],
+    "concerns": [
+      "ressecamento",
+      "frizz"
+    ],
+    "dataClassification": {
+      "commercial": "fictional-demo",
+      "compatibility": "commercial-positioning",
+      "formulation": "synthetic-test-data",
+      "safety": "not-evaluated"
+    },
+    "ingredients": [
+      {
+        "id": "alcool-cetoestearilico",
+        "name": "Álcool cetoestearílico"
+      },
+      {
+        "id": "behentrimonium-methosulfate",
+        "name": "Behentrimonium methosulfate"
+      },
+      {
+        "id": "glicerina",
+        "name": "Glicerina"
+      },
+      {
+        "id": "oleo-de-coco",
+        "name": "Óleo de coco"
+      },
+      {
+        "id": "oleo-de-macadamia",
+        "name": "Óleo de macadâmia"
+      },
+      {
+        "id": "pantenol",
+        "name": "Pantenol"
+      },
+      {
+        "id": "tocoferol",
+        "name": "Tocoferol"
+      }
+    ],
+    "usage": "Aplicar nos comprimentos após a lavagem e enxaguar. Orientação sintética de demonstração, sem tempo de contato definido.",
+    "restrictions": [],
+    "warnings": [
+      "Dados sintéticos de demonstração; não representam a formulação fotografada.",
+      "Informações de segurança não avaliadas; não utilizar para orientar alergias ou segurança dermatológica.",
+      "Uso externo demonstrativo. Evite contato com olhos e mucosas.",
+      "Interrompa o uso em caso de irritação e procure orientação profissional."
+    ],
+    "contraindications": []
+  },
+  {
+    "id": 27,
+    "slug": "condicionador-reconstrucao-extrema-trigo-pataua",
+    "name": "Condicionador Reconstrução Extrema Trigo & Patauá",
+    "brand": "HidraSplash",
+    "visibleLabelBrand": "MADEINMINAS PROFESSIONAL",
+    "isDemo": true,
+    "category": "condicionadores",
+    "subcategory": "reconstrucao",
+    "applicationArea": "hair",
+    "productKind": "single",
+    "description": "Condicionador demonstrativo para cabelos com aparência danificada, posicionado para uma rotina cosmética de reconstrução e fortalecimento visual.",
+    "shortDescription": "Reconstrução cosmética para fios com aparência danificada.",
+    "price": 52.9,
+    "originalPrice": 67.9,
+    "image": "images/condicionador-reconstrucao-extrema-trigo-pataua.jpg",
+    "stock": 12,
+    "netContent": {
+      "value": 340,
+      "unit": "ml"
+    },
+    "variant": {
+      "name": "Trigo & Patauá",
+      "profile": "reconstrucao-intensa"
+    },
+    "tags": [
+      "condicionador",
+      "reconstrucao",
+      "cabelos-danificados"
+    ],
+    "indications": [
+      "Cabelos com danos percebidos e necessidade de cuidado reconstrutor."
+    ],
+    "benefits": [
+      "Ajuda a melhorar a aparência de fios danificados e fragilizados."
+    ],
+    "hairTypes": [
+      "todos"
+    ],
+    "scalpTypes": [
+      "todos"
+    ],
+    "concerns": [
+      "danos",
+      "queda-e-quebra"
+    ],
+    "dataClassification": {
+      "commercial": "fictional-demo",
+      "compatibility": "commercial-positioning",
+      "formulation": "synthetic-test-data",
+      "safety": "not-evaluated"
+    },
+    "ingredients": [
+      {
+        "id": "alcool-cetoestearilico",
+        "name": "Álcool cetoestearílico"
+      },
+      {
+        "id": "behentrimonium-methosulfate",
+        "name": "Behentrimonium methosulfate"
+      },
+      {
+        "id": "glicerina",
+        "name": "Glicerina"
+      },
+      {
+        "id": "proteina-de-trigo-hidrolisada",
+        "name": "Proteína de trigo hidrolisada"
+      },
+      {
+        "id": "oleo-de-pataua",
+        "name": "Óleo de patauá"
+      },
+      {
+        "id": "pantenol",
+        "name": "Pantenol"
+      },
+      {
+        "id": "poliquaternio-10",
+        "name": "Poliquatérnio-10"
+      }
+    ],
+    "usage": "Aplicar nos comprimentos após a lavagem e enxaguar. Orientação sintética de demonstração, sem tempo de contato definido.",
+    "restrictions": [],
+    "warnings": [
+      "Dados sintéticos de demonstração; não representam a formulação fotografada.",
+      "Informações de segurança não avaliadas; não utilizar para orientar alergias ou segurança dermatológica.",
+      "Uso externo demonstrativo. Evite contato com olhos e mucosas.",
+      "Interrompa o uso em caso de irritação e procure orientação profissional."
+    ],
+    "contraindications": []
+  }
+]

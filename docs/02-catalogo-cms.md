@@ -24,14 +24,14 @@
 - Categorias controladas: `shampoos`, `condicionadores`, `mascaras` e `finalizadores`, com combinações de subcategoria validadas por categoria.
 - `hairTypes` representa tipos de fios; `scalpTypes` contém apenas perfis de couro cabeludo; `concerns` registra necessidades cosméticas como caspa, descamação, oleosidade e ressecamento, sem classificá-las como diagnóstico médico.
 - Ingredientes usam objetos `{ id, name }`. O ID normalizado permite que uma incompatibilidade declarada no futuro seja comparada por igualdade, sem busca textual livre.
-- `tags`, `indications`, `hairTypes`, `scalpTypes`, `concerns`, `benefits` e `ingredients` são obrigatórios e não vazios. `restrictions`, `warnings` e `contraindications` são obrigatórios, mas podem ser listas vazias após revisão explícita.
+- `tags`, `indications`, `hairTypes`, `scalpTypes`, `concerns`, `benefits` e `ingredients` são obrigatórios e não vazios. `restrictions`, `warnings` e `contraindications` são obrigatórios, mas podem ser listas vazias após revisão explícita. Lista vazia significa somente que nenhum código estruturado foi registrado; não comprova ausência de risco ou contraindicação.
 - Duplicatas são comparadas após normalizar caixa, acentos e espaços. `todos` não pode coexistir com tipos específicos.
 - `rating` e `reviews` devem ser omitidos ou informados juntos; zero reviews exige rating zero, e reviews positivas exigem rating maior que zero.
 
 **Semântica de compatibilidade e seleção**
 
 - **Eliminatórios determinísticos:** ID/slug solicitado, categoria ou subcategoria escolhida, faixa de preço, estoque quando disponibilidade for exigida, códigos de restrição declarados e interseção entre IDs de ingredientes e incompatibilidades informadas pelo usuário.
-- **Sinais de preferência:** correspondências de `hairTypes`, `scalpTypes` e `concerns` aumentam a pertinência, mas a ausência de correspondência não elimina sozinha um produto.
+- **Sinais de preferência:** correspondências de `hairTypes`, `scalpTypes` e `concerns` aumentam a pertinência, mas a ausência de correspondência não elimina sozinha um produto. No catálogo demonstrativo, esses perfis são posicionamentos comerciais fictícios e não compatibilidades de segurança avaliadas.
 - **Ranqueamento textual:** nome, descrições, tags, indicações, benefícios e ingredientes ajudam a ordenar opções. Rating e reviews servem apenas como desempate secundário.
 - `warnings` e `contraindications` preservam explicações para exibição e para o agente, mas não geram exclusão por busca textual. Toda exclusão automática precisa de código controlado ou ID de ingrediente.
 - Uma restrição não pode contradizer uma compatibilidade declarada no mesmo produto.
@@ -62,14 +62,50 @@ O teste de link simbólico recebeu `EPERM` dentro do sandbox antes de executar a
 
 ## 2.2 — Popular o catálogo fictício
 
-- [ ] Migrar os 8 shampoos existentes preservando imagens e identidade visual sempre que possível.
-- [ ] Expandir gradualmente para aproximadamente **20–24 produtos**, incluindo **3–4 opções de anticaspa com perfis distintos** e alternativas nas demais categorias.
-- [ ] Para cada produto, preencher descrição longa, indicações, ingredientes fictícios coerentes, restrições e modo de uso; evitar alegações médicas não verificadas.
-- [ ] Revisar produtos que competem entre si: diferenças precisam permitir boas perguntas e comparações.
-- [ ] Identificar explicitamente o catálogo e as avaliações como **dados de demonstração**.
+- [x] Migrar os 8 shampoos existentes para o catálogo canônico preservando os IDs 1–8 e as imagens equivalentes.
+- [x] Cadastrar exatamente **27 produtos**: 14 shampoos (incluindo um kit), 5 sabonetes, 4 óleos corporais e 4 condicionadores.
+- [x] Manter **6 opções anticaspa** comercialmente distinguíveis, sem inferir eficácia terapêutica ou diferenças de formulação.
+- [x] Para cada produto publicável, preencher descrição, indicações, ingredientes sintéticos revisados, restrições, avisos, contraindicações e modo de uso demonstrativo.
+- [x] Revisar produtos que competem entre si: diferenças precisam permitir boas perguntas e comparações.
+- [x] Identificar explicitamente o catálogo, preços, estoques e perfis comerciais como **dados de demonstração**.
 
-**Aceite:** pelo menos 20 produtos válidos em categorias distintas, sem produtos indistinguíveis e com imagens acessíveis.  
+**Aceite:** 27 produtos aprovados pelo schema de publicação, distribuição 14/5/4/4, seis alternativas anticaspa distinguíveis, IDs históricos preservados, imagens únicas e acessíveis, formulações identificadas como dados sintéticos e segurança explicitamente não avaliada.
 **Commit:** `data(catalog): seed fictional cosmetic products`.
+
+### Registro da entrega 2.2 — 07/11/2026
+
+**Status:** concluída e validada; o catálogo canônico demonstrativo contém 27 produtos e não antecipa endpoints nem integração com o frontend.
+
+- [x] Schema evoluído para produtos capilares, corporais, individuais e kits.
+- [x] Categorias `sabonetes` e `oleos-corporais`, conteúdo líquido/peso, variante comercial, forma de sabonete e metadados de demonstração modelados.
+- [x] 27 imagens copiadas para o CMS com nomes canônicos, hashes SHA-256 preservados e manifesto de correspondência por ID.
+- [x] Inventário comercial demonstrativo criado com 27 identidades, preços, estoques, descrições e perfis; avaliações foram omitidas.
+- [x] Validação confirma contagens 14/5/4/4, seis anticaspa, um kit, IDs 1–8 preservados, imagens únicas e separação entre campos capilares e corporais.
+- [x] O schema de publicação rejeita o inventário comercial enquanto ingredientes, uso e informações de segurança não estiverem classificados para demonstração.
+- [x] Responsável revisou o material editorial local e autorizou o uso das propostas exclusivamente como dados sintéticos de teste.
+- [x] `products.json` canônico criado e os 27 produtos validados com `productCatalogSchema` e verificação física das imagens.
+
+**Classificação e segurança dos dados**
+
+- `dataClassification` é estrito: dados comerciais são `fictional-demo`, compatibilidade é `commercial-positioning`, formulação publicável é `synthetic-test-data` e segurança é `not-evaluated`.
+- O inventário intermediário `commercial-products.json` usa `formulation: not-provided`, não contém formulações e não passa pelo schema de publicação.
+- Ingredientes do catálogo canônico são dados sintéticos para exercitar a aplicação e não representam as fórmulas fotografadas. Eles não autorizam recomendações reais sobre alergias, compatibilidade ou segurança dermatológica.
+- Modos de uso são gerais e conservadores, sem frequência ou tempo de contato dependentes de formulação. Listas vazias de restrições e contraindicações significam somente que nenhuma informação específica foi registrada; não comprovam ausência de risco.
+- O kit ID 7 continua sendo um único produto comercial. Shampoo e condicionador possuem formulações sintéticas, modos de uso e avisos independentes; o produto não possui lista agregada de ingredientes.
+- O arquivo local `editorial-review.local.md` permanece fora do dataset publicável e é ignorado pelo Git.
+
+**Comandos e resultados**
+
+| Comando | Resultado |
+| --- | --- |
+| `corepack pnpm@11.25.0 install --frozen-lockfile` | Sucesso durante a preparação do worktree; lockfile inalterado. |
+| `npm test` | Sucesso fora do sandbox do Windows; 85/85 testes passaram, preservando os 73 anteriores. |
+| `npm run build` | Sucesso; TypeScript compilou o backend. |
+| `git diff --check` | Sucesso; nenhuma inconsistência de whitespace. |
+
+O teste de escape de imagem por junction recebeu `EPERM` dentro do sandbox e passou quando a suíte foi repetida fora dele. Não houve alteração no frontend, nos endpoints, nas imagens de origem ou no stash existente. Não foi criado ADR: a classificação editorial complementa o schema do catálogo sem alterar a arquitetura modular monolítica aprovada.
+
+**Dependências futuras:** a tarefa 2.3 deverá expor produtos e imagens do mesmo catálogo canônico. Na tarefa 3.2, a categoria "Todos" deverá apresentar os 27 produtos, com filtros 14/5/4/4, busca e subcategorias funcionais, sem manter um segundo array fixo no React e sem botão visual sem função real.
 
 ## 2.3 — Endpoints de catálogo
 

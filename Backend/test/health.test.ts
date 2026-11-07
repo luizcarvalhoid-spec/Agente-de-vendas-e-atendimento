@@ -1,15 +1,15 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { buildApp } from '../src/app.js'
 import { loadConfig } from '../src/config/env.js'
 import { healthResponseSchema } from '../src/contracts/api.js'
+import { buildTestApp } from './helpers/test-app.js'
 
 const config = loadConfig({})
 const allowedOrigin = config.frontendOrigin
 
 test('GET /api/health returns the demo API status', async (t) => {
-  const app = buildApp({ config })
+  const app = await buildTestApp({ config })
   t.after(() => app.close())
 
   const response = await app.inject({
@@ -28,7 +28,7 @@ test('GET /api/health returns the demo API status', async (t) => {
 })
 
 test('CORS allows the local Vite origin', async (t) => {
-  const app = buildApp({ config })
+  const app = await buildTestApp({ config })
   t.after(() => app.close())
 
   const response = await app.inject({
@@ -42,7 +42,7 @@ test('CORS allows the local Vite origin', async (t) => {
 })
 
 test('CORS does not allow an unknown origin', async (t) => {
-  const app = buildApp({ config })
+  const app = await buildTestApp({ config })
   t.after(() => app.close())
 
   const response = await app.inject({
@@ -56,7 +56,7 @@ test('CORS does not allow an unknown origin', async (t) => {
 })
 
 test('CORS answers a valid health preflight request', async (t) => {
-  const app = buildApp({ config })
+  const app = await buildTestApp({ config })
   t.after(() => app.close())
 
   const response = await app.inject({

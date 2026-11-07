@@ -17,6 +17,8 @@ interface CatalogImageReference {
   images?: string[]
 }
 
+class CatalogImageValidationError extends Error {}
+
 function isInsideRoot(root: string, candidate: string) {
   const relativePath = relative(root, candidate)
   return (
@@ -27,6 +29,71 @@ function isInsideRoot(root: string, candidate: string) {
   )
 }
 
+async function resolveCanonicalImageRoot(imageRoot: string) {
+  try {
+    const canonicalRoot = await realpath(imageRoot)
+    const rootStats = await stat(canonicalRoot)
+
+    if (!rootStats.isDirectory()) {
+      throw new Error('Image root is not a directory.')
+    }
+
+    return canonicalRoot
+  } catch {
+    throw new CatalogImageValidationError(
+      'A raiz de imagens não existe ou não é um diretório acessível.',
+    )
+  }
+}
+
+async function resolveFromCanonicalRoot(
+  canonicalRoot: string,
+  reference: string,
+) {
+  const candidate = resolve(canonicalRoot, reference)
+
+  if (!isInsideRoot(canonicalRoot, candidate)) {
+    throw new CatalogImageValidationError(
+      'A imagem deve permanecer dentro da raiz permitida.',
+    )
+  }
+
+  try {
+    const canonicalImagePath = await realpath(candidate)
+
+    if (!isInsideRoot(canonicalRoot, canonicalImagePath)) {
+      throw new CatalogImageValidationError(
+        'A imagem resolve para fora da raiz permitida, inclusive por link simbólico.',
+      )
+    }
+
+    const imageStats = await stat(canonicalImagePath)
+    if (!imageStats.isFile()) {
+      throw new CatalogImageValidationError(
+        'A referência de imagem não aponta para um arquivo.',
+      )
+    }
+
+    return canonicalImagePath
+  } catch (error) {
+    if (error instanceof CatalogImageValidationError) {
+      throw error
+    }
+
+    throw new CatalogImageValidationError(
+      'O arquivo de imagem não existe ou não está acessível.',
+    )
+  }
+}
+
+export async function resolveCatalogImagePath(
+  imageRoot: string,
+  reference: string,
+) {
+  const canonicalRoot = await resolveCanonicalImageRoot(imageRoot)
+  return resolveFromCanonicalRoot(canonicalRoot, reference)
+}
+
 async function validateCatalogImages(
   products: readonly CatalogImageReference[],
   imageRoot: string,
@@ -35,17 +102,15 @@ async function validateCatalogImages(
   let canonicalRoot: string
 
   try {
-    canonicalRoot = await realpath(imageRoot)
-    const rootStats = await stat(canonicalRoot)
-
-    if (!rootStats.isDirectory()) {
-      throw new Error('Image root is not a directory.')
-    }
-  } catch {
+    canonicalRoot = await resolveCanonicalImageRoot(imageRoot)
+  } catch (error) {
     ctx.addIssue({
       code: 'custom',
       path: [],
-      message: 'A raiz de imagens não existe ou não é um diretório acessível.',
+      message:
+        error instanceof CatalogImageValidationError
+          ? error.message
+          : 'A raiz de imagens não existe ou não é um diretório acessível.',
     })
     return
   }
@@ -60,43 +125,16 @@ async function validateCatalogImages(
     ]
 
     for (const reference of references) {
-      const candidate = resolve(canonicalRoot, reference.value)
-
-      if (!isInsideRoot(canonicalRoot, candidate)) {
-        ctx.addIssue({
-          code: 'custom',
-          path: reference.path,
-          message: 'A imagem deve permanecer dentro da raiz permitida.',
-        })
-        continue
-      }
-
       try {
-        const canonicalImagePath = await realpath(candidate)
-
-        if (!isInsideRoot(canonicalRoot, canonicalImagePath)) {
-          ctx.addIssue({
-            code: 'custom',
-            path: reference.path,
-            message:
-              'A imagem resolve para fora da raiz permitida, inclusive por link simbólico.',
-          })
-          continue
-        }
-
-        const imageStats = await stat(canonicalImagePath)
-        if (!imageStats.isFile()) {
-          ctx.addIssue({
-            code: 'custom',
-            path: reference.path,
-            message: 'A referência de imagem não aponta para um arquivo.',
-          })
-        }
-      } catch {
+        await resolveFromCanonicalRoot(canonicalRoot, reference.value)
+      } catch (error) {
         ctx.addIssue({
           code: 'custom',
           path: reference.path,
-          message: 'O arquivo de imagem não existe ou não está acessível.',
+          message:
+            error instanceof CatalogImageValidationError
+              ? error.message
+              : 'O arquivo de imagem não existe ou não está acessível.',
         })
       }
     }

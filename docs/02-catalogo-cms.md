@@ -109,14 +109,87 @@ O teste de escape de imagem por junction recebeu `EPERM` dentro do sandbox e pas
 
 ## 2.3 — Endpoints de catálogo
 
-- [ ] Implementar `GET /api/products` com busca, categoria, faixa de preço e paginação simples.
-- [ ] Implementar `GET /api/products/:slug` (404 para produto inexistente).
-- [ ] Criar busca interna do backend por `id` para uso das ferramentas do agente; não enviar todo o catálogo ao LLM a cada mensagem.
-- [ ] Garantir que preço, estoque, imagem e slug retornem do mesmo dataset utilizado na busca do agente.
-- [ ] Testar filtros combinados, resultados vazios e parâmetros inválidos.
+- [x] Implementar `GET /api/products` com busca, categoria, faixa de preço e paginação simples.
+- [x] Implementar `GET /api/products/:slug` (404 para produto inexistente).
+- [x] Criar busca interna do backend por `id` para uso das ferramentas do agente; não enviar todo o catálogo ao LLM a cada mensagem.
+- [x] Garantir que preço, estoque, imagem e slug retornem do mesmo dataset utilizado na busca do agente.
+- [x] Testar filtros combinados, resultados vazios e parâmetros inválidos.
 
 **Aceite:** API retorna dados filtrados e detalhes estáveis; testes automatizados cobrem filtros e 404.  
 **Commit:** `feat(api): expose product catalog`.
+
+### Registro da entrega 2.3 — 07/11/2026
+
+**Status:** implementação concluída e validada no worktree; aguarda revisão técnica antes de commit e publicação.
+
+**Fonte e carregamento**
+
+- Somente `Backend/content/catalog/products.json` alimenta a API. `commercial-products.json` permanece inventário editorial e não é importado pelo código de produção.
+- O catálogo é lido e validado uma vez antes da composição do Fastify. Falhas de leitura, JSON, schema ou imagens interrompem o startup.
+- Caminhos padrão são derivados de `import.meta.url` por `../../content/catalog`, funcionando a partir de `src/catalog` e `dist/catalog` sem depender do diretório de execução. Testes podem injetar `catalogRoot` e `productsFile`.
+- O repositório mantém os mesmos objetos validados em índices por ID e slug, índice textual e listagem ordenada por ID crescente.
+
+**Endpoints e contratos**
+
+- `GET /api/products` aceita `q`, `category`, `subcategory`, `minPrice`, `maxPrice`, `page` (padrão `1`) e `pageSize` (padrão `12`, máximo `100`).
+- Busca normaliza caixa e acentos e consulta somente nome, marca, slug, descrições, tags, indicações, benefícios e variante comercial. Ingredientes e informações de segurança não são usados como texto comercial.
+- Parâmetros desconhecidos, duplicados ou inválidos, combinações incoerentes de categoria/subcategoria e intervalos de preço invertidos retornam HTTP 400 com `VALIDATION_ERROR` sanitizado.
+- A resposta contém `items` resumidos e `pagination` com página, tamanho, total filtrado, total de páginas e indicadores anterior/próxima. Busca sem correspondência retorna HTTP 200 e lista vazia.
+- `GET /api/products?pageSize=100` retorna os 27 produtos. A tarefa 3.2 deverá usar essa consulta ou consumir todas as páginas para não montar uma vitrine incompleta.
+- `GET /api/products/:slug` retorna o produto canônico completo e URLs de mídia. Slug válido ausente retorna 404 `NOT_FOUND`; slug estruturalmente inválido retorna 400.
+- Listagem e detalhe preservam `fictional-demo`, `commercial-positioning`, `synthetic-test-data` e `not-evaluated`. Ingredientes não são apresentados como formulação verificada.
+
+Exemplo resumido de listagem:
+
+```json
+{
+  "items": [
+    {
+      "id": 1,
+      "slug": "shampoo-anticaspa-coco-blueberry",
+      "name": "Shampoo Anticaspa Coco & Blueberry — Nível 1",
+      "category": "shampoos",
+      "subcategory": "anticaspa",
+      "price": 44.9,
+      "stock": 18,
+      "imageUrl": "/api/catalog/images/shampoo-anticaspa-coco-blueberry.jpg",
+      "dataClassification": {
+        "commercial": "fictional-demo",
+        "compatibility": "commercial-positioning",
+        "formulation": "synthetic-test-data",
+        "safety": "not-evaluated"
+      }
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "pageSize": 12,
+    "totalItems": 27,
+    "totalPages": 3,
+    "hasPreviousPage": false,
+    "hasNextPage": true
+  }
+}
+```
+
+**Imagens**
+
+- `GET /api/catalog/images/*` serve somente referências presentes no catálogo validado. A entrada da URL é comparada a uma allowlist e nunca resolvida livremente como caminho físico.
+- O caminho canônico de cada arquivo é verificado com `realpath`; traversal, barras invertidas, codificações perigosas, nomes desconhecidos e arquivos fora da raiz retornam 404 sem expor caminhos internos.
+- Arquivos são enviados por stream nativo com MIME adequado, `X-Content-Type-Options: nosniff` e `Cache-Control: public, max-age=3600`.
+- URLs são relativas à origem da API. Na tarefa 3.2, o frontend deverá resolvê-las contra `VITE_API_URL`.
+
+**Comandos e resultados**
+
+| Comando | Resultado |
+| --- | --- |
+| `corepack pnpm@11.25.0 install --frozen-lockfile` | Sucesso com acesso autorizado; 57 pacotes reutilizados do cache e lockfile inalterado. |
+| `npm test` | Sucesso fora do sandbox do Windows; 113/113 testes passaram, preservando os 85 anteriores. |
+| `npm run build` | Sucesso; TypeScript compilou o backend. |
+| Smoke HTTP do build | Sucesso em porta efêmera: health, 27 produtos, detalhe e imagem retornaram HTTP 200; contagens 14/5/4/4 e CORS confirmados. |
+| `git diff --check` | Sucesso; nenhuma inconsistência de whitespace. |
+
+A primeira instalação pelo Corepack recebeu `ENOTFOUND` dentro do sandbox e foi repetida com acesso autorizado. O primeiro smoke HTTP recebeu `EACCES` para conexão local no sandbox; a mesma validação passou fora dele. O teste de junction também requer execução fora do sandbox no Windows. Não foi criado novo ADR: loader, repositório e rotas permanecem dentro da arquitetura modular monolítica do ADR-001.
 
 ## 2.4 — Fluxo editorial mínimo (CMS leve)
 

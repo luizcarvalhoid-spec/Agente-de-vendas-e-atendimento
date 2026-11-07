@@ -1,10 +1,12 @@
 import { buildApp } from './app.js'
+import { loadCatalogRepository } from './catalog/catalog-repository.js'
 import { ConfigError, loadConfig, loadLocalEnvFile } from './config/env.js'
 
 try {
   loadLocalEnvFile()
   const config = loadConfig(process.env)
-  const app = buildApp({ config, fastify: { logger: true } })
+  const catalog = await loadCatalogRepository()
+  const app = buildApp({ config, catalog, fastify: { logger: true } })
 
   await app.listen({ host: '127.0.0.1', port: config.port })
 } catch (error) {

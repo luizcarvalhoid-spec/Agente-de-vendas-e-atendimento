@@ -3,14 +3,14 @@ import test from 'node:test'
 
 import { z } from 'zod'
 
-import { buildApp } from '../src/app.js'
 import { loadConfig } from '../src/config/env.js'
 import { apiErrorSchema } from '../src/contracts/api.js'
+import { buildTestApp } from './helpers/test-app.js'
 
 const config = loadConfig({})
 
 test('Zod errors return a sanitized validation response', async (t) => {
-  const app = buildApp({ config })
+  const app = await buildTestApp({ config })
   t.after(() => app.close())
   app.get('/test/zod-error', async () => {
     return z.object({ quantity: z.number().positive() }).parse({ quantity: 0 })
@@ -27,7 +27,7 @@ test('Zod errors return a sanitized validation response', async (t) => {
 })
 
 test('Fastify validation errors return a sanitized response', async (t) => {
-  const app = buildApp({ config })
+  const app = await buildTestApp({ config })
   t.after(() => app.close())
   app.post(
     '/test/fastify-validation',
@@ -59,7 +59,7 @@ test('Fastify validation errors return a sanitized response', async (t) => {
 })
 
 test('unknown routes return the public not found contract', async (t) => {
-  const app = buildApp({ config })
+  const app = await buildTestApp({ config })
   t.after(() => app.close())
 
   const response = await app.inject({ method: 'GET', url: '/missing' })
@@ -72,7 +72,7 @@ test('unknown routes return the public not found contract', async (t) => {
 })
 
 test('unexpected errors do not expose internal messages', async (t) => {
-  const app = buildApp({ config })
+  const app = await buildTestApp({ config })
   t.after(() => app.close())
   app.get('/test/internal-error', async () => {
     throw new Error('database-password=must-not-leak')

@@ -193,13 +193,37 @@ A primeira instalação pelo Corepack recebeu `ENOTFOUND` dentro do sandbox e fo
 
 ## 2.4 — Fluxo editorial mínimo (CMS leve)
 
-- [ ] Documentar passo a passo para criar/editar um produto: editar JSON, validar, testar e revisar no Git.
-- [ ] Criar comando `validate:catalog` ou equivalente para validar o conteúdo antes de publicar.
-- [ ] Explicar que **não há painel administrativo**: mudanças são feitas via arquivos versionados (Git-based content).
-- [ ] Garantir que conteúdo comercial falso não seja apresentado como produto real.
+- [x] Documentar passo a passo para criar/editar um produto: editar JSON, validar, testar e revisar no Git.
+- [x] Criar comando `validate:catalog` ou equivalente para validar o conteúdo antes de publicar.
+- [x] Explicar que **não há painel administrativo**: mudanças são feitas via arquivos versionados (Git-based content).
+- [x] Garantir que conteúdo comercial falso não seja apresentado como produto real.
 
 **Aceite:** uma pessoa consegue incluir um produto novo por arquivo e ele aparece na API após executar o projeto, sem editar componentes de UI.  
 **Commit:** `docs(catalog): document content workflow`.
+
+### Registro da entrega 2.4 — 07/11/2026
+
+**Status:** tecnicamente concluída e validada no worktree; incorporação definitiva à `main` depende de revisão, commit, Pull Request e merge.
+
+- `pnpm validate:catalog` executa o mesmo loader, schemas e validação física usados pelo startup. O comando não inicia servidor, não lê variáveis de ambiente e não modifica o CMS.
+- Sucesso retorna código `0` e informa quantidades de produtos e referências únicas de imagem. JSON, leitura, schema ou imagens inválidas retornam código `1` com mensagens sanitizadas por índice e campo.
+- O fluxo completo de imagem, identidade, campos comerciais e consultivos, classificação, validação, testes, revisão Git e reinício está em `Backend/content/catalog/README.md`.
+- `products.json` continua a única fonte canônica da API. `image-manifest.json` registra proveniência e hashes das 27 imagens iniciais, mas não alimenta endpoints e não substitui o catálogo.
+- A validação de imagem confirma referência, extensão permitida, existência, tipo de arquivo e isolamento por caminho canônico. Ela não constitui análise integral do conteúdo binário, qualidade, direitos ou correspondência de formulação.
+- Os testes fixos de 27 produtos, distribuição 14/5/4/4 e seis anticaspa permanecem como baseline editorial aprovada. Expansão permanente exige revisar deliberadamente essas expectativas; elas não foram flexibilizadas para acomodar novos dados.
+- Um teste de extensibilidade cria catálogo e imagens temporários, adiciona o produto ID 28, executa o validador, carrega o repositório e confirma listagem com 28 itens, busca por ID, detalhe por slug e imagem HTTP. O catálogo canônico permanece byte a byte inalterado.
+
+**Comandos e resultados**
+
+| Comando | Resultado |
+| --- | --- |
+| `corepack pnpm@11.25.0 install --frozen-lockfile` | Sucesso; 57 pacotes reutilizados e lockfile inalterado. |
+| `corepack pnpm@11.25.0 validate:catalog` | Sucesso; 27 produtos e 27 referências de imagem validados. |
+| `npm test` | Sucesso fora do sandbox do Windows; 127/127 testes passaram, preservando os 113 anteriores. |
+| `npm run build` | Sucesso; TypeScript compilou o backend e o script editorial. |
+| `git diff --check` | Sucesso; nenhuma inconsistência de whitespace. |
+
+Dentro do sandbox, os dois testes que criam junctions receberam `EPERM`; a suíte foi repetida fora desse isolamento e ambos passaram. Uma tentativa do comando via Corepack dentro do sandbox recebeu `ENOTFOUND`; a execução com acesso autorizado passou. Não foi criado ADR: esta entrega operacionaliza o CMS em arquivos já aprovado, sem alterar a arquitetura.
 
 ## Fora de escopo
 

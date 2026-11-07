@@ -41,11 +41,16 @@ export default function AnnouncementBar() {
         </a>
 
         {/* Center — Promo text */}
-        <p className="flex items-center gap-1.5 font-semibold tracking-wide text-center mx-auto sm:mx-0">
+        <p className="mx-auto flex items-center gap-1.5 text-center text-[10px] font-semibold tracking-wide min-[420px]:text-xs sm:mx-0">
           <Truck size={14} strokeWidth={2.2} className="text-white/90 flex-shrink-0" />
           <span>
             FRETE GRÁTIS{' '}
-            <span className="font-normal text-white/90">para compras acima de</span>{' '}
+            <span className="hidden font-normal text-white/90 min-[420px]:inline">
+              para compras acima de{' '}
+            </span>
+            <span className="font-normal text-white/90 min-[420px]:hidden">
+              acima de{' '}
+            </span>
             R$100
           </span>
         </p>

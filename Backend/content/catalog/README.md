@@ -64,8 +64,10 @@ Antes de solicitar revisão:
 
 ```bash
 git status --short
-git diff -- Backend/content/catalog
+git diff -- content/catalog
 ```
+
+Arquivos novos ainda não rastreados não aparecem no `git diff` comum; confira-os também com `git status --short`.
 
 Confirme que apenas o produto, suas imagens autorizadas e a documentação necessária foram alterados. Não versione `.env`, logs, `node_modules`, `dist` ou material editorial local.
 

@@ -36,11 +36,17 @@ export interface ProductPage {
   hasNextPage: boolean
 }
 
+export interface CatalogStats {
+  productCount: number
+  imageReferenceCount: number
+}
+
 export interface CatalogRepository {
   list(query: ProductListQuery): ProductPage
   findById(id: number): Product | undefined
   findBySlug(slug: string): Product | undefined
   findImage(publicPath: string): CatalogImage | undefined
+  getStats(): CatalogStats
 }
 
 interface IndexedProduct {
@@ -236,6 +242,12 @@ async function createCatalogRepository(
     },
     findImage(publicPath) {
       return imagesByPublicPath.get(publicPath)
+    },
+    getStats() {
+      return {
+        productCount: sortedProducts.length,
+        imageReferenceCount: imagesByPublicPath.size,
+      }
     },
   }
 }

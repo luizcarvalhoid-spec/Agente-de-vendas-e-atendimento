@@ -33,7 +33,7 @@ Marque a fase apenas quando **todos os critérios de aceite** de seus backlogs f
 
 - [x] **00. Diagnóstico do ponto de partida** — interface existente e repositório público identificados.
 - [x] **01. Fundação técnica e contratos** — [Abrir](./01-fundacao-tecnica.md)
-- [ ] **02. Catálogo e CMS leve** — [Abrir](./02-catalogo-cms.md)
+- [x] **02. Catálogo e CMS leve** — [Abrir](./02-catalogo-cms.md)
 - [ ] **03. Navegação e páginas de produto** — [Abrir](./03-paginas-da-loja.md)
 - [ ] **04. FAQ fictícia e RAG** — [Abrir](./04-faq-rag.md)
 - [ ] **05. Agente com OpenRouter e ferramentas** — [Abrir](./05-agente-openrouter.md)

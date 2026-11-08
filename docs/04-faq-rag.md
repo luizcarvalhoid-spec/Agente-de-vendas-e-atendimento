@@ -5,14 +5,34 @@
 
 ## 4.1 — Criar base de conhecimento da loja
 
-- [ ] Criar aproximadamente **20–30 FAQs**, em arquivos Markdown por assunto (`frete`, `pagamento`, `trocas`, `produtos`, `pedidos`, `privacidade`), com IDs estáveis.
-- [ ] Estabelecer políticas **fictícias e coerentes**, incluindo frete grátis acima de R$ 100, prazos ilustrativos, pagamentos, trocas e itens danificados.
-- [ ] Indicar em cada documento que as políticas são apenas demonstrativas; evitar textos contraditórios.
-- [ ] Incluir pergunta sem resposta prevista para testar fallback honesto.
-- [ ] Não criar pedidos reais, CPF ou dados pessoais de clientes.
+- [x] Criar aproximadamente **20–30 FAQs**, em arquivos Markdown por assunto (`frete`, `pagamento`, `trocas`, `produtos`, `pedidos`, `privacidade`), com IDs estáveis.
+- [x] Estabelecer políticas **fictícias e coerentes**, incluindo frete grátis acima de R$ 100, prazos ilustrativos, pagamentos, trocas e itens danificados.
+- [x] Indicar em cada documento que as políticas são apenas demonstrativas; evitar textos contraditórios.
+- [x] Incluir pergunta sem resposta prevista para testar fallback honesto.
+- [x] Não criar pedidos reais, CPF ou dados pessoais de clientes.
 
 **Aceite:** FAQs revisadas são legíveis, versionadas e não contradizem a barra de anúncio da loja.  
 **Commit:** `docs(knowledge): add fictional ecommerce policies`.
+
+### Registro de execução — 08/11/2026
+
+- A base contém 25 documentos, um por FAQ, distribuídos em frete `4`, pagamento `4`, trocas `5`, produtos `5`, pedidos `4` e privacidade `3`.
+- Cada documento usa frontmatter plano e estrito com `sourceId`, `category`, `title` e `classification: fictional-demo`. IDs `faq-NNN` são únicos, ordenados e independentes da categoria para permitir recategorização sem quebrar referências.
+- As políticas aprovadas mantêm frete grátis somente para subtotal maior que R$ 100,00, frete padrão fictício de R$ 12,90, prazo de 4 a 8 dias úteis e janelas demonstrativas de 7 dias corridos e 5 dias úteis.
+- Todas as respostas afirmam seu caráter fictício ou demonstrativo. Não há produto, preço, estoque, transportadora, rastreamento, pagamento, atendimento humano ou dado pessoal concreto apresentado como real.
+- Consultas deliberadamente sem política foram registradas fora da raiz carregável, como fixtures para o fallback futuro. Nenhuma resposta foi inventada para esses casos.
+- O parser controlado rejeita metadados incompletos, duplicados ou desconhecidos, IDs e títulos duplicados, divergência de arquivo ou categoria, entradas inesperadas e links simbólicos. O carregamento é determinístico, independente de `cwd` e expõe somente erros sanitizados.
+- O comando `validate:faq` reutiliza o padrão editorial do catálogo e retorna código `0` para a base válida ou `1` para erros, sem stack trace ou caminhos absolutos.
+
+Validações executadas:
+
+- instalação congelada com pnpm `11.25.0`, sem alteração do lockfile;
+- `validate:faq`: 25 documentos aprovados na distribuição `4/4/5/5/4/3`;
+- 15/15 testes do módulo de conhecimento e 142/142 testes do backend;
+- typecheck, build do backend e `git diff --check` aprovados;
+- testes temporários verificaram frontmatter inválido, duplicatas, divergências editoriais, arquivos inesperados, mensagens sanitizadas e escape por junction/symlink.
+
+O Corepack precisou de acesso de rede fora do sandbox. Testes que criam links simbólicos ou junctions também foram repetidos fora do sandbox por restrições do Windows. Não foram implementados busca, ranking, tokenização, endpoint, ferramenta do agente ou integração OpenRouter.
 
 ## 4.2 — Recuperação textual (retrieval)
 

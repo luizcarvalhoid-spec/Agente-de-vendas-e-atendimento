@@ -353,6 +353,7 @@ export default function CategoryPage() {
                 >
                   <button
                     type="button"
+                    aria-label="Página anterior"
                     disabled={!pagination.hasPreviousPage}
                     onClick={() =>
                       setUrlState({ ...urlState, page: pagination.page - 1 })
@@ -383,6 +384,7 @@ export default function CategoryPage() {
 
                   <button
                     type="button"
+                    aria-label="Próxima página"
                     disabled={!pagination.hasNextPage}
                     onClick={() =>
                       setUrlState({ ...urlState, page: pagination.page + 1 })

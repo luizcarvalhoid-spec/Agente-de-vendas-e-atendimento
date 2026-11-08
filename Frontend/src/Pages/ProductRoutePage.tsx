@@ -1,5 +1,5 @@
 import { AlertTriangle, ArrowLeft, RefreshCw, SearchX } from 'lucide-react'
-import { Link, useParams } from 'react-router'
+import { Link, useLocation, useParams } from 'react-router'
 
 import ProductDetailView from '../components/ProductDetailView'
 import StoreRouteFrame from '../components/StoreRouteFrame'
@@ -7,9 +7,10 @@ import {
   useProductDetail,
   type ProductDetailErrorReason,
 } from '../hooks/useProductDetail'
+import { getSafeCatalogReturnTo } from '../utils/catalog-navigation'
 
 const actionClassName =
-  'inline-flex items-center justify-center rounded-full px-5 py-2.5 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8BB964] focus-visible:ring-offset-2'
+  'inline-flex min-h-11 items-center justify-center rounded-full px-5 py-2.5 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#527A36] focus-visible:ring-offset-2'
 
 const errorMessages: Record<ProductDetailErrorReason, string> = {
   configuration:
@@ -29,7 +30,12 @@ const errorMessages: Record<ProductDetailErrorReason, string> = {
 
 export default function ProductRoutePage() {
   const { slug } = useParams()
+  const location = useLocation()
   const { state, retry } = useProductDetail(slug)
+  const navigationState = location.state as
+    | { catalogReturnTo?: unknown }
+    | null
+  const returnTo = getSafeCatalogReturnTo(navigationState?.catalogReturnTo)
 
   return (
     <StoreRouteFrame>
@@ -51,7 +57,11 @@ export default function ProductRoutePage() {
       )}
 
       {state.status === 'success' && (
-        <ProductDetailView key={state.data.item.slug} response={state.data} />
+        <ProductDetailView
+          key={state.data.item.slug}
+          response={state.data}
+          returnTo={returnTo}
+        />
       )}
 
       {state.status === 'not-found' && (
@@ -60,6 +70,7 @@ export default function ProductRoutePage() {
           eyebrow="Erro 404"
           title="Produto não encontrado"
           description="Não encontramos um produto com este endereço no catálogo HidraSplash."
+          returnTo={returnTo}
         />
       )}
 
@@ -69,6 +80,7 @@ export default function ProductRoutePage() {
           eyebrow="Endereço inválido"
           title="Não foi possível consultar este produto"
           description="O endereço informado não corresponde ao formato de slug aceito pelo catálogo."
+          returnTo={returnTo}
         />
       )}
 
@@ -79,6 +91,7 @@ export default function ProductRoutePage() {
           title="Não foi possível carregar este produto"
           description={errorMessages[state.reason]}
           retry={state.canRetry ? retry : undefined}
+          returnTo={returnTo}
         />
       )}
     </StoreRouteFrame>
@@ -91,6 +104,7 @@ interface RouteMessageProps {
   title: string
   description: string
   retry?: () => void
+  returnTo: string
 }
 
 function RouteMessage({
@@ -99,6 +113,7 @@ function RouteMessage({
   title,
   description,
   retry,
+  returnTo,
 }: RouteMessageProps) {
   return (
     <section
@@ -120,7 +135,7 @@ function RouteMessage({
           strokeWidth={1.7}
         />
       )}
-      <p className="mb-2 text-sm font-semibold uppercase tracking-wide text-[#8BB964]">
+      <p className="mb-2 text-sm font-semibold uppercase tracking-wide text-[#527A36]">
         {eyebrow}
       </p>
       <h1 className="text-2xl font-semibold text-gray-900 sm:text-3xl">
@@ -135,15 +150,15 @@ function RouteMessage({
           <button
             type="button"
             onClick={retry}
-            className={`${actionClassName} bg-[#8BB964] text-white hover:bg-[#7aa854]`}
+            className={`${actionClassName} bg-[#527A36] text-white hover:bg-[#466B2D]`}
           >
             <RefreshCw aria-hidden="true" className="mr-2" size={16} />
             Tentar novamente
           </button>
         )}
         <Link
-          to="/"
-          className={`${actionClassName} border-2 border-[#8BB964] text-[#8BB964] hover:bg-[#8BB964] hover:text-white`}
+          to={returnTo}
+          className={`${actionClassName} border-2 border-[#527A36] text-[#527A36] hover:bg-[#527A36] hover:text-white`}
         >
           <ArrowLeft aria-hidden="true" className="mr-2" size={16} />
           Voltar à vitrine

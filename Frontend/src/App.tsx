@@ -5,11 +5,13 @@ import DeferredFeaturePage from './Pages/DeferredFeaturePage'
 import ProductRoutePage from './Pages/ProductRoutePage'
 import RouteNotFoundPage from './Pages/RouteNotFoundPage'
 import ApiHealthStatus from './components/ApiHealthStatus'
+import RouteFocusManager from './components/RouteFocusManager'
 
 function App() {
   return (
     <BrowserRouter>
       <div className="font-poppins">
+        <RouteFocusManager />
         <Routes>
           <Route path="/" element={<CategoryPage />} />
           <Route path="/produtos/:slug" element={<ProductRoutePage />} />

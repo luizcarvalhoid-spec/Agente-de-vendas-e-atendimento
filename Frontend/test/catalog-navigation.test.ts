@@ -2,9 +2,11 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  createPaginationFocusIntent,
   formatProductCount,
   getSafeCatalogReturnTo,
   readCatalogUrlState,
+  resolvePaginationFocusIntent,
   toCatalogSearchParams,
 } from '../src/utils/catalog-navigation.ts'
 
@@ -59,4 +61,70 @@ test('product count uses singular and plural concordance', () => {
   assert.equal(formatProductCount(0), '0 produtos encontrados')
   assert.equal(formatProductCount(1), '1 produto encontrado')
   assert.equal(formatProductCount(27), '27 produtos encontrados')
+})
+
+test('pagination focus is not registered for the current page', () => {
+  assert.equal(createPaginationFocusIntent(2, 2, 'page=2'), undefined)
+})
+
+test('pagination focus is bound to its loading request and resolved on success', () => {
+  const created = createPaginationFocusIntent(1, 2, 'page=2')
+  const loading = resolvePaginationFocusIntent(
+    created,
+    'page=2',
+    { status: 'loading', requestKey: 'request-page-2' },
+    false,
+  )
+
+  assert.deepEqual(loading, {
+    intent: { queryKey: 'page=2', requestKey: 'request-page-2' },
+    shouldFocus: false,
+  })
+  assert.deepEqual(
+    resolvePaginationFocusIntent(
+      loading.intent,
+      'page=2',
+      { status: 'success', requestKey: 'request-page-2' },
+      false,
+    ),
+    { shouldFocus: true },
+  )
+})
+
+test('pagination focus is cancelled by query changes, errors and replacement requests', () => {
+  const boundIntent = {
+    queryKey: 'page=2',
+    requestKey: 'request-page-2',
+  }
+
+  const cancelledCases = [
+    resolvePaginationFocusIntent(
+      boundIntent,
+      'category=sabonetes',
+      { status: 'loading', requestKey: 'request-filtered' },
+      false,
+    ),
+    resolvePaginationFocusIntent(
+      boundIntent,
+      'page=2',
+      { status: 'error', requestKey: 'request-page-2' },
+      false,
+    ),
+    resolvePaginationFocusIntent(
+      boundIntent,
+      'page=2',
+      { status: 'loading', requestKey: 'replacement-request' },
+      false,
+    ),
+    resolvePaginationFocusIntent(
+      boundIntent,
+      'page=2',
+      { status: 'success', requestKey: 'request-page-2' },
+      true,
+    ),
+  ]
+
+  for (const resolution of cancelledCases) {
+    assert.deepEqual(resolution, { shouldFocus: false })
+  }
 })

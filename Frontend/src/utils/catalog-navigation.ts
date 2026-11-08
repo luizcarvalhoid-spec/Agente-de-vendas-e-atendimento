@@ -12,6 +12,21 @@ export interface CatalogUrlState {
   page: number
 }
 
+export interface PaginationFocusIntent {
+  queryKey: string
+  requestKey?: string
+}
+
+interface CatalogRequestState {
+  status: 'loading' | 'success' | 'error'
+  requestKey: string
+}
+
+interface PaginationFocusResolution {
+  intent?: PaginationFocusIntent
+  shouldFocus: boolean
+}
+
 const catalogParameterNames = new Set([
   'q',
   'category',
@@ -57,6 +72,47 @@ export function toCatalogSearchParams(state: CatalogUrlState) {
 
 export function formatProductCount(count: number) {
   return count === 1 ? '1 produto encontrado' : `${count} produtos encontrados`
+}
+
+export function createPaginationFocusIntent(
+  currentPage: number,
+  targetPage: number,
+  queryKey: string,
+): PaginationFocusIntent | undefined {
+  return currentPage === targetPage ? undefined : { queryKey }
+}
+
+export function resolvePaginationFocusIntent(
+  intent: PaginationFocusIntent | undefined,
+  currentQueryKey: string,
+  requestState: CatalogRequestState,
+  isPageBeingCorrected: boolean,
+): PaginationFocusResolution {
+  if (
+    !intent ||
+    intent.queryKey !== currentQueryKey ||
+    isPageBeingCorrected ||
+    requestState.status === 'error'
+  ) {
+    return { shouldFocus: false }
+  }
+
+  if (intent.requestKey === undefined) {
+    return requestState.status === 'loading'
+      ? {
+          intent: { ...intent, requestKey: requestState.requestKey },
+          shouldFocus: false,
+        }
+      : { shouldFocus: false }
+  }
+
+  if (intent.requestKey !== requestState.requestKey) {
+    return { shouldFocus: false }
+  }
+
+  return requestState.status === 'success'
+    ? { shouldFocus: true }
+    : { intent, shouldFocus: false }
 }
 
 export function getSafeCatalogReturnTo(value: unknown) {

@@ -10,10 +10,13 @@ import {
 import fireIcon from '../assets/Icons/fire_1f525.gif'
 import { useCatalogProducts } from '../hooks/useCatalogProducts'
 import {
+  createPaginationFocusIntent,
   formatProductCount,
   readCatalogUrlState,
+  resolvePaginationFocusIntent,
   toCatalogSearchParams,
   type CatalogUrlState,
+  type PaginationFocusIntent,
 } from '../utils/catalog-navigation'
 import AnnouncementBar from './AnnouncementBar'
 import ChatbotButton from './ChatbotButton'
@@ -65,7 +68,7 @@ export default function CategoryPage() {
   const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
   const resultsSummaryRef = useRef<HTMLParagraphElement>(null)
-  const shouldFocusResultsAfterPageChange = useRef(false)
+  const paginationFocusIntent = useRef<PaginationFocusIntent>()
   const urlState = useMemo(
     () => readCatalogUrlState(searchParams),
     [searchParams],
@@ -147,26 +150,37 @@ export default function CategoryPage() {
     : []
 
   useEffect(() => {
-    if (
-      !shouldFocusResultsAfterPageChange.current ||
-      state.status !== 'success' ||
-      isPageBeingCorrected
-    ) {
-      return
-    }
+    const resolution = resolvePaginationFocusIntent(
+      paginationFocusIntent.current,
+      canonicalParams.toString(),
+      state,
+      isPageBeingCorrected,
+    )
+    paginationFocusIntent.current = resolution.intent
 
-    shouldFocusResultsAfterPageChange.current = false
+    if (!resolution.shouldFocus) return
+
     const animationFrame = window.requestAnimationFrame(() => {
       resultsSummaryRef.current?.scrollIntoView({ block: 'start' })
       resultsSummaryRef.current?.focus({ preventScroll: true })
     })
 
     return () => window.cancelAnimationFrame(animationFrame)
-  }, [isPageBeingCorrected, state])
+  }, [canonicalParams, isPageBeingCorrected, state])
 
   const changePage = (page: number) => {
-    shouldFocusResultsAfterPageChange.current = true
-    setUrlState({ ...urlState, page })
+    const nextState = { ...urlState, page }
+    const nextParams = toCatalogSearchParams(nextState)
+    const intent = createPaginationFocusIntent(
+      urlState.page,
+      page,
+      nextParams.toString(),
+    )
+
+    paginationFocusIntent.current = intent
+    if (!intent) return
+
+    setSearchParams(nextParams)
   }
 
   return (

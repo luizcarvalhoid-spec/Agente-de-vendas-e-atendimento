@@ -36,14 +36,50 @@ O Corepack precisou de acesso de rede fora do sandbox. Testes que criam links si
 
 ## 4.2 — Recuperação textual (retrieval)
 
-- [ ] Implementar indexação simples de Markdown em memória (ex.: MiniSearch, busca BM25 ou score textual determinístico).
-- [ ] Dividir conhecimento em trechos pequenos com `sourceId`, `title` e `content` recuperáveis.
-- [ ] Criar `searchFaq(query, limit)` que devolve melhores trechos e pontuação; limitar tamanho de contexto enviado ao LLM.
-- [ ] Responder com “não encontrei essa política” quando os trechos não forem relevantes; não forçar recuperação fraca.
-- [ ] Testar sinônimos, acentos, consultas parciais e consultas sem correspondência.
+- [x] Implementar indexação simples de Markdown em memória (ex.: MiniSearch, busca BM25 ou score textual determinístico).
+- [x] Dividir conhecimento em trechos pequenos com `sourceId`, `title` e `content` recuperáveis.
+- [x] Criar `searchFaq(query, limit)` que devolve melhores trechos e pontuação; limitar tamanho de contexto enviado ao LLM.
+- [x] Responder com “não encontrei essa política” quando os trechos não forem relevantes; não forçar recuperação fraca.
+- [x] Testar sinônimos, acentos, consultas parciais e consultas sem correspondência.
 
 **Aceite:** consultas típicas retornam trechos corretos; respostas inexistentes são identificadas, sem embeddings nem vetor externo.  
 **Commit:** `feat(rag): implement FAQ text retrieval`.
+
+### Registro de execução — 08/11/2026
+
+- A recuperação usa um índice lexical próprio criado uma vez a partir dos
+  `FaqDocument` validados, sem dependências adicionais, embeddings, vetor ou
+  leitura de disco por consulta.
+- Cada uma das 25 FAQs permanece uma unidade recuperável. O resultado preserva
+  `sourceId`, título, categoria, classificação `fictional-demo` e a resposta
+  integral limitada pelo schema editorial.
+- A normalização trata caixa, acentos, pontuação e números. Stopwords, ruído
+  editorial e aliases estreitos são explícitos; não há stemming, busca difusa
+  ou correspondência por prefixo.
+- O score combina IDF, peso maior para título, bônus de bigramas e cobertura
+  ponderada. Termos informativos ausentes do corpus reduzem a cobertura, e um
+  termo genérico isolado não produz fonte. O score ordena correspondências, mas
+  não representa probabilidade ou confiança estatística.
+- Empates são resolvidos por score, evidência no título e `sourceId`. Consultas
+  vazias, compostas apenas por stopwords, maiores que 300 caracteres ou sem
+  evidência suficiente retornam lista vazia.
+- Os testes específicos cobrem 11 consultas positivas, as 5 consultas
+  desconhecidas versionadas, 5 negativas adicionais com sobreposição lexical,
+  fallback parcial, metadados, cláusulas condicionais e negativas, estabilidade
+  de score, empates, limites, repetição de termos e consulta semelhante a caminho.
+
+Validações executadas:
+
+- `validate:faq`: 25 documentos aprovados na distribuição `4/4/5/5/4/3`;
+- testes específicos de recuperação: 9/9;
+- suíte completa do backend: 151/151;
+- typecheck e build do backend aprovados;
+- `git diff --check` aprovado.
+
+A suíte completa precisou ser repetida fora do sandbox para permitir testes
+preexistentes que criam links simbólicos e renomeiam fixtures temporárias no
+Windows. Não foram implementados endpoint, ferramenta `search_faq`, singleton
+global, inicialização no servidor, OpenRouter, agente ou UI.
 
 ## 4.3 — Tool `search_faq`
 

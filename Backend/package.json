@@ -12,7 +12,8 @@
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/server.js",
     "test": "tsc -p tsconfig.json && tsx --test \"test/**/*.test.ts\"",
-    "validate:catalog": "tsx src/scripts/validate-catalog.ts"
+    "validate:catalog": "tsx src/scripts/validate-catalog.ts",
+    "validate:faq": "tsx src/scripts/validate-faq.ts"
   },
   "dependencies": {
     "@fastify/cors": "^11.0.0",

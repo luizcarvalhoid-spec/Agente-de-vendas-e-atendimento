@@ -3,7 +3,6 @@ import { useState } from 'react'
 import { Link } from 'react-router'
 
 export default function Header() {
-  const [cartCount] = useState(2)
   const [searchValue, setSearchValue] = useState('')
 
   return (
@@ -74,14 +73,7 @@ export default function Header() {
               className="flex flex-col items-center relative text-gray-500 hover:text-[#8BB964] transition-colors group"
               aria-label="Carrinho de compras"
             >
-              <div className="relative">
-                <ShoppingCart size={22} strokeWidth={1.8} />
-                {cartCount > 0 && (
-                  <span className="absolute -top-2 -right-2 bg-[#8BB964] text-white text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center leading-none">
-                    {cartCount}
-                  </span>
-                )}
-              </div>
+              <ShoppingCart size={22} strokeWidth={1.8} />
               <span className="hidden sm:block text-[10px] font-medium mt-0.5 group-hover:text-[#8BB964]">
                 Carrinho
               </span>

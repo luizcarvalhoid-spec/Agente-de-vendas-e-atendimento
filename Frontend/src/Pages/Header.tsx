@@ -1,17 +1,21 @@
 import { Search, User, ShoppingCart } from 'lucide-react'
 import { useState } from 'react'
+import { Link } from 'react-router'
 
 export default function Header() {
-  const [cartCount] = useState(2)
   const [searchValue, setSearchValue] = useState('')
 
   return (
     <header className="bg-white shadow-sm sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16 gap-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 py-3 sm:h-16 sm:flex-nowrap sm:gap-4 sm:py-0">
           
           {/* Logo */}
-          <div className="flex-shrink-0 flex items-center">
+          <Link
+            to="/"
+            aria-label="Voltar à vitrine HidraSplash"
+            className="flex flex-shrink-0 items-center rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8BB964] focus-visible:ring-offset-2"
+          >
             <img
               src="/logo (10).svg"
               alt="HidraSplash Logo"
@@ -29,10 +33,10 @@ export default function Header() {
             >
               HidraSplash
             </span>
-          </div>
+          </Link>
 
           {/* Search Bar */}
-          <div className="flex-1 max-w-xl">
+          <div className="order-3 w-full min-w-0 sm:order-none sm:max-w-xl sm:flex-1">
             <div className="relative">
               <input
                 type="text"
@@ -64,22 +68,16 @@ export default function Header() {
             </button>
 
             {/* Cart */}
-            <button
+            <Link
+              to="/carrinho"
               className="flex flex-col items-center relative text-gray-500 hover:text-[#8BB964] transition-colors group"
               aria-label="Carrinho de compras"
             >
-              <div className="relative">
-                <ShoppingCart size={22} strokeWidth={1.8} />
-                {cartCount > 0 && (
-                  <span className="absolute -top-2 -right-2 bg-[#8BB964] text-white text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center leading-none">
-                    {cartCount}
-                  </span>
-                )}
-              </div>
+              <ShoppingCart size={22} strokeWidth={1.8} />
               <span className="hidden sm:block text-[10px] font-medium mt-0.5 group-hover:text-[#8BB964]">
                 Carrinho
               </span>
-            </button>
+            </Link>
           </div>
         </div>
       </div>

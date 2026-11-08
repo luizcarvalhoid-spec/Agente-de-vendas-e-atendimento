@@ -1,8 +1,10 @@
 import {
   isApiError,
   isHealthResponse,
+  isProductRouteResponse,
   type ApiErrorCode,
   type HealthResponse,
+  type ProductRouteResponse,
 } from './contracts'
 
 type ApiRequestErrorKind =
@@ -69,11 +71,11 @@ async function readJson(response: Response): Promise<unknown> {
   }
 }
 
-export async function getHealth(signal?: AbortSignal): Promise<HealthResponse> {
+async function requestJson(path: string, signal?: AbortSignal) {
   let response: Response
 
   try {
-    response = await fetch(`${getApiBaseUrl()}/api/health`, {
+    response = await fetch(`${getApiBaseUrl()}${path}`, {
       headers: { Accept: 'application/json' },
       signal,
     })
@@ -105,9 +107,29 @@ export async function getHealth(signal?: AbortSignal): Promise<HealthResponse> {
     })
   }
 
-  const body = await readJson(response)
+  return readJson(response)
+}
+
+export async function getHealth(signal?: AbortSignal): Promise<HealthResponse> {
+  const body = await requestJson('/api/health', signal)
 
   if (!isHealthResponse(body)) {
+    throw new ApiRequestError('invalid-response')
+  }
+
+  return body
+}
+
+export async function getProductBySlug(
+  slug: string,
+  signal?: AbortSignal,
+): Promise<ProductRouteResponse> {
+  const body = await requestJson(
+    `/api/products/${encodeURIComponent(slug)}`,
+    signal,
+  )
+
+  if (!isProductRouteResponse(body)) {
     throw new ApiRequestError('invalid-response')
   }
 

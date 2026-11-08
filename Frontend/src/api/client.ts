@@ -1,17 +1,17 @@
 import {
   isApiError,
   isHealthResponse,
+  isProductDetailResponse,
   isProductListResponse,
-  isProductRouteResponse,
   type ApiErrorCode,
   type HealthResponse,
   type ProductCategory,
+  type ProductDetailResponse,
   type ProductListResponse,
-  type ProductRouteResponse,
   type ProductSubcategory,
 } from './contracts'
 
-type ApiRequestErrorKind =
+export type ApiRequestErrorKind =
   | 'configuration'
   | 'network'
   | 'http'
@@ -186,17 +186,23 @@ export async function getHealth(signal?: AbortSignal): Promise<HealthResponse> {
 export async function getProductBySlug(
   slug: string,
   signal?: AbortSignal,
-): Promise<ProductRouteResponse> {
+): Promise<ProductDetailResponse> {
   const body = await requestJson(
     `/api/products/${encodeURIComponent(slug)}`,
     signal,
   )
 
-  if (!isProductRouteResponse(body)) {
+  if (!isProductDetailResponse(body)) {
     throw new ApiRequestError('invalid-response')
   }
 
-  return body
+  return {
+    ...body,
+    media: {
+      primaryUrl: resolveApiResourceUrl(body.media.primaryUrl),
+      galleryUrls: body.media.galleryUrls.map(resolveApiResourceUrl),
+    },
+  }
 }
 
 export async function getProducts(

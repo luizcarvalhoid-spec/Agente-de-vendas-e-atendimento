@@ -1,10 +1,14 @@
 import {
   isApiError,
   isHealthResponse,
+  isProductListResponse,
   isProductRouteResponse,
   type ApiErrorCode,
   type HealthResponse,
+  type ProductCategory,
+  type ProductListResponse,
   type ProductRouteResponse,
+  type ProductSubcategory,
 } from './contracts'
 
 type ApiRequestErrorKind =
@@ -110,6 +114,65 @@ async function requestJson(path: string, signal?: AbortSignal) {
   return readJson(response)
 }
 
+function resolveApiResourceUrl(path: string) {
+  const apiOrigin = getApiBaseUrl()
+
+  try {
+    const url = new URL(path, `${apiOrigin}/`)
+    const isCatalogImage = url.pathname.startsWith('/api/catalog/images/')
+
+    if (
+      url.origin !== apiOrigin ||
+      !isCatalogImage ||
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash
+    ) {
+      throw new ApiRequestError('invalid-response')
+    }
+
+    return url.toString()
+  } catch (error) {
+    if (error instanceof ApiRequestError) {
+      throw error
+    }
+
+    throw new ApiRequestError('invalid-response', { cause: error })
+  }
+}
+
+export interface ProductListQuery {
+  q?: string
+  category?: ProductCategory
+  subcategory?: ProductSubcategory
+  minPrice?: number
+  maxPrice?: number
+  page?: number
+  pageSize?: number
+}
+
+function createProductListPath(query: ProductListQuery) {
+  const params = new URLSearchParams()
+
+  if (query.q) params.set('q', query.q)
+  if (query.category) params.set('category', query.category)
+  if (query.subcategory) params.set('subcategory', query.subcategory)
+  if (query.minPrice !== undefined) {
+    params.set('minPrice', String(query.minPrice))
+  }
+  if (query.maxPrice !== undefined) {
+    params.set('maxPrice', String(query.maxPrice))
+  }
+  if (query.page !== undefined) params.set('page', String(query.page))
+  if (query.pageSize !== undefined) {
+    params.set('pageSize', String(query.pageSize))
+  }
+
+  const search = params.toString()
+  return search ? `/api/products?${search}` : '/api/products'
+}
+
 export async function getHealth(signal?: AbortSignal): Promise<HealthResponse> {
   const body = await requestJson('/api/health', signal)
 
@@ -134,4 +197,23 @@ export async function getProductBySlug(
   }
 
   return body
+}
+
+export async function getProducts(
+  query: ProductListQuery,
+  signal?: AbortSignal,
+): Promise<ProductListResponse> {
+  const body = await requestJson(createProductListPath(query), signal)
+
+  if (!isProductListResponse(body)) {
+    throw new ApiRequestError('invalid-response')
+  }
+
+  return {
+    ...body,
+    items: body.items.map((product) => ({
+      ...product,
+      imageUrl: resolveApiResourceUrl(product.imageUrl),
+    })),
+  }
 }

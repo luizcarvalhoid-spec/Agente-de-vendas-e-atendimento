@@ -1,9 +1,42 @@
 import { Search, User, ShoppingCart } from 'lucide-react'
-import { useState } from 'react'
-import { Link } from 'react-router'
+import { type FormEvent, useEffect, useState } from 'react'
+import {
+  Link,
+  useLocation,
+  useNavigate,
+  useSearchParams,
+} from 'react-router'
 
 export default function Header() {
-  const [searchValue, setSearchValue] = useState('')
+  const location = useLocation()
+  const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const queryFromUrl = searchParams.get('q') ?? ''
+  const [searchValue, setSearchValue] = useState(queryFromUrl)
+
+  useEffect(() => {
+    setSearchValue(queryFromUrl)
+  }, [queryFromUrl])
+
+  function handleSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const nextParams =
+      location.pathname === '/'
+        ? new URLSearchParams(searchParams)
+        : new URLSearchParams()
+    const normalizedSearch = searchValue.trim().slice(0, 100)
+
+    nextParams.delete('page')
+
+    if (normalizedSearch) {
+      nextParams.set('q', normalizedSearch)
+    } else {
+      nextParams.delete('q')
+    }
+
+    const search = nextParams.toString()
+    navigate(search ? `/?${search}` : '/')
+  }
 
   return (
     <header className="bg-white shadow-sm sticky top-0 z-50">
@@ -36,23 +69,33 @@ export default function Header() {
           </Link>
 
           {/* Search Bar */}
-          <div className="order-3 w-full min-w-0 sm:order-none sm:max-w-xl sm:flex-1">
+          <form
+            className="order-3 w-full min-w-0 sm:order-none sm:max-w-xl sm:flex-1"
+            role="search"
+            onSubmit={handleSearch}
+          >
             <div className="relative">
+              <label htmlFor="catalog-search" className="sr-only">
+                Pesquisar produtos
+              </label>
               <input
+                id="catalog-search"
                 type="text"
                 value={searchValue}
                 onChange={(e) => setSearchValue(e.target.value)}
                 placeholder="Pesquisar..."
+                maxLength={100}
                 className="w-full pl-4 pr-10 py-2 border border-gray-200 rounded-md text-sm text-gray-700 placeholder-gray-400 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-[#8BB964]/40 focus:border-[#8BB964] transition-all"
               />
               <button
+                type="submit"
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-[#8BB964] transition-colors"
                 aria-label="Buscar"
               >
                 <Search size={18} />
               </button>
             </div>
-          </div>
+          </form>
 
           {/* Icons */}
           <div className="flex items-center gap-3 sm:gap-5">

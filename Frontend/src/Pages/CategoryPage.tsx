@@ -1,189 +1,405 @@
-import Header from './Header'
-import ProductCard, { type Product } from './ProductCard'
-import ChatbotButton from './ChatbotButton'
-import AnnouncementBar from './AnnouncementBar'
+import { ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react'
+import { useEffect, useMemo } from 'react'
+import { useSearchParams } from 'react-router'
 
-// Product images from assets
-import antiCaspa from '../assets/Anti-caspa.jpg'
-import antiQueda from '../assets/Anti-queda.jpg'
-import antiResiduo from '../assets/Anti-residuo.jpg'
-import controleOleo from '../assets/Controle de oliosidade.jpg'
-import hidraLabels from '../assets/Change_name_to_HidraSplash_6b60b9a7_2K.jpg'
-import shampooLabels from '../assets/Shampoo_label_design_for_curly_cd85cb03_2K.jpg'
-import hidratante from '../assets/Change_product_label_name_and_64bdb95c_2K.jpg'
-import shampooDesign from '../assets/Create_oil_control_shampoo_label_692b4bfd_2K.jpg'
+import {
+  isProductCategory,
+  isSubcategoryForCategory,
+  subcategoriesByCategory,
+  type ProductCategory,
+  type ProductSubcategory,
+} from '../api/contracts'
 import fireIcon from '../assets/Icons/fire_1f525.gif'
+import { useCatalogProducts } from '../hooks/useCatalogProducts'
+import AnnouncementBar from './AnnouncementBar'
+import ChatbotButton from './ChatbotButton'
+import Header from './Header'
+import ProductCard from './ProductCard'
 
-const products: Product[] = [
-  {
-    id: 1,
-    name: 'Shampoo Anti-Caspa HidraSplash',
-    shortDescription:
-      'Fórmula avançada com zinco piritiona que combate a caspa e alivia o couro cabeludo sensível, deixando o cabelo limpo e sedoso.',
-    image: antiCaspa,
-    originalPrice: 59.9,
-    price: 44.9,
-    installments: 12,
-    installmentValue: 3.74,
-    discount: 25,
-    rating: 4,
-    reviews: 128,
-  },
-  {
-    id: 2,
-    name: 'Shampoo Anti-Queda Reconstrutor',
-    shortDescription:
-      'Enriquecido com biotina e queratina hidrolisada para fortalecer os fios desde a raiz e reduzir a queda capilar.',
-    image: antiQueda,
-    originalPrice: 69.9,
-    price: 52.9,
-    installments: 12,
-    installmentValue: 4.41,
-    discount: 24,
-    rating: 5,
-    reviews: 213,
-  },
-  {
-    id: 3,
-    name: 'Shampoo Anti-Resíduo Purificante',
-    shortDescription:
-      'Remove resíduos de produtos acumulados no couro cabeludo, devolvendo leveza e brilho natural aos cabelos.',
-    image: antiResiduo,
-    price: 39.9,
-    installments: 10,
-    installmentValue: 3.99,
-    rating: 4,
-    reviews: 87,
-  },
-  {
-    id: 4,
-    name: 'Shampoo Controle de Oleosidade',
-    shortDescription:
-      'Tecnologia balanceadora que regula a produção de sebo, mantendo o cabelo fresco e sem aspecto gorduroso por mais tempo.',
-    image: controleOleo,
-    originalPrice: 54.9,
-    price: 42.9,
-    installments: 12,
-    installmentValue: 3.57,
-    discount: 22,
-    rating: 4,
-    reviews: 95,
-  },
-  {
-    id: 5,
-    name: 'Shampoo Hidratação Profunda HidraSplash',
-    shortDescription:
-      'Com óleos de argan e abissínia que penetram nos fios para uma hidratação intensa e duradoura, perfeito para cabelos secos.',
-    image: hidraLabels,
-    originalPrice: 74.9,
-    price: 57.9,
-    installments: 12,
-    installmentValue: 4.82,
-    discount: 23,
-    rating: 5,
-    reviews: 304,
-  },
-  {
-    id: 6,
-    name: 'Shampoo Cachos Definidos',
-    shortDescription:
-      'Especialmente formulado para cabelos cacheados e crespos: define, hidrata e combate o frizz sem pesar nos fios.',
-    image: shampooLabels,
-    price: 48.9,
-    installments: 10,
-    installmentValue: 4.89,
-    rating: 4,
-    reviews: 176,
-  },
-  {
-    id: 7,
-    name: 'Shampoo Hidratante Nutritivo',
-    shortDescription:
-      'Enriquecido com manteiga de karité e proteínas do leite para nutrir profundamente cabelos ressecados e sem brilho.',
-    image: hidratante,
-    originalPrice: 62.9,
-    price: 46.9,
-    installments: 12,
-    installmentValue: 3.91,
-    discount: 25,
-    rating: 5,
-    reviews: 241,
-  },
-  {
-    id: 8,
-    name: 'Shampoo Reconstrutor Intensivo',
-    shortDescription:
-      'Tecnologia de reconstrução capilar com aminoácidos e colágeno que restaura o fio danificado de dentro para fora.',
-    image: shampooDesign,
-    originalPrice: 79.9,
-    price: 59.9,
-    installments: 12,
-    installmentValue: 4.99,
-    discount: 25,
-    rating: 4,
-    reviews: 189,
-  },
+const pageSize = 12
+
+const categoryOptions: ReadonlyArray<{
+  label: string
+  value?: ProductCategory
+}> = [
+  { label: 'Todos' },
+  { label: 'Shampoos', value: 'shampoos' },
+  { label: 'Sabonetes', value: 'sabonetes' },
+  { label: 'Óleos corporais', value: 'oleos-corporais' },
+  { label: 'Condicionadores', value: 'condicionadores' },
 ]
 
+const subcategoryLabels: Record<ProductSubcategory, string> = {
+  anticaspa: 'Anticaspa',
+  antiqueda: 'Antiqueda',
+  antirresiduos: 'Antirresíduos',
+  'controle-de-oleosidade': 'Controle de oleosidade',
+  hidratacao: 'Hidratação',
+  nutricao: 'Nutrição',
+  reconstrucao: 'Reconstrução',
+  cachos: 'Cachos',
+  'uso-diario': 'Uso diário',
+  'protecao-termica': 'Proteção térmica',
+  kit: 'Kit',
+  barra: 'Barra',
+  liquido: 'Líquido',
+  relaxamento: 'Relaxamento',
+  revitalizacao: 'Revitalização',
+}
+
+interface CatalogUrlState {
+  q?: string
+  category?: ProductCategory
+  subcategory?: ProductSubcategory
+  page: number
+}
+
+function readCatalogUrlState(searchParams: URLSearchParams): CatalogUrlState {
+  const rawQuery = searchParams.get('q')?.trim().slice(0, 100)
+  const rawCategory = searchParams.get('category')
+  const category = isProductCategory(rawCategory) ? rawCategory : undefined
+  const rawSubcategory = searchParams.get('subcategory')
+  const subcategory =
+    category && isSubcategoryForCategory(category, rawSubcategory)
+      ? rawSubcategory
+      : undefined
+  const rawPage = searchParams.get('page')
+  const parsedPage = rawPage && /^\d+$/.test(rawPage) ? Number(rawPage) : 1
+  const page = Number.isSafeInteger(parsedPage) && parsedPage > 0 ? parsedPage : 1
+
+  return {
+    q: rawQuery || undefined,
+    category,
+    subcategory,
+    page,
+  }
+}
+
+function toSearchParams(state: CatalogUrlState) {
+  const params = new URLSearchParams()
+
+  if (state.q) params.set('q', state.q)
+  if (state.category) params.set('category', state.category)
+  if (state.subcategory) params.set('subcategory', state.subcategory)
+  if (state.page > 1) params.set('page', String(state.page))
+
+  return params
+}
+
+function getVisiblePages(currentPage: number, totalPages: number) {
+  const firstPage = Math.max(1, Math.min(currentPage - 2, totalPages - 4))
+  const lastPage = Math.min(totalPages, firstPage + 4)
+
+  return Array.from(
+    { length: Math.max(0, lastPage - firstPage + 1) },
+    (_, index) => firstPage + index,
+  )
+}
+
 export default function CategoryPage() {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const urlState = useMemo(
+    () => readCatalogUrlState(searchParams),
+    [searchParams],
+  )
+  const canonicalParams = useMemo(() => toSearchParams(urlState), [urlState])
+  const isUrlCanonical = searchParams.toString() === canonicalParams.toString()
+  const { state, retry } = useCatalogProducts({
+    q: urlState.q,
+    category: urlState.category,
+    subcategory: urlState.subcategory,
+    page: urlState.page,
+    pageSize,
+  })
+
+  useEffect(() => {
+    if (!isUrlCanonical) {
+      setSearchParams(canonicalParams, { replace: true })
+    }
+  }, [canonicalParams, isUrlCanonical, setSearchParams])
+
+  useEffect(() => {
+    if (state.status !== 'success') return
+
+    const { totalPages } = state.data.pagination
+    const targetPage =
+      totalPages === 0 ? 1 : Math.min(urlState.page, totalPages)
+
+    if (targetPage !== urlState.page) {
+      setSearchParams(toSearchParams({ ...urlState, page: targetPage }), {
+        replace: true,
+      })
+    }
+  }, [setSearchParams, state, urlState])
+
+  const setUrlState = (nextState: CatalogUrlState) => {
+    setSearchParams(toSearchParams(nextState))
+  }
+
+  const selectCategory = (category?: ProductCategory) => {
+    setUrlState({
+      ...urlState,
+      category,
+      subcategory: undefined,
+      page: 1,
+    })
+  }
+
+  const selectAnticaspa = () => {
+    setUrlState({
+      ...urlState,
+      category: 'shampoos',
+      subcategory: 'anticaspa',
+      page: 1,
+    })
+  }
+
+  const selectSubcategory = (subcategory?: ProductSubcategory) => {
+    setUrlState({ ...urlState, subcategory, page: 1 })
+  }
+
+  const clearFilters = () => {
+    setUrlState({ page: 1 })
+  }
+
+  const pagination =
+    state.status === 'success' ? state.data.pagination : undefined
+  const isPageBeingCorrected =
+    pagination !== undefined &&
+    ((pagination.totalPages === 0 && urlState.page !== 1) ||
+      (pagination.totalPages > 0 && urlState.page > pagination.totalPages))
+  const visiblePages = pagination
+    ? getVisiblePages(pagination.page, pagination.totalPages)
+    : []
+  const availableSubcategories = urlState.category
+    ? subcategoriesByCategory[urlState.category]
+    : []
+
   return (
     <div className="min-h-screen bg-gray-50 font-poppins">
-      {/* Announcement Bar — hides on scroll down */}
       <AnnouncementBar />
-
-      {/* Top Header */}
       <Header />
 
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-
-        {/* Category Title */}
+      <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
         <div className="mb-8">
-          <div className="flex items-center gap-2 mb-1">
-            <img src={fireIcon} alt="Destaque" className="w-7 h-7 sm:w-8 sm:h-8 object-contain" />
-            <h1 className="text-2xl sm:text-3xl font-medium text-gray-900 tracking-tight">
+          <div className="mb-1 flex items-center gap-2">
+            <img
+              src={fireIcon}
+              alt=""
+              aria-hidden="true"
+              className="h-7 w-7 object-contain sm:h-8 sm:w-8"
+            />
+            <h1 className="text-2xl font-medium tracking-tight text-gray-900 sm:text-3xl">
               Produtos em destaque
             </h1>
           </div>
-          <p className="text-sm text-gray-500 ml-9 sm:ml-10">
-            {products.length} produtos encontrados
+          <p
+            className="ml-9 text-sm text-gray-500 sm:ml-10"
+            aria-live="polite"
+          >
+            {state.status === 'success' && !isPageBeingCorrected
+              ? `${pagination?.totalItems ?? 0} produtos encontrados`
+              : state.status === 'error'
+                ? 'Não foi possível consultar os produtos'
+                : 'Carregando produtos...'}
           </p>
         </div>
 
-        {/* Filter Bar */}
-        <div className="flex items-center gap-2 mb-6 overflow-x-auto pb-2 scrollbar-hide">
-          {['Todos', 'Anti-Caspa', 'Anti-Queda', 'Hidratação', 'Cachos', 'Oleosidade'].map(
-            (filter, idx) => (
-              <button
-                key={filter}
-                className={`flex-shrink-0 px-4 py-1.5 rounded-full text-sm font-medium transition-all border ${
-                  idx === 0
-                    ? 'bg-[#8BB964] text-white border-[#8BB964] shadow-sm'
-                    : 'bg-white text-gray-600 border-gray-200 hover:border-[#8BB964] hover:text-[#8BB964]'
-                }`}
+        <section aria-labelledby="catalog-filters" className="mb-6">
+          <h2 id="catalog-filters" className="sr-only">
+            Filtros do catálogo
+          </h2>
+          <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-hide">
+            {categoryOptions.map((option) => {
+              const isSelected =
+                urlState.category === option.value && !urlState.subcategory
+
+              return (
+                <button
+                  key={option.label}
+                  type="button"
+                  aria-pressed={isSelected}
+                  onClick={() => selectCategory(option.value)}
+                  className={`flex-shrink-0 rounded-full border px-4 py-1.5 text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8BB964] focus-visible:ring-offset-2 ${
+                    isSelected
+                      ? 'border-[#8BB964] bg-[#8BB964] text-white shadow-sm'
+                      : 'border-gray-200 bg-white text-gray-600 hover:border-[#8BB964] hover:text-[#8BB964]'
+                  }`}
+                >
+                  {option.label}
+                </button>
+              )
+            })}
+            <button
+              type="button"
+              aria-pressed={urlState.subcategory === 'anticaspa'}
+              onClick={selectAnticaspa}
+              className={`flex-shrink-0 rounded-full border px-4 py-1.5 text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8BB964] focus-visible:ring-offset-2 ${
+                urlState.subcategory === 'anticaspa'
+                  ? 'border-[#8BB964] bg-[#8BB964] text-white shadow-sm'
+                  : 'border-gray-200 bg-white text-gray-600 hover:border-[#8BB964] hover:text-[#8BB964]'
+              }`}
+            >
+              Anticaspa
+            </button>
+          </div>
+
+          {urlState.category && availableSubcategories.length > 0 && (
+            <div className="mt-3 flex items-center gap-2">
+              <label
+                htmlFor="subcategory-filter"
+                className="text-sm font-medium text-gray-600"
               >
-                {filter}
-              </button>
-            )
+                Subcategoria
+              </label>
+              <select
+                id="subcategory-filter"
+                value={urlState.subcategory ?? ''}
+                onChange={(event) =>
+                  selectSubcategory(
+                    (event.target.value || undefined) as
+                      | ProductSubcategory
+                      | undefined,
+                  )
+                }
+                className="max-w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-[#8BB964] focus:outline-none focus:ring-2 focus:ring-[#8BB964]/40"
+              >
+                <option value="">Todas</option>
+                {availableSubcategories.map((subcategory) => (
+                  <option key={subcategory} value={subcategory}>
+                    {subcategoryLabels[subcategory]}
+                  </option>
+                ))}
+              </select>
+            </div>
           )}
-        </div>
+        </section>
 
-        {/* Product Grid — 1 col → 2 → 4 */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5 sm:gap-6">
-          {products.map((product) => (
-            <ProductCard key={product.id} product={product} />
-          ))}
-        </div>
+        {(state.status === 'loading' || isPageBeingCorrected) && (
+          <div
+            className="grid grid-cols-1 gap-5 sm:grid-cols-2 sm:gap-6 xl:grid-cols-4"
+            aria-label="Carregando catálogo"
+            aria-busy="true"
+          >
+            {Array.from({ length: pageSize }).map((_, index) => (
+              <div
+                key={index}
+                className="h-[430px] animate-pulse rounded-2xl border border-gray-100 bg-white shadow-sm"
+              >
+                <div className="aspect-square bg-gray-200" />
+                <div className="space-y-3 p-4">
+                  <div className="h-4 w-4/5 rounded bg-gray-200" />
+                  <div className="h-3 w-full rounded bg-gray-100" />
+                  <div className="h-6 w-2/5 rounded bg-gray-200" />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
-        {/* Load More */}
-        <div className="flex justify-center mt-10">
-          <button className="px-8 py-3 border-2 border-[#8BB964] text-[#8BB964] rounded-full text-sm font-semibold hover:bg-[#8BB964] hover:text-white transition-all duration-200">
-            Ver mais produtos
-          </button>
-        </div>
+        {state.status === 'error' && (
+          <div className="rounded-2xl border border-gray-200 bg-white px-6 py-12 text-center shadow-sm">
+            <h2 className="text-lg font-semibold text-gray-800">
+              A vitrine está temporariamente indisponível
+            </h2>
+            <p className="mx-auto mt-2 max-w-md text-sm text-gray-500">
+              Não foi possível carregar o catálogo. Verifique a conexão e tente novamente.
+            </p>
+            <button
+              type="button"
+              onClick={retry}
+              className="mt-5 inline-flex items-center gap-2 rounded-full bg-[#8BB964] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#7aa854] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8BB964] focus-visible:ring-offset-2"
+            >
+              <RefreshCw size={16} aria-hidden="true" />
+              Tentar novamente
+            </button>
+          </div>
+        )}
+
+        {state.status === 'success' &&
+          !isPageBeingCorrected &&
+          state.data.items.length === 0 && (
+            <div className="rounded-2xl border border-gray-200 bg-white px-6 py-12 text-center shadow-sm">
+              <h2 className="text-lg font-semibold text-gray-800">
+                Nenhum produto encontrado
+              </h2>
+              <p className="mt-2 text-sm text-gray-500">
+                Ajuste a busca ou os filtros para consultar novamente.
+              </p>
+              <button
+                type="button"
+                onClick={clearFilters}
+                className="mt-5 rounded-full border-2 border-[#8BB964] px-5 py-2 text-sm font-semibold text-[#8BB964] transition-colors hover:bg-[#8BB964] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8BB964] focus-visible:ring-offset-2"
+              >
+                Limpar busca e filtros
+              </button>
+            </div>
+          )}
+
+        {state.status === 'success' &&
+          !isPageBeingCorrected &&
+          state.data.items.length > 0 && (
+            <>
+              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 sm:gap-6 xl:grid-cols-4">
+                {state.data.items.map((product) => (
+                  <ProductCard key={product.id} product={product} />
+                ))}
+              </div>
+
+              {pagination && pagination.totalPages > 1 && (
+                <nav
+                  aria-label="Paginação dos produtos"
+                  className="mt-10 flex flex-wrap items-center justify-center gap-2"
+                >
+                  <button
+                    type="button"
+                    aria-label="Página anterior"
+                    disabled={!pagination.hasPreviousPage}
+                    onClick={() =>
+                      setUrlState({ ...urlState, page: pagination.page - 1 })
+                    }
+                    className="inline-flex h-10 items-center gap-1 rounded-full border border-gray-200 bg-white px-3 text-sm font-medium text-gray-600 transition-colors hover:border-[#8BB964] hover:text-[#8BB964] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8BB964] disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <ChevronLeft size={16} aria-hidden="true" />
+                    <span className="hidden sm:inline">Anterior</span>
+                  </button>
+
+                  {visiblePages.map((page) => (
+                    <button
+                      key={page}
+                      type="button"
+                      aria-current={
+                        page === pagination.page ? 'page' : undefined
+                      }
+                      onClick={() => setUrlState({ ...urlState, page })}
+                      className={`h-10 min-w-10 rounded-full border px-3 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8BB964] ${
+                        page === pagination.page
+                          ? 'border-[#8BB964] bg-[#8BB964] text-white'
+                          : 'border-gray-200 bg-white text-gray-600 hover:border-[#8BB964] hover:text-[#8BB964]'
+                      }`}
+                    >
+                      {page}
+                    </button>
+                  ))}
+
+                  <button
+                    type="button"
+                    aria-label="Próxima página"
+                    disabled={!pagination.hasNextPage}
+                    onClick={() =>
+                      setUrlState({ ...urlState, page: pagination.page + 1 })
+                    }
+                    className="inline-flex h-10 items-center gap-1 rounded-full border border-gray-200 bg-white px-3 text-sm font-medium text-gray-600 transition-colors hover:border-[#8BB964] hover:text-[#8BB964] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8BB964] disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <span className="hidden sm:inline">Próxima</span>
+                    <ChevronRight size={16} aria-hidden="true" />
+                  </button>
+                </nav>
+              )}
+            </>
+          )}
       </main>
 
-      {/* Chatbot FAB */}
       <ChatbotButton />
     </div>
   )

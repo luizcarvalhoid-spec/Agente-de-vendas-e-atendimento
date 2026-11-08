@@ -95,13 +95,35 @@ O Corepack não conseguiu consultar o registry dentro do sandbox durante uma rep
 
 ## 3.4 — Polimento de UX e acessibilidade
 
-- [ ] Tornar busca e filtros utilizáveis pelo teclado e acessíveis por rótulos.
-- [ ] Verificar mobile, desktop, scroll, foco e contraste da interface já existente.
-- [ ] Substituir links/botões sem ação por ação real ou estado explicitamente desabilitado.
-- [ ] Exibir aviso discreto de loja fictícia/demonstração.
+- [x] Tornar busca e filtros utilizáveis pelo teclado e acessíveis por rótulos.
+- [x] Verificar mobile, desktop, scroll, foco e contraste da interface já existente.
+- [x] Substituir links/botões sem ação por ação real ou estado explicitamente desabilitado.
+- [x] Exibir aviso discreto de loja fictícia/demonstração.
 
 **Aceite:** fluxos de listar → filtrar → abrir produto funcionam com mouse e teclado, em viewport pequena e grande.  
 **Commit:** `fix(web): improve catalog UX and accessibility`.
+
+### Registro de execução — 08/11/2026
+
+- A vitrine preserva busca, categoria, subcategoria e página ao abrir um produto. Os links de retorno aceitam somente URLs canônicas internas da vitrine e usam `/` como fallback para acesso direto.
+- Mudanças de rota posicionam e focam o conteúdo principal; filtros e busca mantêm o foco no controle acionado. A paginação anuncia os resultados e move o foco de forma previsível, sem alterar o foco durante filtragens comuns.
+- Todas as rotas possuem um único link “Pular para o conteúdo”. Filtros, paginação, cards, breadcrumbs, CTAs e controles do cabeçalho receberam alvos de toque, foco visível e contraste compatível com WCAG AA.
+- O verde claro permaneceu decorativo e o verde `#527A36` passou a ser usado com texto branco, atingindo contraste de `5,00:1`. “Minha conta” está explicitamente indisponível, enquanto o carrinho continua apontando para seu placeholder.
+- A barra superior agora informa que a loja, as compras, os pagamentos e o atendimento são demonstrativos. O comportamento que escondia a barra foi removido para não deixar controles invisíveis focáveis.
+- O chat permanece uma simulação local. O diálogo não modal possui nome e descrição acessíveis, campo rotulado, foco inicial e restaurado, Escape, minimização, rótulo dinâmico, rolagem interna e cancelamento de respostas pendentes ao fechar ou trocar de rota. Alegações de atendimento humano e disponibilidade online foram removidas.
+- Animações, skeletons e transições respeitam `prefers-reduced-motion`. A concordância da contagem foi corrigida para “1 produto encontrado”.
+
+Validações executadas:
+
+- lint, 6/6 testes unitários e build de produção do frontend;
+- 127/127 testes e build do backend; no sandbox, os dois testes que criam links simbólicos receberam `EPERM` e passaram fora dele;
+- smoke HTTP da API e do frontend local, com CORS autorizado;
+- navegador: retorno exato de URL filtrada, fallback de acesso direto, back/forward, foco por rota, filtros e paginação, link de salto em vitrine, produto, carrinho, checkout demonstrativo e 404;
+- chat em `320×800`, `375×812` e desktop, incluindo abertura, minimização, expansão, Escape, restauração do foco, cancelamento de resposta e troca de rota;
+- inspeção visual de vitrine e produto em mobile e desktop, sem overflow horizontal. O reflow equivalente a zoom de 200% em uma janela de 1440 px foi validado em 720 px;
+- Chrome headless com movimento reduzido confirmou `matchMedia` ativo, animação do botão desativada e transições reduzidas.
+
+Nenhum arquivo do backend, catálogo, imagens ou lockfiles foi alterado. Carrinho, checkout, conta e agente real permanecem reservados às fases futuras.
 
 ## Se houver algo imprevisto
 

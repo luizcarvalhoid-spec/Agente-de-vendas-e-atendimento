@@ -11,9 +11,10 @@ export default {
       },
       colors: {
         brand: {
-          primary: '#8BB964',
-          hover: '#7aa854',
-          dark: '#689244',
+          primary: '#527A36',
+          hover: '#466B2D',
+          dark: '#3F6526',
+          accent: '#8BB964',
           light: '#f2f8ed',
         }
       }

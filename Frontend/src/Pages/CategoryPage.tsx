@@ -1,16 +1,20 @@
 import { ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react'
-import { useEffect, useMemo } from 'react'
-import { useSearchParams } from 'react-router'
+import { useEffect, useMemo, useRef } from 'react'
+import { useLocation, useSearchParams } from 'react-router'
 
 import {
-  isProductCategory,
-  isSubcategoryForCategory,
   subcategoriesByCategory,
   type ProductCategory,
   type ProductSubcategory,
 } from '../api/contracts'
 import fireIcon from '../assets/Icons/fire_1f525.gif'
 import { useCatalogProducts } from '../hooks/useCatalogProducts'
+import {
+  formatProductCount,
+  readCatalogUrlState,
+  toCatalogSearchParams,
+  type CatalogUrlState,
+} from '../utils/catalog-navigation'
 import AnnouncementBar from './AnnouncementBar'
 import ChatbotButton from './ChatbotButton'
 import Header from './Header'
@@ -47,45 +51,6 @@ const subcategoryLabels: Record<ProductSubcategory, string> = {
   revitalizacao: 'Revitalização',
 }
 
-interface CatalogUrlState {
-  q?: string
-  category?: ProductCategory
-  subcategory?: ProductSubcategory
-  page: number
-}
-
-function readCatalogUrlState(searchParams: URLSearchParams): CatalogUrlState {
-  const rawQuery = searchParams.get('q')?.trim().slice(0, 100)
-  const rawCategory = searchParams.get('category')
-  const category = isProductCategory(rawCategory) ? rawCategory : undefined
-  const rawSubcategory = searchParams.get('subcategory')
-  const subcategory =
-    category && isSubcategoryForCategory(category, rawSubcategory)
-      ? rawSubcategory
-      : undefined
-  const rawPage = searchParams.get('page')
-  const parsedPage = rawPage && /^\d+$/.test(rawPage) ? Number(rawPage) : 1
-  const page = Number.isSafeInteger(parsedPage) && parsedPage > 0 ? parsedPage : 1
-
-  return {
-    q: rawQuery || undefined,
-    category,
-    subcategory,
-    page,
-  }
-}
-
-function toSearchParams(state: CatalogUrlState) {
-  const params = new URLSearchParams()
-
-  if (state.q) params.set('q', state.q)
-  if (state.category) params.set('category', state.category)
-  if (state.subcategory) params.set('subcategory', state.subcategory)
-  if (state.page > 1) params.set('page', String(state.page))
-
-  return params
-}
-
 function getVisiblePages(currentPage: number, totalPages: number) {
   const firstPage = Math.max(1, Math.min(currentPage - 2, totalPages - 4))
   const lastPage = Math.min(totalPages, firstPage + 4)
@@ -97,12 +62,18 @@ function getVisiblePages(currentPage: number, totalPages: number) {
 }
 
 export default function CategoryPage() {
+  const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
+  const resultsSummaryRef = useRef<HTMLParagraphElement>(null)
+  const shouldFocusResultsAfterPageChange = useRef(false)
   const urlState = useMemo(
     () => readCatalogUrlState(searchParams),
     [searchParams],
   )
-  const canonicalParams = useMemo(() => toSearchParams(urlState), [urlState])
+  const canonicalParams = useMemo(
+    () => toCatalogSearchParams(urlState),
+    [urlState],
+  )
   const isUrlCanonical = searchParams.toString() === canonicalParams.toString()
   const { state, retry } = useCatalogProducts({
     q: urlState.q,
@@ -126,14 +97,14 @@ export default function CategoryPage() {
       totalPages === 0 ? 1 : Math.min(urlState.page, totalPages)
 
     if (targetPage !== urlState.page) {
-      setSearchParams(toSearchParams({ ...urlState, page: targetPage }), {
+      setSearchParams(toCatalogSearchParams({ ...urlState, page: targetPage }), {
         replace: true,
       })
     }
   }, [setSearchParams, state, urlState])
 
   const setUrlState = (nextState: CatalogUrlState) => {
-    setSearchParams(toSearchParams(nextState))
+    setSearchParams(toCatalogSearchParams(nextState))
   }
 
   const selectCategory = (category?: ProductCategory) => {
@@ -175,12 +146,39 @@ export default function CategoryPage() {
     ? subcategoriesByCategory[urlState.category]
     : []
 
+  useEffect(() => {
+    if (
+      !shouldFocusResultsAfterPageChange.current ||
+      state.status !== 'success' ||
+      isPageBeingCorrected
+    ) {
+      return
+    }
+
+    shouldFocusResultsAfterPageChange.current = false
+    const animationFrame = window.requestAnimationFrame(() => {
+      resultsSummaryRef.current?.scrollIntoView({ block: 'start' })
+      resultsSummaryRef.current?.focus({ preventScroll: true })
+    })
+
+    return () => window.cancelAnimationFrame(animationFrame)
+  }, [isPageBeingCorrected, state])
+
+  const changePage = (page: number) => {
+    shouldFocusResultsAfterPageChange.current = true
+    setUrlState({ ...urlState, page })
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 font-poppins">
       <AnnouncementBar />
       <Header />
 
-      <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+      <main
+        id="main-content"
+        tabIndex={-1}
+        className="mx-auto max-w-7xl px-4 py-8 focus:outline-none sm:px-6 lg:px-8"
+      >
         <div className="mb-8">
           <div className="mb-1 flex items-center gap-2">
             <img
@@ -194,11 +192,13 @@ export default function CategoryPage() {
             </h1>
           </div>
           <p
-            className="ml-9 text-sm text-gray-500 sm:ml-10"
-            aria-live="polite"
+            ref={resultsSummaryRef}
+            className="ml-9 scroll-mt-24 text-sm text-gray-600 focus:outline-none sm:ml-10"
+            role="status"
+            tabIndex={-1}
           >
             {state.status === 'success' && !isPageBeingCorrected
-              ? `${pagination?.totalItems ?? 0} produtos encontrados`
+              ? formatProductCount(pagination?.totalItems ?? 0)
               : state.status === 'error'
                 ? 'Não foi possível consultar os produtos'
                 : 'Carregando produtos...'}
@@ -209,7 +209,11 @@ export default function CategoryPage() {
           <h2 id="catalog-filters" className="sr-only">
             Filtros do catálogo
           </h2>
-          <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-hide">
+          <div
+            role="group"
+            aria-label="Filtrar por categoria"
+            className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-hide"
+          >
             {categoryOptions.map((option) => {
               const isSelected =
                 urlState.category === option.value && !urlState.subcategory
@@ -219,11 +223,12 @@ export default function CategoryPage() {
                   key={option.label}
                   type="button"
                   aria-pressed={isSelected}
+                  aria-controls="catalog-products"
                   onClick={() => selectCategory(option.value)}
-                  className={`flex-shrink-0 rounded-full border px-4 py-1.5 text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8BB964] focus-visible:ring-offset-2 ${
+                  className={`min-h-11 flex-shrink-0 rounded-full border px-4 py-1.5 text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#527A36] focus-visible:ring-offset-2 ${
                     isSelected
-                      ? 'border-[#8BB964] bg-[#8BB964] text-white shadow-sm'
-                      : 'border-gray-200 bg-white text-gray-600 hover:border-[#8BB964] hover:text-[#8BB964]'
+                      ? 'border-[#527A36] bg-[#527A36] text-white shadow-sm'
+                      : 'border-gray-300 bg-white text-gray-700 hover:border-[#527A36] hover:text-[#527A36]'
                   }`}
                 >
                   {option.label}
@@ -233,11 +238,12 @@ export default function CategoryPage() {
             <button
               type="button"
               aria-pressed={urlState.subcategory === 'anticaspa'}
+              aria-controls="catalog-products"
               onClick={selectAnticaspa}
-              className={`flex-shrink-0 rounded-full border px-4 py-1.5 text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8BB964] focus-visible:ring-offset-2 ${
+              className={`min-h-11 flex-shrink-0 rounded-full border px-4 py-1.5 text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#527A36] focus-visible:ring-offset-2 ${
                 urlState.subcategory === 'anticaspa'
-                  ? 'border-[#8BB964] bg-[#8BB964] text-white shadow-sm'
-                  : 'border-gray-200 bg-white text-gray-600 hover:border-[#8BB964] hover:text-[#8BB964]'
+                  ? 'border-[#527A36] bg-[#527A36] text-white shadow-sm'
+                  : 'border-gray-300 bg-white text-gray-700 hover:border-[#527A36] hover:text-[#527A36]'
               }`}
             >
               Anticaspa
@@ -254,6 +260,7 @@ export default function CategoryPage() {
               </label>
               <select
                 id="subcategory-filter"
+                aria-controls="catalog-products"
                 value={urlState.subcategory ?? ''}
                 onChange={(event) =>
                   selectSubcategory(
@@ -262,7 +269,7 @@ export default function CategoryPage() {
                       | undefined,
                   )
                 }
-                className="max-w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-[#8BB964] focus:outline-none focus:ring-2 focus:ring-[#8BB964]/40"
+                className="min-h-11 max-w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 focus:border-[#527A36] focus:outline-none focus:ring-2 focus:ring-[#527A36]/40"
               >
                 <option value="">Todas</option>
                 {availableSubcategories.map((subcategory) => (
@@ -277,6 +284,7 @@ export default function CategoryPage() {
 
         {(state.status === 'loading' || isPageBeingCorrected) && (
           <div
+            id="catalog-products"
             className="grid grid-cols-1 gap-5 sm:grid-cols-2 sm:gap-6 xl:grid-cols-4"
             aria-label="Carregando catálogo"
             aria-busy="true"
@@ -298,7 +306,10 @@ export default function CategoryPage() {
         )}
 
         {state.status === 'error' && (
-          <div className="rounded-2xl border border-gray-200 bg-white px-6 py-12 text-center shadow-sm">
+          <div
+            id="catalog-products"
+            className="rounded-2xl border border-gray-200 bg-white px-6 py-12 text-center shadow-sm"
+          >
             <h2 className="text-lg font-semibold text-gray-800">
               A vitrine está temporariamente indisponível
             </h2>
@@ -308,7 +319,7 @@ export default function CategoryPage() {
             <button
               type="button"
               onClick={retry}
-              className="mt-5 inline-flex items-center gap-2 rounded-full bg-[#8BB964] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#7aa854] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8BB964] focus-visible:ring-offset-2"
+              className="mt-5 inline-flex min-h-11 items-center gap-2 rounded-full bg-[#527A36] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#466B2D] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#527A36] focus-visible:ring-offset-2"
             >
               <RefreshCw size={16} aria-hidden="true" />
               Tentar novamente
@@ -319,7 +330,10 @@ export default function CategoryPage() {
         {state.status === 'success' &&
           !isPageBeingCorrected &&
           state.data.items.length === 0 && (
-            <div className="rounded-2xl border border-gray-200 bg-white px-6 py-12 text-center shadow-sm">
+            <div
+              id="catalog-products"
+              className="rounded-2xl border border-gray-200 bg-white px-6 py-12 text-center shadow-sm"
+            >
               <h2 className="text-lg font-semibold text-gray-800">
                 Nenhum produto encontrado
               </h2>
@@ -329,7 +343,7 @@ export default function CategoryPage() {
               <button
                 type="button"
                 onClick={clearFilters}
-                className="mt-5 rounded-full border-2 border-[#8BB964] px-5 py-2 text-sm font-semibold text-[#8BB964] transition-colors hover:bg-[#8BB964] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8BB964] focus-visible:ring-offset-2"
+                className="mt-5 min-h-11 rounded-full border-2 border-[#527A36] px-5 py-2 text-sm font-semibold text-[#527A36] transition-colors hover:bg-[#527A36] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#527A36] focus-visible:ring-offset-2"
               >
                 Limpar busca e filtros
               </button>
@@ -340,9 +354,16 @@ export default function CategoryPage() {
           !isPageBeingCorrected &&
           state.data.items.length > 0 && (
             <>
-              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 sm:gap-6 xl:grid-cols-4">
+              <div
+                id="catalog-products"
+                className="grid grid-cols-1 gap-5 sm:grid-cols-2 sm:gap-6 xl:grid-cols-4"
+              >
                 {state.data.items.map((product) => (
-                  <ProductCard key={product.id} product={product} />
+                  <ProductCard
+                    key={product.id}
+                    product={product}
+                    catalogReturnTo={`${location.pathname}${location.search}`}
+                  />
                 ))}
               </div>
 
@@ -355,10 +376,8 @@ export default function CategoryPage() {
                     type="button"
                     aria-label="Página anterior"
                     disabled={!pagination.hasPreviousPage}
-                    onClick={() =>
-                      setUrlState({ ...urlState, page: pagination.page - 1 })
-                    }
-                    className="inline-flex h-10 items-center gap-1 rounded-full border border-gray-200 bg-white px-3 text-sm font-medium text-gray-600 transition-colors hover:border-[#8BB964] hover:text-[#8BB964] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8BB964] disabled:cursor-not-allowed disabled:opacity-40"
+                    onClick={() => changePage(pagination.page - 1)}
+                    className="inline-flex h-11 items-center gap-1 rounded-full border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:border-[#527A36] hover:text-[#527A36] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#527A36] disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     <ChevronLeft size={16} aria-hidden="true" />
                     <span className="hidden sm:inline">Anterior</span>
@@ -371,11 +390,11 @@ export default function CategoryPage() {
                       aria-current={
                         page === pagination.page ? 'page' : undefined
                       }
-                      onClick={() => setUrlState({ ...urlState, page })}
-                      className={`h-10 min-w-10 rounded-full border px-3 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8BB964] ${
+                      onClick={() => changePage(page)}
+                      className={`h-11 min-w-11 rounded-full border px-3 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#527A36] ${
                         page === pagination.page
-                          ? 'border-[#8BB964] bg-[#8BB964] text-white'
-                          : 'border-gray-200 bg-white text-gray-600 hover:border-[#8BB964] hover:text-[#8BB964]'
+                          ? 'border-[#527A36] bg-[#527A36] text-white'
+                          : 'border-gray-300 bg-white text-gray-700 hover:border-[#527A36] hover:text-[#527A36]'
                       }`}
                     >
                       {page}
@@ -386,10 +405,8 @@ export default function CategoryPage() {
                     type="button"
                     aria-label="Próxima página"
                     disabled={!pagination.hasNextPage}
-                    onClick={() =>
-                      setUrlState({ ...urlState, page: pagination.page + 1 })
-                    }
-                    className="inline-flex h-10 items-center gap-1 rounded-full border border-gray-200 bg-white px-3 text-sm font-medium text-gray-600 transition-colors hover:border-[#8BB964] hover:text-[#8BB964] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8BB964] disabled:cursor-not-allowed disabled:opacity-40"
+                    onClick={() => changePage(pagination.page + 1)}
+                    className="inline-flex h-11 items-center gap-1 rounded-full border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:border-[#527A36] hover:text-[#527A36] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#527A36] disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     <span className="hidden sm:inline">Próxima</span>
                     <ChevronRight size={16} aria-hidden="true" />

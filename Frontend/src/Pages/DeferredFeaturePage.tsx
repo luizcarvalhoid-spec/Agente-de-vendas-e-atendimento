@@ -13,7 +13,7 @@ interface DeferredFeaturePageProps {
 }
 
 const linkClassName =
-  'inline-flex items-center justify-center rounded-full border-2 border-[#8BB964] px-5 py-2.5 text-sm font-semibold text-[#8BB964] transition-colors hover:bg-[#8BB964] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8BB964] focus-visible:ring-offset-2'
+  'inline-flex min-h-11 items-center justify-center rounded-full border-2 border-[#527A36] px-5 py-2.5 text-sm font-semibold text-[#527A36] transition-colors hover:bg-[#527A36] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#527A36] focus-visible:ring-offset-2'
 
 export default function DeferredFeaturePage({
   title,
@@ -29,7 +29,7 @@ export default function DeferredFeaturePage({
           size={42}
           strokeWidth={1.7}
         />
-        <p className="mb-2 text-sm font-semibold uppercase tracking-wide text-[#8BB964]">
+        <p className="mb-2 text-sm font-semibold uppercase tracking-wide text-[#527A36]">
           Funcionalidade futura
         </p>
         <h1 className="text-2xl font-semibold text-gray-900 sm:text-3xl">

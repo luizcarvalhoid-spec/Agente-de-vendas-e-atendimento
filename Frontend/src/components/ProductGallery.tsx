@@ -47,7 +47,7 @@ export default function ProductGallery({
           <div
             role="img"
             aria-label={`Imagem indisponível de ${productName}`}
-            className="flex h-full w-full flex-col items-center justify-center gap-3 bg-gray-100 text-gray-400"
+            className="flex h-full w-full flex-col items-center justify-center gap-3 bg-gray-100 text-gray-600"
           >
             <ImageOff aria-hidden="true" size={44} strokeWidth={1.5} />
             <span className="text-sm font-medium">Imagem indisponível</span>
@@ -81,14 +81,14 @@ export default function ProductGallery({
                     imageCount: images.length,
                   })
                 }
-                className={`aspect-square overflow-hidden rounded-xl border-2 bg-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8BB964] focus-visible:ring-offset-2 ${
+                className={`aspect-square overflow-hidden rounded-xl border-2 bg-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#527A36] focus-visible:ring-offset-2 ${
                   isSelected
-                    ? 'border-[#8BB964]'
-                    : 'border-transparent hover:border-[#8BB964]/50'
+                    ? 'border-[#527A36]'
+                    : 'border-transparent hover:border-[#527A36]/50'
                 }`}
               >
                 {hasFailed ? (
-                  <span className="flex h-full w-full items-center justify-center bg-gray-100 text-gray-400">
+                  <span className="flex h-full w-full items-center justify-center bg-gray-100 text-gray-600">
                     <ImageOff aria-hidden="true" size={20} />
                   </span>
                 ) : (

@@ -6,6 +6,7 @@ import type { CatalogProductSummary } from '../api/contracts'
 
 interface ProductCardProps {
   product: CatalogProductSummary
+  catalogReturnTo: string
 }
 
 const priceFormatter = new Intl.NumberFormat('pt-BR', {
@@ -13,7 +14,10 @@ const priceFormatter = new Intl.NumberFormat('pt-BR', {
   currency: 'BRL',
 })
 
-export default function ProductCard({ product }: ProductCardProps) {
+export default function ProductCard({
+  product,
+  catalogReturnTo,
+}: ProductCardProps) {
   const [imageUnavailable, setImageUnavailable] = useState(false)
   const discount = product.originalPrice
     ? Math.round((1 - product.price / product.originalPrice) * 100)
@@ -24,21 +28,22 @@ export default function ProductCard({ product }: ProductCardProps) {
   }, [product.imageUrl])
 
   return (
-    <article className="h-full overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm transition-all duration-300 hover:border-[#8BB964]/40 hover:shadow-lg">
+    <article className="h-full overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm transition-all duration-300 hover:border-[#527A36]/50 hover:shadow-lg">
       <Link
         to={`/produtos/${product.slug}`}
-        className="group flex h-full flex-col rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8BB964] focus-visible:ring-offset-2"
+        state={{ catalogReturnTo }}
+        className="group flex h-full flex-col rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#527A36] focus-visible:ring-offset-2"
         aria-label={`Ver produto ${product.name}`}
       >
         <div className="relative aspect-square overflow-hidden bg-gray-50">
           {discount !== undefined && discount > 0 && (
-            <span className="absolute left-3 top-3 z-10 rounded-full bg-[#8BB964] px-2 py-0.5 text-xs font-semibold text-white shadow">
+            <span className="absolute left-3 top-3 z-10 rounded-full bg-[#527A36] px-2 py-0.5 text-xs font-semibold text-white shadow">
               -{discount}%
             </span>
           )}
 
           {imageUnavailable ? (
-            <div className="flex h-full w-full flex-col items-center justify-center gap-2 bg-gray-100 text-gray-400">
+            <div className="flex h-full w-full flex-col items-center justify-center gap-2 bg-gray-100 text-gray-600">
               <ImageOff aria-hidden="true" size={30} strokeWidth={1.5} />
               <span className="text-xs font-medium">Imagem indisponível</span>
             </div>
@@ -52,7 +57,7 @@ export default function ProductCard({ product }: ProductCardProps) {
             />
           )}
 
-          <span className="absolute inset-x-0 bottom-0 flex translate-y-full items-center justify-center bg-[#8BB964] py-2.5 text-sm font-semibold text-white transition-transform duration-300 group-hover:translate-y-0 group-focus-visible:translate-y-0">
+          <span className="absolute inset-x-0 bottom-0 flex translate-y-full items-center justify-center bg-[#527A36] py-2.5 text-sm font-semibold text-white transition-transform duration-300 group-hover:translate-y-0 group-focus-visible:translate-y-0">
             Ver produto
           </span>
         </div>
@@ -75,13 +80,13 @@ export default function ProductCard({ product }: ProductCardProps) {
                   }
                 />
               ))}
-              <span className="ml-1 text-xs text-gray-400">
+              <span className="ml-1 text-xs text-gray-500">
                 ({product.reviews})
               </span>
             </div>
           )}
 
-          <h2 className="mb-1 min-h-10 text-sm font-semibold leading-snug text-gray-800 transition-colors line-clamp-2 group-hover:text-[#8BB964]">
+          <h2 className="mb-1 min-h-10 text-sm font-semibold leading-snug text-gray-800 transition-colors line-clamp-2 group-hover:text-[#527A36]">
             {product.name}
           </h2>
           <p className="mb-3 min-h-10 flex-1 text-xs leading-relaxed text-gray-500 line-clamp-2">
@@ -90,7 +95,7 @@ export default function ProductCard({ product }: ProductCardProps) {
 
           <div className="mt-auto">
             {product.originalPrice !== undefined && (
-              <p className="text-xs text-gray-400 line-through">
+              <p className="text-xs text-gray-500 line-through">
                 {priceFormatter.format(product.originalPrice)}
               </p>
             )}
@@ -99,7 +104,7 @@ export default function ProductCard({ product }: ProductCardProps) {
             </p>
             <p
               className={`mt-0.5 text-xs font-medium ${
-                product.stock > 0 ? 'text-[#6f994c]' : 'text-gray-500'
+                product.stock > 0 ? 'text-[#527A36]' : 'text-gray-500'
               }`}
             >
               {product.stock > 0 ? 'Em estoque' : 'Esgotado'}

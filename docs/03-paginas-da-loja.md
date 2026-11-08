@@ -64,14 +64,34 @@ O Corepack exigiu acesso de rede fora do sandbox. No sandbox, dois testes de lin
 
 ## 3.3 — Página de detalhe de produto
 
-- [ ] Criar layout `/produtos/:slug`: imagem, nome, preço, disponibilidade, descrição, benefícios, indicações, ingredientes, modo de uso e avisos.
-- [ ] Exibir avisos importantes sem esconder em abas; evitar claims clínicos exagerados.
-- [ ] Adicionar CTAs “Adicionar ao carrinho” e “Voltar à loja” (a ação real de carrinho entra na fase 06).
-- [ ] Implementar responsividade e textos alternativos para fotos.
-- [ ] Validar que os detalhes vêm da API; não duplicar descrições em JSX.
+- [x] Criar layout `/produtos/:slug`: imagem, nome, preço, disponibilidade, descrição, benefícios, indicações, ingredientes, modo de uso e avisos.
+- [x] Exibir avisos importantes sem esconder em abas; evitar claims clínicos exagerados.
+- [x] Adicionar CTAs “Adicionar ao carrinho” e “Voltar à loja” (a ação real de carrinho entra na fase 06).
+- [x] Implementar responsividade e textos alternativos para fotos.
+- [x] Validar que os detalhes vêm da API; não duplicar descrições em JSX.
 
 **Aceite:** todas as páginas dos produtos válidos abrem por slug e exibem campos corretos; produto inexistente apresenta estado 404.  
 **Commit:** `feat(web): add product detail pages`.
+
+### Registro de execução — 08/11/2026
+
+- A rota `/produtos/:slug` passou a validar e apresentar o contrato completo de `GET /api/products/:slug`, sem importar dados do backend ou duplicar conteúdo comercial no JSX.
+- O layout reutilizável reúne breadcrumb canônico, galeria, marca, preço, desconto derivado, estoque, conteúdo, variante, apresentação do sabonete, descrições, benefícios, indicações e compatibilidades específicas para produtos capilares e corporais.
+- Produtos individuais exibem sua própria formulação sintética. Kits mantêm cada componente, quantidade, conteúdo, ingredientes, uso e segurança em blocos independentes, sem sugerir uma fórmula agregada.
+- A classificação demonstrativa e a segurança não avaliada permanecem visíveis. Listas vazias de restrições ou contraindicações são descritas como ausência de informação registrada, não como comprovação de ausência de riscos.
+- O CTA de compra é explicitamente demonstrativo, não cria estado de carrinho e informa por região acessível que nenhum item foi adicionado. Produtos sem estoque mantêm o CTA desabilitado e identificado como esgotado.
+- O cliente diferencia 404, consulta inválida, configuração, rede, timeout, falha HTTP/servidor e resposta incompatível. Somente falhas recuperáveis oferecem retry; cancelamento e chave da requisição impedem conteúdo obsoleto após troca de slug.
+- A galeria utiliza somente `primaryUrl` e `galleryUrls` resolvidos na origem validada da API, reinicia seleção e falhas ao trocar de produto e possui fallback neutro para imagens indisponíveis.
+
+Validações executadas:
+
+- lint, 2/2 testes unitários da galeria e build de produção do frontend;
+- 127/127 testes e build do backend; os dois testes com links simbólicos exigiram execução fora do sandbox por limitação de permissões do Windows;
+- smoke HTTP dos 27 slugs e das 27 imagens, incluindo 18 produtos capilares, 9 corporais, 1 kit, 404 e consulta inválida;
+- navegador: produto capilar, sabonete, kit com dois componentes, CTA demonstrativo, breadcrumbs, 404, erro 400, resposta inválida, rede indisponível com retry, timeout, desktop e mobile sem overflow horizontal;
+- dados simulados verificaram galeria com uma e três imagens sem alterar o catálogo canônico.
+
+O Corepack não conseguiu consultar o registry dentro do sandbox durante uma repetição dos comandos; as dependências já instaladas permitiram executar as mesmas validações pelos scripts locais com `npm`. Backend, catálogo, imagens e dependências permaneceram inalterados.
 
 ## 3.4 — Polimento de UX e acessibilidade
 

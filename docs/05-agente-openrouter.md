@@ -83,6 +83,20 @@ manual após a revisão do PR.
 **Aceite:** em simulações, uma entrada genérica (“preciso de shampoo anticaspa”) leva a perguntas pertinentes; entrada completa permite recomendação direta.  
 **Commit:** `feat(agent): define consultative sales behavior`.
 
+### Registro técnico da 5.2
+
+A política provider-agnostic está documentada em
+[05.2 — Política consultiva do agente](./05.2-consultative-policy.md). A fonte
+determinística define hierarquia de confiança, entrevista adaptativa,
+fundamentação por catálogo/FAQ, fallback e limites clínicos sem codificar
+produtos ou preços na mensagem permanente.
+
+O golden set contém 15 cenários esperados e separa validação estática,
+simulação controlada futura e avaliação manual com modelo real. Os testes desta
+etapa não chamam OpenRouter e não alegam provar obediência de um LLM. A
+integração da política, ferramentas e resultados no ciclo de execução permanece
+na tarefa 5.3.
+
 ## 5.3 — Ferramentas e ciclo de execução
 
 - [ ] Implementar ferramentas `search_products`, `get_product_details`, `search_faq` com esquemas Zod claros.

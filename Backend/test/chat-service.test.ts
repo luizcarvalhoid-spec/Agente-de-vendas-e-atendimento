@@ -171,6 +171,39 @@ test('returns direct consultative text without product cards', async () => {
   assert.equal(response.message, 'Como posso ajudar?')
 })
 
+test('generic anticaspa need asks one controlled profile question without a card', async () => {
+  const service = await buildService(
+    createQueueModel([
+      assistant('Qual produto você quer?'),
+    ]),
+  )
+  const response = await execute(service, {
+    message: 'Preciso de shampoo anticaspa.',
+  })
+  assert.equal(response.type, 'text')
+  if (response.type !== 'text') return
+  assert.equal(response.reason, 'clarification')
+  assert.match(response.message, /seco, normal, oleoso ou sensível/i)
+  assert.equal('products' in response, false)
+})
+
+test('a product lookup followed by a model question stays a consultative question', async () => {
+  const service = await buildService(
+    createQueueModel([
+      assistant(null, [anticaspaSearch(100)]),
+      assistant('Você quer o primeiro produto do ranking?'),
+    ]),
+  )
+  const response = await execute(service, {
+    message: 'Preciso de shampoo anticaspa.',
+  })
+  assert.equal(response.type, 'text')
+  if (response.type !== 'text') return
+  assert.equal(response.reason, 'clarification')
+  assert.match(response.message, /couro cabeludo/i)
+  assert.equal('productIds' in response, false)
+})
+
 test('selects canonical product 13 inside R$ 50 without incompatible restriction', async () => {
   const service = await buildService(
     createQueueModel([
@@ -227,6 +260,9 @@ test('product details without recommendation intent never create a card', async 
   })
   assert.equal(response.type, 'text')
   assert.equal('productIds' in response, false)
+  assert.match(response.message, /Cocamidopropil betaína/)
+  assert.match(response.message, /formulação é sintética/i)
+  assert.match(response.message, /não comprova segurança clínica/i)
 })
 
 test('two detail calls without comparison intent never create a comparison', async () => {
@@ -312,6 +348,107 @@ test('a current lower budget replaces history and removes stale candidates', asy
   })
   assert.equal(response.type, 'text')
   assert.equal('productIds' in response, false)
+})
+
+test('multi-turn history preserves anticaspa, oily scalp and refreshing preference', async () => {
+  const service = await buildService(
+    createQueueModel([
+      assistant(null, [anticaspaSearch(50)]),
+      assistant('Escolhi uma opção.'),
+    ]),
+  )
+  const response = await execute(service, {
+    message: 'É oleoso e posso gastar até R$ 50.',
+    history: [
+      {
+        role: 'user',
+        content: 'Preciso de shampoo anticaspa e prefiro sensação refrescante.',
+      },
+      {
+        role: 'assistant',
+        content: 'Seu couro cabeludo tende ao seco, normal ou oleoso?',
+      },
+    ],
+  })
+  assert.equal(response.type, 'recommendation')
+  if (response.type !== 'recommendation') return
+  assert.deepEqual(response.productIds, [13])
+})
+
+test('changing category does not inherit incompatible scalp or sensory preferences', async () => {
+  const service = await buildService(
+    createQueueModel([
+      (input) => {
+        const current = input.messages.at(-1)
+        assert.equal(current?.role, 'user')
+        const content = current?.role === 'user' ? current.content : ''
+        assert.doesNotMatch(content, /scalpTypes/)
+        assert.doesNotMatch(content, /hairConcerns/)
+        assert.doesNotMatch(content, /refrescante/)
+        return assistant(null, [
+          toolCall('soap-search', 'search_products', {
+            query: 'sabonete corporal',
+            category: 'sabonetes',
+            maxPrice: 50,
+            requireInStock: true,
+            limit: 5,
+          }),
+        ])
+      },
+      assistant('Escolhi um sabonete.'),
+    ]),
+  )
+  const response = await execute(service, {
+    message: 'Agora quero um sabonete corporal.',
+    history: [
+      {
+        role: 'user',
+        content:
+          'Quero shampoo anticaspa para couro oleoso, refrescante, até R$ 50.',
+      },
+      { role: 'assistant', content: 'Entendi.' },
+    ],
+  })
+  assert.equal(response.type, 'recommendation')
+  if (response.type !== 'recommendation') return
+  assert.equal(response.products[0].category, 'sabonetes')
+})
+
+test('adverse physical reaction returns a controlled clinical boundary without tools', async () => {
+  let called = false
+  const service = await buildService({
+    async complete() {
+      called = true
+      return assistant('Compre outro shampoo.')
+    },
+  })
+  const response = await execute(service, {
+    message:
+      'Usei um shampoo, tive uma reação física e meu couro ficou inchado e ardendo. O que compro agora?',
+  })
+  assert.equal(response.type, 'text')
+  assert.match(response.message, /profissional de saúde externo/i)
+  assert.match(response.message, /não posso diagnosticar/i)
+  assert.equal('productIds' in response, false)
+  assert.equal(called, false)
+})
+
+test('requests for cure or clinical safety guarantees never produce unsupported claims', async () => {
+  let called = false
+  const service = await buildService({
+    async complete() {
+      called = true
+      return assistant('Garantia inventada.')
+    },
+  })
+  const response = await execute(service, {
+    message: 'Qual shampoo garante a cura da caspa e segurança dermatológica?',
+  })
+  assert.equal(response.type, 'text')
+  assert.match(response.message, /não posso garantir cura/i)
+  assert.match(response.message, /sem avaliação clínica/i)
+  assert.equal('products' in response, false)
+  assert.equal(called, false)
 })
 
 test('conflicting current structured and textual budgets require clarification', async () => {
@@ -433,6 +570,64 @@ test('both becomes unavailable when one required domain fails operationally', as
   )
 })
 
+test('both reports product not_found while preserving a found FAQ policy', async () => {
+  const service = await buildService(
+    createQueueModel([
+      assistant(null, [
+        toolCall('products', 'search_products', {
+          query: 'anticaspa',
+          category: 'shampoos',
+          subcategory: 'anticaspa',
+          maxPrice: 1,
+          requireInStock: true,
+          limit: 5,
+        }),
+        toolCall('faq', 'search_faq', {
+          query: 'qual é o prazo de entrega?',
+        }),
+      ]),
+      assistant('Resposta mista.'),
+    ]),
+  )
+  const response = await execute(service, {
+    message:
+      'Quero shampoo anticaspa até R$ 1 e também saber qual é o prazo de entrega.',
+  })
+  assert.equal(response.type, 'text')
+  assert.match(response.message, /não encontrei um produto/i)
+  assert.match(response.message, /política consultada está documentada/i)
+  assert.ok(response.sourceIds.length > 0)
+})
+
+test('both reports product and FAQ not_found without positive sources', async () => {
+  const service = await buildService(
+    createQueueModel([
+      assistant(null, [
+        toolCall('products', 'search_products', {
+          query: 'anticaspa',
+          category: 'shampoos',
+          subcategory: 'anticaspa',
+          maxPrice: 1,
+          requireInStock: true,
+          limit: 5,
+        }),
+        toolCall('faq', 'search_faq', {
+          query: 'vocês entregam para Portugal?',
+        }),
+      ]),
+      assistant('Resposta sem fontes.'),
+    ]),
+  )
+  const response = await execute(service, {
+    message:
+      'Quero shampoo anticaspa até R$ 1 e vocês entregam para Portugal?',
+  })
+  assert.equal(response.type, 'text')
+  assert.match(response.message, /não encontrei um produto/i)
+  assert.match(response.message, /nem uma política documentada/i)
+  assert.deepEqual(response.sourceIds, [])
+})
+
 test('FAQ found returns canonical content and source IDs', async () => {
   const service = await buildService(
     createQueueModel([
@@ -467,6 +662,46 @@ test('FAQ not_found returns an honest controlled absence', async () => {
   assert.equal(response.type, 'text')
   if (response.type === 'text') assert.equal(response.reason, 'not_found')
   assert.equal(response.message.includes('Entregamos'), false)
+})
+
+test('public FAQ sources are canonical, stable, deduplicated and limited to five', async () => {
+  const base = await canonical()
+  const selected = base.faqDocuments.slice(0, 8)
+  const faqIndex: FaqSearchIndex = {
+    size: 25,
+    searchFaq(query) {
+      const documents = query.includes('primeira')
+        ? selected.slice(0, 3)
+        : query.includes('segunda')
+          ? selected.slice(2, 5)
+          : selected.slice(5, 8)
+      return documents.map((document, index) => ({
+        ...document,
+        score: 10 - index,
+      }))
+    },
+  }
+  const service = await buildService(
+    createQueueModel([
+      assistant(null, [
+        toolCall('faq-a', 'search_faq', { query: 'primeira política' }),
+        toolCall('faq-b', 'search_faq', { query: 'segunda política' }),
+        toolCall('faq-c', 'search_faq', { query: 'terceira política' }),
+      ]),
+      assistant('Resumo das políticas.'),
+    ]),
+    { faqIndex },
+  )
+  const response = await execute(service, {
+    message: 'Quais são as políticas de entrega e pagamento?',
+  })
+  assert.equal(response.type, 'text')
+  assert.equal(response.sourceIds.length, 5)
+  assert.equal(new Set(response.sourceIds).size, 5)
+  assert.deepEqual(
+    response.sourceIds,
+    selected.slice(0, 5).map((document) => document.sourceId),
+  )
 })
 
 test('free model IDs cannot become authorized recommendations', async () => {

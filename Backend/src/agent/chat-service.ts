@@ -8,6 +8,7 @@ import type {
   ScalpType,
 } from '../catalog/product-schema.js'
 import {
+  CHAT_MAX_SOURCES,
   chatProductCardSchema,
   chatRequestSchema,
   chatResponseSchema,
@@ -127,6 +128,24 @@ function latestHistoricalBudget(request: ChatRequest) {
   return undefined
 }
 
+function historicalUserMessages(request: ChatRequest) {
+  return request.history
+    .filter((message) => message.role === 'user')
+    .map((message) => message.content)
+}
+
+function latestHistoricalValue<T>(
+  request: ChatRequest,
+  infer: (message: string) => T | undefined,
+) {
+  const messages = historicalUserMessages(request)
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const value = infer(messages[index] ?? '')
+    if (value !== undefined) return value
+  }
+  return undefined
+}
+
 function inferCategory(message: string): ProductCategory | undefined {
   const normalized = normalize(message)
   if (/\b(?:shampoo|anticaspa)\b/.test(normalized)) return 'shampoos'
@@ -158,6 +177,17 @@ function inferScalpTypes(message: string): readonly ScalpType[] | undefined {
   return types.length > 0 ? types : undefined
 }
 
+function inferEllipticalScalpTypes(
+  message: string,
+  hasSafeScalpContext: boolean,
+): readonly ScalpType[] | undefined {
+  if (!hasSafeScalpContext) return undefined
+  const match = normalize(message).match(
+    /^(?:e|eh|meu couro e|meu couro eh)\s+(oleoso|seco|normal|sensivel)\b/,
+  )
+  return match?.[1] ? [match[1] as ScalpType] : undefined
+}
+
 function inferHairConcerns(message: string): readonly ProductConcern[] | undefined {
   const normalized = normalize(message)
   const concerns: ProductConcern[] = []
@@ -166,6 +196,30 @@ function inferHairConcerns(message: string): readonly ProductConcern[] | undefin
   if (/\b(?:ressecamento|ressecado)\b/.test(normalized)) concerns.push('ressecamento')
   if (/\b(?:sensibilidade|sensivel)\b/.test(normalized)) concerns.push('sensibilidade')
   return concerns.length > 0 ? concerns : undefined
+}
+
+const sensoryTerms = [
+  'frescor',
+  'refrescante',
+  'citrico',
+  'herbal',
+  'suave',
+  'intenso',
+  'coco',
+  'camomila',
+  'aloe',
+  'hortela',
+  'limao',
+  'hidratante',
+  'confortavel',
+] as const
+
+function inferSensoryTerms(message: string): readonly string[] | undefined {
+  const normalized = normalize(message)
+  const found = sensoryTerms.filter((term) =>
+    new RegExp(`\\b${term}\\b`).test(normalized),
+  )
+  return found.length > 0 ? found : undefined
 }
 
 function extractAvoidedIngredientTerms(message: string) {
@@ -200,13 +254,61 @@ function resolveCommercialContext(
   const ingredientResolution = productIndex.resolveIngredientTerms(
     [...new Set(ingredientTerms)],
   )
-  const category = preferences.category ?? inferCategory(request.message)
-  const subcategory =
+  const historicalCategory = latestHistoricalValue(request, inferCategory)
+  const historicalSubcategory = latestHistoricalValue(
+    request,
+    inferSubcategory,
+  )
+  const currentCategory = preferences.category ?? inferCategory(request.message)
+  const currentSubcategory =
     preferences.subcategory ?? inferSubcategory(request.message)
+  const categoryChanged =
+    currentCategory !== undefined &&
+    historicalCategory !== undefined &&
+    currentCategory !== historicalCategory
+  const objectiveChanged =
+    currentSubcategory !== undefined &&
+    historicalSubcategory !== undefined &&
+    currentSubcategory !== historicalSubcategory
+  const productGoalChanged = categoryChanged || objectiveChanged
+  const category = currentCategory ?? historicalCategory
+  const subcategory =
+    currentSubcategory ?? (categoryChanged ? undefined : historicalSubcategory)
+
+  const historyHasSafeScalpContext =
+    historicalSubcategory === 'anticaspa' ||
+    historicalUserMessages(request).some((message) =>
+      /\bcouro(?: cabeludo)?\b/.test(normalize(message)),
+    )
+  const currentScalpTypes =
+    inferScalpTypes(request.message) ??
+    inferEllipticalScalpTypes(request.message, historyHasSafeScalpContext)
+  const historicalScalpTypes = latestHistoricalValue(
+    request,
+    inferScalpTypes,
+  )
   const scalpTypes =
-    preferences.scalpTypes ?? inferScalpTypes(request.message)
+    preferences.scalpTypes ??
+    currentScalpTypes ??
+    (productGoalChanged ? undefined : historicalScalpTypes)
+  const currentHairConcerns = inferHairConcerns(request.message)
+  const historicalHairConcerns = latestHistoricalValue(
+    request,
+    inferHairConcerns,
+  )
   const hairConcerns =
-    preferences.hairConcerns ?? inferHairConcerns(request.message)
+    preferences.hairConcerns ??
+    currentHairConcerns ??
+    (productGoalChanged ? undefined : historicalHairConcerns)
+  const currentSensoryTerms = inferSensoryTerms(request.message)
+  const historicalSensoryTerms = latestHistoricalValue(
+    request,
+    inferSensoryTerms,
+  )
+  const effectiveSensoryTerms =
+    currentSensoryTerms ??
+    (productGoalChanged ? undefined : historicalSensoryTerms) ??
+    []
 
   const constraints: ProductEligibilityConstraints = {
     ...(category !== undefined ? { category } : {}),
@@ -219,7 +321,7 @@ function resolveCommercialContext(
   }
 
   const searchInput: SearchProductsInput = {
-    query: request.message,
+    query: [request.message, ...effectiveSensoryTerms].join(' '),
     ...(category !== undefined ? { category } : {}),
     ...(subcategory !== undefined ? { subcategory } : {}),
     ...(maxPrice !== undefined ? { maxPrice } : {}),
@@ -261,7 +363,6 @@ function hasSelectionDiscriminator(context: EffectiveCommercialContext) {
     input.maxPrice !== undefined ||
     input.hairTypes !== undefined ||
     input.scalpTypes !== undefined ||
-    input.hairConcerns !== undefined ||
     input.skinTypes !== undefined ||
     input.bodyConcerns !== undefined ||
     input.incompatibleIngredientIds !== undefined ||
@@ -269,6 +370,49 @@ function hasSelectionDiscriminator(context: EffectiveCommercialContext) {
       normalized,
     )
   )
+}
+
+function consultativeQuestion(
+  plan: ChatGroundingPlan,
+  context: EffectiveCommercialContext,
+) {
+  if (
+    plan.presentationIntent !== 'recommendation' ||
+    context.needsClarification ||
+    hasSelectionDiscriminator(context)
+  ) {
+    return undefined
+  }
+  if (
+    context.searchInput.subcategory === 'anticaspa' ||
+    context.searchInput.hairConcerns?.includes('caspa')
+  ) {
+    return 'Seu couro cabeludo tende a ser seco, normal, oleoso ou sensível?'
+  }
+  return 'Qual preferência é mais importante para você nessa escolha: perfil de uso, sensação ou orçamento?'
+}
+
+function preserveHistoricalRecommendationIntent(
+  request: ChatRequest,
+  currentPlan: ChatGroundingPlan,
+): ChatGroundingPlan {
+  if (
+    currentPlan.groundingRequirement !== 'product' ||
+    currentPlan.presentationIntent !== 'text'
+  ) {
+    return currentPlan
+  }
+  const previousUsers = request.history.filter(
+    (message) => message.role === 'user',
+  )
+  const previousUser = previousUsers.at(-1)
+  if (!previousUser) return currentPlan
+  const previousPlan = planChatGrounding(
+    chatRequestSchema.parse({ message: previousUser.content }),
+  )
+  return previousPlan.presentationIntent === 'recommendation'
+    ? { ...currentPlan, presentationIntent: 'recommendation' }
+    : currentPlan
 }
 
 function explicitComparisonIds(message: string, catalog: CatalogRepository) {
@@ -306,11 +450,127 @@ function createConversation(
   ]
 }
 
+function clinicalSafetyResponse(
+  request: ChatRequest,
+  requestId: string,
+): ChatResponse | undefined {
+  const normalized = normalize(request.message)
+  const adverseReaction =
+    /\b(?:reac(?:ao|oes)|dores?|doendo|ardor|ardendo|inch(?:aco|acos|ado|ada|ados|adas)|feridas?|sangramento|sangrando|secrec(?:ao|oes)|sintomas? intensos?|piorando|piora)\b/.test(
+      normalized,
+    )
+  const productContext = normalize(
+    [...historicalUserMessages(request), request.message].join(' '),
+  )
+  const unsupportedGuarantee =
+    /\b(?:shampoo|cosmetico|produto|pele|couro|cabelo|caspa|alergia|dermatolog)/.test(
+      productContext,
+    ) &&
+    /\b(?:garant(?:e|ia|ido|ida)|curar|cura|segur(?:o|a|os|as)|seguranca dermatologica|hipoalergen(?:ico|ica)|sem alergia|nao causa alergia|eficacia terapeutica)\b/.test(
+      normalized,
+    )
+
+  if (adverseReaction) {
+    return chatResponseSchema.parse({
+      type: 'text',
+      message:
+        'Não posso diagnosticar essa reação nem indicar outro cosmético como solução. Diante de dor, inchaço, ardor, feridas, sangramento, secreção ou sintomas intensos, persistentes ou em piora, procure um profissional de saúde externo.',
+      reason: 'unable_to_verify',
+      sourceIds: [],
+      requestId,
+    })
+  }
+  if (unsupportedGuarantee) {
+    return chatResponseSchema.parse({
+      type: 'text',
+      message:
+        'Não posso garantir cura, eficácia terapêutica, segurança dermatológica ou ausência de alergias. Os produtos e ingredientes desta demonstração têm posicionamento cosmético e formulação sintética de teste, sem avaliação clínica.',
+      reason: 'unable_to_verify',
+      sourceIds: [],
+      requestId,
+    })
+  }
+  return undefined
+}
+
+function controlledConsultativeQuestion(
+  message: string,
+  requestId: string,
+): ChatResponse {
+  return chatResponseSchema.parse({
+    type: 'text',
+    message,
+    reason: 'clarification',
+    sourceIds: [],
+    requestId,
+  })
+}
+
+function explicitInformationalProductId(message: string) {
+  const match = normalize(message).match(
+    /\bproduto\s+(?:id\s*)?(\d{1,6})\b/,
+  )
+  return match?.[1] ? Number(match[1]) : undefined
+}
+
+function controlledProductInformation(
+  request: ChatRequest,
+  result: ToolOrchestratorResult,
+  catalog: CatalogRepository,
+  sourceIds: readonly string[],
+  requestId: string,
+): ChatResponse | undefined {
+  const normalized = normalize(request.message)
+  const productId = explicitInformationalProductId(request.message)
+  if (
+    productId === undefined ||
+    !result.consultedProductIds.includes(productId)
+  ) {
+    return undefined
+  }
+  const product = catalog.findById(productId)
+  if (!product) return undefined
+
+  if (/\b(?:ingredientes?|formula|formulacao|composicao|contem|leva)\b/.test(normalized)) {
+    const ingredients = product.ingredients?.map((ingredient) => ingredient.name)
+    const description =
+      ingredients && ingredients.length > 0
+        ? `Os ingredientes demonstrativos registrados são: ${ingredients.join(', ')}.`
+        : 'Não há uma formulação individual publicada para este item demonstrativo.'
+    return chatResponseSchema.parse({
+      type: 'text',
+      message: `${product.name}: ${description} A formulação é sintética e não comprova segurança clínica, ausência de alergias ou adequação dermatológica.`,
+      sourceIds,
+      requestId,
+    })
+  }
+  if (/\b(?:preco|custa|valor|estoque|disponivel|disponibilidade)\b/.test(normalized)) {
+    return chatResponseSchema.parse({
+      type: 'text',
+      message: `${product.name}: preço demonstrativo canônico de R$ ${product.price.toFixed(2).replace('.', ',')} e estoque atual de ${product.stock} unidade(s).`,
+      sourceIds,
+      requestId,
+    })
+  }
+  return undefined
+}
+
 function resolveFaqSourceIds(
   result: ToolOrchestratorResult,
   faqDocuments: ReadonlyMap<string, FaqDocument>,
 ) {
-  return result.faqSourceIds.filter((sourceId) => faqDocuments.has(sourceId))
+  const resolved: string[] = []
+  for (const sourceId of result.faqSourceIds) {
+    if (
+      resolved.length >= CHAT_MAX_SOURCES ||
+      resolved.includes(sourceId) ||
+      !faqDocuments.has(sourceId)
+    ) {
+      continue
+    }
+    resolved.push(sourceId)
+  }
+  return resolved
 }
 
 function mixedPolicySuffix(
@@ -405,6 +665,34 @@ function controlledTextResponse(
       requestId,
     })
   }
+  if (
+    plan.groundingRequirement === 'both' &&
+    result.grounding.product === 'not_found' &&
+    result.grounding.faq === 'found'
+  ) {
+    const source = faqDocuments.get(sourceIds[0] ?? '')
+    return chatResponseSchema.parse({
+      type: 'text',
+      message: `Não encontrei um produto demonstrativo elegível para a solicitação. A política consultada está documentada: ${source?.content ?? 'fonte canônica indisponível para exibição.'}`,
+      reason: 'not_found',
+      sourceIds,
+      requestId,
+    })
+  }
+  if (
+    plan.groundingRequirement === 'both' &&
+    result.grounding.product === 'not_found' &&
+    result.grounding.faq === 'not_found'
+  ) {
+    return chatResponseSchema.parse({
+      type: 'text',
+      message:
+        'Não encontrei um produto demonstrativo elegível nem uma política documentada para esta solicitação.',
+      reason: 'not_found',
+      sourceIds: [],
+      requestId,
+    })
+  }
   if (result.grounding.status === 'not_found') {
     return chatResponseSchema.parse({
       type: 'text',
@@ -474,8 +762,18 @@ export function createChatService(
         }
       }
 
-      const plan = planChatGrounding(request)
+      const clinicalResponse = clinicalSafetyResponse(
+        request,
+        execution.requestId,
+      )
+      if (clinicalResponse) return clinicalResponse
+
+      const plan = preserveHistoricalRecommendationIntent(
+        request,
+        planChatGrounding(request),
+      )
       const commercial = resolveCommercialContext(request, options.productIndex)
+      const consultationQuestion = consultativeQuestion(plan, commercial)
       const policy = createProductEligibilityPolicy(
         options.productIndex,
         commercial.constraints,
@@ -496,7 +794,36 @@ export function createChatService(
         signal: execution.signal,
       })
 
-      if (result.status !== 'completed') handleNonCompleted(result)
+      if (result.status !== 'completed') {
+        if (
+          consultationQuestion &&
+          result.termination === 'INSUFFICIENT_GROUNDING'
+        ) {
+          return controlledConsultativeQuestion(
+            consultationQuestion,
+            execution.requestId,
+          )
+        }
+        handleNonCompleted(result)
+      }
+
+      const sourceIds = resolveFaqSourceIds(result, faqDocuments)
+      if (consultationQuestion) {
+        return controlledConsultativeQuestion(
+          consultationQuestion,
+          execution.requestId,
+        )
+      }
+      if (plan.presentationIntent === 'text') {
+        const productInformation = controlledProductInformation(
+          request,
+          result,
+          options.catalog,
+          sourceIds,
+          execution.requestId,
+        )
+        if (productInformation) return productInformation
+      }
 
       const authorizedIds = new Set(result.recommendationProductIds)
       const selectionContext = createAgentToolExecutionContext(execution.signal)
@@ -546,7 +873,6 @@ export function createChatService(
         const card = toProductCard(product, options.catalog)
         return card ? [card] : []
       })
-      const sourceIds = resolveFaqSourceIds(result, faqDocuments)
       const policySuffix = mixedPolicySuffix(
         plan,
         result,

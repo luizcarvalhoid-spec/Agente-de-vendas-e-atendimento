@@ -14,6 +14,63 @@
 **Aceite:** API real retorna resposta pelo servidor, e nenhum segredo fica em artefato do Vite ou controle de versão.  
 **Commit:** `feat(agent): integrate OpenRouter client`.
 
+### Registro técnico da 5.1
+
+O cliente usa `fetch` nativo do Node.js 22, endpoint fixo
+`https://openrouter.ai/api/v1/chat/completions`, transporte injetável e
+validação Zod. A chave e o modelo são recebidos da configuração central na
+criação da instância; o cliente não acessa `process.env`, não registra payloads
+e não realiza retries automáticos. A tarefa 5.1 não registra o cliente no
+servidor nem expõe rota HTTP.
+
+Limites iniciais da aplicação:
+
+- timeout padrão de 15 segundos e máximo configurável de 60 segundos;
+- 512 tokens de saída por padrão e teto de 4.096;
+- até 40 mensagens, 16 ferramentas e 100.000 bytes no payload serializado;
+- até 20.000 caracteres por string de argumentos retornada;
+- resposta HTTP de sucesso limitada a 250.000 bytes antes da validação.
+
+Esses limites controlam memória, latência e custo, mas não substituem uma
+contagem de tokens do contexto. O ciclo e o orçamento agregado do agente serão
+tratados nas tarefas posteriores.
+
+#### Modelos verificados em 09/11/2026
+
+Os dados abaixo vieram do
+[catálogo oficial da OpenRouter](https://openrouter.ai/api/v1/models). Preços
+são em dólares por 1 milhão de tokens e podem mudar.
+
+| Modelo | Entrada / saída | Contexto / saída máxima | Tools | Decisão |
+| --- | ---: | ---: | --- | --- |
+| `openai/gpt-4.1-mini` | US$ 0,40 / US$ 1,60 | 1.047.576 / 32.768 | `tools` e `tool_choice` | Modelo inicial sugerido; deve ser configurado em `OPENROUTER_MODEL`, nunca no cliente. |
+| `google/gemini-3.1-flash-lite` | US$ 0,25 / US$ 1,50 | 1.048.576 / 65.536 | `tools` e `tool_choice` | Alternativa atual para avaliação de custo, latência e português brasileiro. |
+| `google/gemini-2.5-flash-lite` | US$ 0,10 / US$ 0,40 | 1.048.576 / 65.535 | `tools` e `tool_choice` | Ainda constava no catálogo, sem expiração, apesar de avisos históricos divergentes sobre outubro de 2026; revalidar antes de cada adoção. |
+
+Suporte declarado no catálogo não substitui o smoke manual. Para modelos que
+serão usados com ferramentas, a compatibilidade deve ser testada com uma
+função nomeada antes de habilitar o agente.
+
+#### Smoke manual
+
+Preencha `OPENROUTER_API_KEY` e `OPENROUTER_MODEL` no `.env` local do backend e
+execute:
+
+```bash
+pnpm smoke:openrouter
+```
+
+O script realiza uma única chamada, com timeout de 10 segundos, no máximo 64
+tokens e uma função fictícia `health_check` exigida por `tool_choice`. A função
+não é executada. Os logs contêm somente estado sanitizado, modelo, motivo de
+finalização, quantidade de chamadas e uso agregado quando disponível. Sem as
+duas variáveis, o smoke informa que não foi executado e termina sem simular
+sucesso. Ele não faz parte da suíte padrão nem do CI.
+
+**Estado em 09/11/2026:** smoke real pendente por ausência de credencial local;
+nenhum sucesso foi simulado. Os checkboxes permanecem para validação técnica e
+manual após a revisão do PR.
+
 ## 5.2 — Prompt e política consultiva
 
 - [ ] Definir papel: consultor de cosméticos da HidraSplash, cordial e objetivo, com português brasileiro.

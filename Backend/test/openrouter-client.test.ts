@@ -6,6 +6,7 @@ import {
   OPENROUTER_DEFAULT_MAX_OUTPUT_TOKENS,
   OPENROUTER_MAX_MESSAGES,
   OPENROUTER_MAX_REQUEST_BYTES,
+  OPENROUTER_MAX_RESPONSE_BYTES,
   OPENROUTER_MAX_TOOL_ARGUMENT_CHARACTERS,
   OPENROUTER_MAX_TOOLS,
   OpenRouterClientError,
@@ -74,6 +75,95 @@ function jsonResponse(payload: unknown, status = 200) {
     status,
     headers: { 'Content-Type': 'application/json' },
   })
+}
+
+function createControlledStreamResponse(chunks: readonly Uint8Array[]) {
+  let pullCount = 0
+  let cancelCount = 0
+  let chunkIndex = 0
+  const stream = new ReadableStream<Uint8Array>(
+    {
+      pull(controller) {
+        pullCount += 1
+        const chunk = chunks[chunkIndex]
+        if (!chunk) {
+          controller.close()
+          return
+        }
+
+        chunkIndex += 1
+        controller.enqueue(chunk)
+        if (chunkIndex === chunks.length) controller.close()
+      },
+      cancel() {
+        cancelCount += 1
+      },
+    },
+    { highWaterMark: 0 },
+  )
+
+  const response = new Response(stream, {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  })
+
+  return {
+    response,
+    get pullCount() {
+      return pullCount
+    },
+    get cancelCount() {
+      return cancelCount
+    },
+  }
+}
+
+function createPendingStreamResponse(signal: AbortSignal) {
+  let cancelCount = 0
+  let notifyStarted: (() => void) | undefined
+  let releasePull: (() => void) | undefined
+  const started = new Promise<void>((resolve) => {
+    notifyStarted = resolve
+  })
+  const stream = new ReadableStream<Uint8Array>(
+    {
+      pull() {
+        notifyStarted?.()
+        return new Promise<void>((resolve) => {
+          releasePull = resolve
+          signal.addEventListener('abort', () => resolve(), { once: true })
+        })
+      },
+      cancel() {
+        cancelCount += 1
+        releasePull?.()
+      },
+    },
+    { highWaterMark: 0 },
+  )
+
+  const response = new Response(stream, {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  })
+
+  return {
+    response,
+    started,
+    get cancelCount() {
+      return cancelCount
+    },
+  }
+}
+
+function createProviderBodyWithExactBytes(targetBytes: number) {
+  const payload = { ...createProviderPayload(), padding: '' }
+  const baseBytes = Buffer.byteLength(JSON.stringify(payload), 'utf8')
+  assert.ok(baseBytes < targetBytes)
+  payload.padding = 'x'.repeat(targetBytes - baseBytes)
+  const body = JSON.stringify(payload)
+  assert.equal(Buffer.byteLength(body, 'utf8'), targetBytes)
+  return body
 }
 
 function createRecordingTransport(response: Response) {
@@ -383,6 +473,151 @@ test('input validation rejects inconsistent tools and bounded request sizes befo
   })
 
   assert.equal(calls.length, 0)
+})
+
+test('bounded response reader accepts valid bodies below and exactly at the byte limit', async (t) => {
+  const encoder = new TextEncoder()
+
+  await t.test('valid response below limit', async () => {
+    const body = JSON.stringify(createProviderPayload())
+    const controlled = createControlledStreamResponse([
+      encoder.encode(body.slice(0, 17)),
+      encoder.encode(body.slice(17)),
+    ])
+    const { transport } = createRecordingTransport(controlled.response)
+
+    const result = await createClient(transport).createChatCompletion(
+      validInput,
+    )
+
+    assert.equal(result.message.content, 'Resposta curta.')
+    assert.equal(controlled.pullCount, 2)
+    assert.equal(controlled.cancelCount, 0)
+    assert.equal(controlled.response.body?.locked, false)
+  })
+
+  await t.test('valid response exactly at the byte limit', async () => {
+    const body = createProviderBodyWithExactBytes(
+      OPENROUTER_MAX_RESPONSE_BYTES,
+    )
+    const bytes = encoder.encode(body)
+    const controlled = createControlledStreamResponse([
+      bytes.slice(0, 80_000),
+      bytes.slice(80_000, 170_000),
+      bytes.slice(170_000),
+    ])
+    const { transport } = createRecordingTransport(controlled.response)
+
+    const result = await createClient(transport).createChatCompletion(
+      validInput,
+    )
+
+    assert.equal(result.message.content, 'Resposta curta.')
+    assert.equal(controlled.pullCount, 3)
+    assert.equal(controlled.cancelCount, 0)
+    assert.equal(controlled.response.body?.locked, false)
+  })
+})
+
+test('bounded response reader cancels immediately after a multi-chunk overflow', async () => {
+  const controlled = createControlledStreamResponse([
+    new Uint8Array(OPENROUTER_MAX_RESPONSE_BYTES - 2),
+    new Uint8Array(3),
+    new Uint8Array(64),
+  ])
+  const { transport } = createRecordingTransport(controlled.response)
+
+  await assertClientError(
+    createClient(transport).createChatCompletion(validInput),
+    'OPENROUTER_INVALID_RESPONSE',
+  )
+
+  assert.equal(controlled.pullCount, 2)
+  assert.equal(controlled.cancelCount, 1)
+  assert.equal(controlled.response.body?.locked, false)
+})
+
+test('bounded response reader decodes UTF-8 characters split between chunks', async () => {
+  const content = 'Olá 💧 — ação concluída.'
+  const body = JSON.stringify(createProviderPayload({ content }))
+  const encoder = new TextEncoder()
+  const bytes = encoder.encode(body)
+  const emojiBytes = encoder.encode('💧')
+  const emojiStart = bytes.findIndex(
+    (value, index) =>
+      value === emojiBytes[0] &&
+      emojiBytes.every(
+        (emojiByte, offset) => bytes[index + offset] === emojiByte,
+      ),
+  )
+  assert.ok(emojiStart >= 0)
+
+  const controlled = createControlledStreamResponse([
+    bytes.slice(0, emojiStart + 1),
+    bytes.slice(emojiStart + 1, emojiStart + 3),
+    bytes.slice(emojiStart + 3),
+  ])
+  const { transport } = createRecordingTransport(controlled.response)
+  const result = await createClient(transport).createChatCompletion(validInput)
+
+  assert.equal(result.message.content, content)
+  assert.equal(controlled.cancelCount, 0)
+  assert.equal(controlled.response.body?.locked, false)
+})
+
+test('caller cancellation interrupts and releases a body being received', async () => {
+  const controller = new AbortController()
+  let pending: ReturnType<typeof createPendingStreamResponse> | undefined
+  const transport: OpenRouterTransport = async (_input, init) => {
+    assert.ok(init?.signal)
+    pending = createPendingStreamResponse(init.signal)
+    return pending.response
+  }
+  const promise = createClient(transport).createChatCompletion({
+    ...validInput,
+    signal: controller.signal,
+  })
+
+  while (!pending) await Promise.resolve()
+  await pending.started
+  controller.abort()
+
+  await assertClientError(promise, 'OPENROUTER_CANCELLED')
+  assert.equal(pending.cancelCount, 1)
+  assert.equal(pending.response.body?.locked, false)
+})
+
+test('local timeout interrupts and releases a body being received', async () => {
+  let pending: ReturnType<typeof createPendingStreamResponse> | undefined
+  const transport: OpenRouterTransport = async (_input, init) => {
+    assert.ok(init?.signal)
+    pending = createPendingStreamResponse(init.signal)
+    return pending.response
+  }
+  const promise = createClient(transport, {
+    timeoutMs: 15,
+  }).createChatCompletion(validInput)
+
+  while (!pending) await Promise.resolve()
+  await pending.started
+
+  await assertClientError(promise, 'OPENROUTER_TIMEOUT')
+  assert.equal(pending.cancelCount, 1)
+  assert.equal(pending.response.body?.locked, false)
+})
+
+test('invalid JSON inside the byte limit remains a sanitized parse failure', async () => {
+  const controlled = createControlledStreamResponse([
+    new TextEncoder().encode('{"incomplete":'),
+  ])
+  const { transport } = createRecordingTransport(controlled.response)
+
+  await assertClientError(
+    createClient(transport).createChatCompletion(validInput),
+    'OPENROUTER_INVALID_JSON',
+  )
+  assert.equal(controlled.cancelCount, 0)
+  assert.equal(controlled.response.body?.locked, false)
 })
 
 test('rejects empty, malformed, oversized and structurally invalid success responses', async (t) => {

@@ -528,6 +528,68 @@ async function discardErrorBody(response: Response) {
   }
 }
 
+async function readStreamChunk(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  signal: AbortSignal,
+) {
+  if (signal.aborted) throw new DOMException('Aborted', 'AbortError')
+
+  let abortFromSignal: (() => void) | undefined
+  const aborted = new Promise<never>((_resolve, reject) => {
+    abortFromSignal = () =>
+      reject(new DOMException('Aborted', 'AbortError'))
+    signal.addEventListener('abort', abortFromSignal, { once: true })
+  })
+
+  try {
+    return await Promise.race([reader.read(), aborted])
+  } finally {
+    if (abortFromSignal) {
+      signal.removeEventListener('abort', abortFromSignal)
+    }
+  }
+}
+
+async function readResponseBodyWithinLimit(
+  response: Response,
+  signal: AbortSignal,
+) {
+  if (!response.body) return ''
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder('utf-8')
+  let bytesRead = 0
+  let responseText = ''
+  let completed = false
+
+  try {
+    while (true) {
+      const chunk = await readStreamChunk(reader, signal)
+      if (chunk.done) {
+        completed = true
+        responseText += decoder.decode()
+        return responseText
+      }
+
+      bytesRead += chunk.value.byteLength
+      if (bytesRead > OPENROUTER_MAX_RESPONSE_BYTES) {
+        throw clientError('OPENROUTER_INVALID_RESPONSE')
+      }
+
+      responseText += decoder.decode(chunk.value, { stream: true })
+    }
+  } finally {
+    if (!completed) {
+      try {
+        await reader.cancel()
+      } catch {
+        // Cancelamento e detalhes do stream nunca são expostos.
+      }
+    }
+    reader.releaseLock()
+  }
+}
+
 export function createOpenRouterClient(
   options: CreateOpenRouterClientOptions,
 ): OpenRouterClient {
@@ -628,13 +690,10 @@ export function createOpenRouterClient(
           throw classifyHttpError(response.status)
         }
 
-        const responseText = await response.text()
-        if (
-          Buffer.byteLength(responseText, 'utf8') >
-          OPENROUTER_MAX_RESPONSE_BYTES
-        ) {
-          throw clientError('OPENROUTER_INVALID_RESPONSE')
-        }
+        const responseText = await readResponseBodyWithinLimit(
+          response,
+          requestController.signal,
+        )
 
         let rawResponse: unknown
         try {

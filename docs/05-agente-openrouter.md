@@ -141,14 +141,26 @@ reservados à 5.4; controles por sessão e custo operacional permanecem na 5.5.
 
 ## 5.4 — Contrato de `POST /api/chat`
 
-- [ ] Definir entrada validada com mensagem do usuário, `sessionId` opcional, histórico recente limitado e contexto de carrinho **sanitizado** (IDs/quantidades, nunca preços enviados pelo cliente como autoridade).
-- [ ] Definir saída estruturada: `message`, `type` (`text | recommendation | comparison`), `productIds?`, `reason?`, `sourceIds?` e `requestId`.
-- [ ] Backend resolve IDs em objetos de catálogo e valida imagens, preços e estoque **antes** de devolver cartões ao frontend.
-- [ ] Diferenciar mensagem de texto de recomendação; não deixar o modelo produzir URLs de checkout ou números de cartão.
-- [ ] Criar testes de schema para entrada/saída e erros padronizados.
+- [x] Definir entrada validada com mensagem do usuário, `sessionId` opcional, histórico recente limitado e contexto de carrinho **sanitizado** (IDs/quantidades, nunca preços enviados pelo cliente como autoridade).
+- [x] Definir saída estruturada: `message`, `type` (`text | recommendation | comparison`), `productIds?`, `reason?`, `sourceIds?` e `requestId`.
+- [x] Backend resolve IDs em objetos de catálogo e valida imagens, preços e estoque **antes** de devolver cartões ao frontend.
+- [x] Diferenciar mensagem de texto de recomendação; não deixar o modelo produzir URLs de checkout ou números de cartão.
+- [x] Criar testes de schema para entrada/saída e erros padronizados.
 
 **Aceite:** contrato documentado por exemplos e validado; produtos exibidos sempre vêm do catálogo.  
 **Commit:** `feat(api): expose structured chat endpoint`.
+
+**Status de entrega:** implementada na branch da tarefa 5.4, com contrato
+estrito, planejador determinístico, `ChatService`, rota Fastify, composição no
+servidor e projeção canônica de cartões validados por testes offline. A seleção
+de cartões cruza o ranking recalculado com IDs autorizados e intenção comercial;
+consultas de detalhes isoladas não equivalem a uma escolha. A arquitetura, os
+limites e exemplos estão em [05.4 — API de chat estruturada](./05.4-chat-api.md).
+
+O aceite operacional com OpenRouter real continua pendente. A suíte não usa
+credencial, não faz chamadas pagas e não demonstra compatibilidade real de tool
+calling nem comportamento do modelo configurado. Os controles de sessão, rate
+limiting e custo permanecem na 5.5.
 
 ## 5.5 — Falhas e custo controlado
 

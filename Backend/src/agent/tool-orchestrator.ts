@@ -48,6 +48,7 @@ const runInputSchema = z
       'product',
       'faq',
       'any',
+      'both',
     ]),
     signal: z.custom<AbortSignal>(
       (value) => value instanceof AbortSignal,
@@ -97,6 +98,7 @@ export type ToolOrchestratorGroundingRequirement =
   | 'product'
   | 'faq'
   | 'any'
+  | 'both'
 
 export type ToolOrchestratorGroundingDomainStatus =
   | 'not_consulted'
@@ -330,6 +332,16 @@ export function createToolOrchestrator(
               : faq === 'not_found'
                 ? 'not_found'
                 : 'insufficient'
+        } else if (requirement === 'both') {
+          const productResolved =
+            product === 'found' || product === 'not_found'
+          const faqResolved = faq === 'found' || faq === 'not_found'
+          status =
+            !productResolved || !faqResolved
+              ? 'insufficient'
+              : product === 'not_found' && faq === 'not_found'
+                ? 'not_found'
+                : 'verified'
         } else if (product === 'found' || faq === 'found') {
           status = 'verified'
         } else if (

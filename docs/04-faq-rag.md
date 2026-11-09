@@ -83,13 +83,49 @@ global, inicialização no servidor, OpenRouter, agente ou UI.
 
 ## 4.3 — Tool `search_faq`
 
-- [ ] Expor a recuperação ao orquestrador como ferramenta com entrada validada (`query`, `limit?`).
-- [ ] Retornar snippets com identificador de fonte, sem instruções executáveis vindas do conteúdo.
-- [ ] Instruir o agente a fundamentar política no retorno da ferramenta, sem inventar prazos, devoluções ou rastreamento.
-- [ ] Preparar exibição opcional “Fonte: política de entrega” na UI, sem links falsos.
+- [x] Expor a recuperação ao orquestrador como ferramenta com entrada validada (`query`, `limit?`).
+- [x] Retornar snippets com identificador de fonte, sem instruções executáveis vindas do conteúdo.
+- [x] Instruir o agente a fundamentar política no retorno da ferramenta, sem inventar prazos, devoluções ou rastreamento.
+- [x] Preparar exibição opcional “Fonte: política de entrega” na UI, sem links falsos.
 
 **Aceite:** o agente futuro recebe apenas trechos pertinentes e metadados verificáveis; ferramenta pode ser testada isoladamente.  
 **Commit:** `feat(agent): add FAQ lookup tool`.
+
+### Registro de execução — 08/11/2026
+
+- `createSearchFaqTool(faqSearchIndex)` recebe somente a porta de busca por
+  injeção e expõe nome, descrição, schema Zod estrito e `execute`. Não carrega
+  arquivos, não cria singleton e não conhece HTTP, OpenRouter ou runtime de agente.
+- A entrada exige `query` de 1 a 300 caracteres após `trim`; `limit` aceita
+  inteiros de 1 a 5 e usa padrão 3. Não há coerção, e campos desconhecidos são
+  rejeitados como `INVALID_ARGUMENTS` antes de consultar o índice.
+- A saída distingue `found`, `not_found`, `INVALID_ARGUMENTS` e
+  `EXECUTION_FAILED`. Fontes retornam somente `sourceId`, título, categoria,
+  classificação `fictional-demo` e conteúdo; o score lexical permanece interno.
+- Resultados do índice são validados em runtime com os schemas FAQ. Estruturas
+  incompletas, propriedades extras, classificações inválidas, scores não finitos,
+  excesso de resultados e falhas inesperadas produzem erro sanitizado.
+- O orçamento máximo de 5.500 caracteres mede o JSON completo serializado,
+  incluindo estrutura, nomes de campos e conteúdo. A ferramenta mantém um
+  prefixo ordenado de fontes completas e só marca `budgetLimited` quando uma
+  fonte relevante é efetivamente omitida. Caracteres não representam garantia
+  de tokens para um modelo ou tokenizador.
+- O conteúdo FAQ é documentado como dado não confiável: a integração futura deve
+  enviá-lo como resultado de ferramenta, nunca como instrução de sistema, e deve
+  preservar `not_found` sem inventar política, prazo ou procedimento.
+
+Validações executadas:
+
+- `validate:faq`: 25 documentos aprovados na distribuição `4/4/5/5/4/3`;
+- testes específicos da ferramenta: 12/12 com índice falso e índice real;
+- suíte completa do backend: 163/163;
+- typecheck e build do backend aprovados;
+- `git diff --check` aprovado.
+
+A suíte completa foi executada fora do sandbox devido aos testes preexistentes
+que criam links simbólicos e renomeiam fixtures temporárias no Windows. Não foram
+implementados orquestrador, ciclo de tool calling, endpoint, OpenRouter, frontend
+ou alterações de catálogo e FAQs.
 
 ## 4.4 — Testar o RAG independentemente do LLM
 

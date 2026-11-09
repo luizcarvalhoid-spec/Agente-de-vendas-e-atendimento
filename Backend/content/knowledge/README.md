@@ -75,6 +75,38 @@ sem cobertura suficiente retorna uma lista vazia. Esse fallback é um resultado
 válido e deve ser preservado pela futura ferramenta `search_faq`; ela não deve
 inventar política para preencher a ausência de fontes.
 
+## Ferramenta `search_faq`
+
+`createSearchFaqTool(faqSearchIndex)` cria um adaptador provider-agnostic com o
+índice injetado. A ferramenta não carrega arquivos, não cria singleton, não
+conhece HTTP ou OpenRouter e pode ser testada com um índice falso.
+
+A entrada é um objeto estrito com `query` obrigatória de 1 a 300 caracteres
+após `trim` e `limit` inteiro opcional entre 1 e 5, com padrão 3. Tipos
+incorretos, campos extras e valores fora dos limites resultam em
+`INVALID_ARGUMENTS`; uma consulta válida sem política resulta em `not_found`,
+não em erro.
+
+As fontes retornam somente `sourceId`, `title`, `category`, `classification` e
+`content`. O score lexical permanece interno, e o adaptador valida em runtime a
+estrutura recebida do índice antes de copiar esses campos. Retornos inválidos ou
+falhas inesperadas produzem `EXECUTION_FAILED` sanitizado, sem mensagens
+internas, caminhos, stack traces ou segredos.
+
+O retorno serializado por `JSON.stringify` deve ter no máximo 5.500 caracteres,
+incluindo discriminantes, nomes de campos, arrays, metadados e conteúdo. Quando
+o próximo resultado ultrapassaria esse orçamento, a ferramenta mantém apenas o
+prefixo já selecionado, preserva cada fonte integral e marca
+`budgetLimited: true`. Esse limite em caracteres é uma barreira determinística
+de contexto, não uma garantia de quantidade de tokens para qualquer modelo ou
+tokenizador.
+
+O conteúdo continua sendo dado não confiável. Uma integração futura deve
+entregá-lo ao modelo como resultado de ferramenta, nunca como mensagem ou
+instrução de sistema. Instruções eventualmente presentes na FAQ não devem ser
+executadas. Se o resultado for `not_found`, o agente deve declarar a ausência de
+política em vez de inferir prazo, procedimento ou condição comercial.
+
 ## Validação
 
 Execute dentro de `Backend/`:

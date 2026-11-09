@@ -3,9 +3,9 @@ import type {
   FaqDocument,
 } from './faq-document-schema.js'
 
-const DEFAULT_RESULT_LIMIT = 3
-const MAX_RESULT_LIMIT = 5
-const MAX_QUERY_LENGTH = 300
+export const FAQ_SEARCH_DEFAULT_LIMIT = 3
+export const FAQ_SEARCH_MAX_RESULTS = 5
+export const FAQ_SEARCH_MAX_QUERY_LENGTH = 300
 
 const TITLE_MATCH_WEIGHT = 3
 const CONTENT_MATCH_WEIGHT = 1
@@ -251,12 +251,12 @@ function roundScore(value: number) {
 }
 
 function resolveLimit(limit: number | undefined) {
-  if (limit === undefined) return DEFAULT_RESULT_LIMIT
+  if (limit === undefined) return FAQ_SEARCH_DEFAULT_LIMIT
   if (!Number.isInteger(limit) || limit <= 0) {
     throw new RangeError('O limite da busca FAQ deve ser um inteiro positivo.')
   }
 
-  return Math.min(limit, MAX_RESULT_LIMIT)
+  return Math.min(limit, FAQ_SEARCH_MAX_RESULTS)
 }
 
 function indexDocument(document: FaqDocument): IndexedFaqDocument {
@@ -310,7 +310,12 @@ export function createFaqSearchIndex(
     size: indexedDocuments.length,
     searchFaq(query, limit) {
       const resultLimit = resolveLimit(limit)
-      if (query.trim() === '' || query.length > MAX_QUERY_LENGTH) return []
+      if (
+        query.trim() === '' ||
+        query.length > FAQ_SEARCH_MAX_QUERY_LENGTH
+      ) {
+        return []
+      }
 
       const querySequence = tokenize(query)
       const queryConcepts = [...new Set(querySequence)]

@@ -108,6 +108,18 @@ na tarefa 5.3.
 **Aceite:** tool calling real é observável nos logs de desenvolvimento, sem consultas arbitrárias ao banco/arquivos.  
 **Commit:** `feat(agent): add bounded tool orchestration`.
 
+### Registro técnico da 5.3
+
+A arquitetura e os limites estão documentados em
+[05.3 — Ferramentas e ciclo limitado de execução](./05.3-tool-orchestration.md).
+A implementação separa consulta, elegibilidade e autorização de produtos,
+reutiliza `search_faq`, gera definições de função dos schemas Zod e executa um
+ciclo provider-agnostic limitado, cancelável e testável sem rede.
+
+A tarefa não registra o orquestrador no servidor nem cria endpoint. A
+composição por requisição, o contrato público e a resolução de cartões ficam
+reservados à 5.4; controles por sessão e custo operacional permanecem na 5.5.
+
 ## 5.4 — Contrato de `POST /api/chat`
 
 - [ ] Definir entrada validada com mensagem do usuário, `sessionId` opcional, histórico recente limitado e contexto de carrinho **sanitizado** (IDs/quantidades, nunca preços enviados pelo cliente como autoridade).

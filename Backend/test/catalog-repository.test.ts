@@ -81,10 +81,13 @@ test('repository loads only products.json and preserves canonical object identit
   const byId = catalog.findById(Number(product?.id))
   const bySlug = catalog.findBySlug(String(product?.slug))
   const listed = catalog.list(productListQuerySchema.parse({})).products[0]
+  const listedWithoutPagination = catalog.listAll()[0]
 
   assert.ok(byId)
   assert.strictEqual(byId, bySlug)
   assert.strictEqual(byId, listed)
+  assert.strictEqual(byId, listedWithoutPagination)
+  assert.equal(catalog.listAll().length, 1)
   assert.equal(catalog.findById(999), undefined)
   assert.equal(catalog.findBySlug('produto-inexistente'), undefined)
   assert.deepEqual(byId.dataClassification, {

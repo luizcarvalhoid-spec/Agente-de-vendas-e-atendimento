@@ -15,6 +15,7 @@ import {
   type OpenRouterFunctionTool,
   type OpenRouterTransport,
 } from '../src/agent/openrouter/openrouter-client.js'
+import { createOpenRouterAgentModel } from '../src/agent/openrouter/openrouter-agent-model.js'
 
 const testApiKey = 'test-openrouter-key'
 const testModel = 'test/provider-model'
@@ -328,6 +329,117 @@ test('serializes assistant tool calls for future conversation history', async ()
       },
     ],
   })
+})
+
+test('serializes ordered tool results with their required call IDs', async () => {
+  const { calls, transport } = createRecordingTransport(
+    jsonResponse(createProviderPayload()),
+  )
+  await createClient(transport).createChatCompletion({
+    messages: [
+      {
+        role: 'assistant',
+        content: null,
+        toolCalls: [
+          {
+            id: 'call-first',
+            type: 'function',
+            function: { name: 'first_tool', arguments: '{}' },
+          },
+          {
+            id: 'call-second',
+            type: 'function',
+            function: { name: 'second_tool', arguments: '{}' },
+          },
+        ],
+      },
+      { role: 'tool', toolCallId: 'call-first', content: '{"ok":true}' },
+      { role: 'tool', toolCallId: 'call-second', content: '{"ok":false}' },
+    ],
+  })
+
+  const body = JSON.parse(String(calls[0]?.init?.body))
+  assert.deepEqual(body.messages.slice(1), [
+    { role: 'tool', tool_call_id: 'call-first', content: '{"ok":true}' },
+    { role: 'tool', tool_call_id: 'call-second', content: '{"ok":false}' },
+  ])
+})
+
+test('rejects malformed tool result messages before transport', async () => {
+  const { calls, transport } = createRecordingTransport(
+    jsonResponse(createProviderPayload()),
+  )
+  const client = createClient(transport)
+
+  await assertClientError(
+    client.createChatCompletion({
+      messages: [
+        { role: 'tool', toolCallId: '', content: '{"ok":true}' },
+      ],
+    }),
+    'OPENROUTER_INVALID_REQUEST',
+  )
+  await assertClientError(
+    client.createChatCompletion({
+      messages: [
+        { role: 'tool', toolCallId: 'call-1', content: '' },
+      ],
+    }),
+    'OPENROUTER_INVALID_REQUEST',
+  )
+  await assertClientError(
+    client.createChatCompletion({
+      messages: [
+        { role: 'tool', toolCallId: 'call-1', content: '   ' },
+      ],
+    }),
+    'OPENROUTER_INVALID_REQUEST',
+  )
+  assert.equal(calls.length, 0)
+})
+
+test('provider adapter validates definitions and preserves tool messages', async () => {
+  let recorded: OpenRouterChatInput | undefined
+  const model = createOpenRouterAgentModel({
+    async createChatCompletion(input) {
+      recorded = input
+      return {
+        id: 'adapter-result',
+        model: testModel,
+        created: 1,
+        message: { role: 'assistant', content: 'Final.' },
+        finishReason: 'stop',
+      }
+    },
+  })
+  const signal = new AbortController().signal
+  const result = await model.complete({
+    messages: [
+      { role: 'tool', toolCallId: 'call-adapter', content: '{"ok":true}' },
+    ],
+    tools: [
+      {
+        type: 'function',
+        function: {
+          name: 'adapter_tool',
+          description: 'Ferramenta de teste.',
+          parameters: {
+            type: 'object',
+            properties: {},
+            additionalProperties: false,
+          },
+        },
+      },
+    ],
+    signal,
+  })
+
+  assert.deepEqual(recorded?.messages, [
+    { role: 'tool', toolCallId: 'call-adapter', content: '{"ok":true}' },
+  ])
+  assert.equal(recorded?.toolChoice, 'auto')
+  assert.equal(recorded?.signal, signal)
+  assert.equal(result.message.content, 'Final.')
 })
 
 test('accepts ordinary text when tool choice is automatic', async () => {

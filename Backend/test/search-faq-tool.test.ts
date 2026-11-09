@@ -63,6 +63,7 @@ test('tool exposes provider-agnostic metadata and strict input schema', () => {
   assert.equal(tool.name, 'search_faq')
   assert.equal(tool.description, SEARCH_FAQ_TOOL_DESCRIPTION)
   assert.equal(tool.inputSchema, searchFaqToolInputSchema)
+  assert.equal(tool.outputSchema, searchFaqToolExecutionResultSchema)
   assert.equal('openRouter' in tool, false)
   assert.equal('url' in tool, false)
 })

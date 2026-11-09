@@ -129,12 +129,45 @@ ou alterações de catálogo e FAQs.
 
 ## 4.4 — Testar o RAG independentemente do LLM
 
-- [ ] Escrever 8–10 perguntas de frete, pagamento, devolução e casos sem fonte.
-- [ ] Testar se o trecho correto aparece no top-3, sem usar a API paga.
-- [ ] Documentar limites da busca textual e casos em que resposta deve ser encaminhada para atendimento humano fictício.
+- [x] Escrever 8–10 perguntas de frete, pagamento, devolução e casos sem fonte.
+- [x] Testar se o trecho correto aparece no top-3, sem usar a API paga.
+- [x] Documentar limites da busca textual e casos em que resposta deve ser encaminhada para atendimento humano fictício.
 
 **Aceite:** testes de recuperação passam localmente e podem rodar em CI sem chave OpenRouter.  
 **Commit:** `test(rag): cover retrieval and unknown answers`.
+
+**Relatório:** [Avaliação independente do RAG textual](./04.4-rag-evaluation.md).
+
+### Registro de execução — 08/11/2026
+
+- O golden set versionado contém 10 perguntas definidas pelas políticas: 7 com
+  fonte documentada e 3 com condições inexistentes. As 5 consultas desconhecidas
+  anteriores são reutilizadas como regressão adicional, sem duplicação.
+- Recall@3 e Top-1 atingiram `7/7`; as 8 consultas sem política tiveram `0`
+  falsos positivos e `8/8` rejeições corretas. A integridade das fontes foi
+  `7/7`, com metadados e conteúdo idênticos aos documentos canônicos.
+- A ferramenta canônica retornou `found` nos 7 casos cobertos e `not_found` nos
+  3 casos principais sem política. Não expôs score, URL, caminho ou nome físico,
+  preservou as fontes completas e manteve o JSON abaixo de 5.500 caracteres; o
+  maior retorno observado teve 490 caracteres.
+- Nenhum caso falhou. O algoritmo, a ferramenta, as FAQs e o catálogo não foram
+  alterados para obter os resultados.
+- O relatório documenta dependência de vocabulário, ausência de compreensão
+  semântica ampla, limites de generalização e encaminhamento externo apropriado
+  para questões clínicas, sem prometer atendimento humano HidraSplash.
+
+Validações executadas:
+
+- testes específicos da avaliação: 4/4;
+- `validate:faq`: 25 documentos aprovados na distribuição `4/4/5/5/4/3`;
+- suíte completa do backend: 167/167;
+- typecheck e build do backend aprovados;
+- `git diff --check` aprovado.
+
+A suíte completa foi executada fora do sandbox devido aos testes preexistentes
+que criam links simbólicos e renomeiam fixtures temporárias no Windows. Toda a
+avaliação foi local e não utilizou chave OpenRouter, LLM, embedding, banco
+vetorial ou serviço pago.
 
 ## Limite de segurança
 

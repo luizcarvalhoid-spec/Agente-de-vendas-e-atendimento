@@ -1,0 +1,92 @@
+[
+  {
+    "id": "rag-frete-limite-100",
+    "group": "frete",
+    "query": "No subtotal de R$ 100,00, ainda existe frete grátis?",
+    "expectedStatus": "found",
+    "expectedSourceIds": ["faq-002"],
+    "top1Eligible": true,
+    "rationale": "A política documenta que R$ 100,00 exatos não recebem frete grátis."
+  },
+  {
+    "id": "rag-frete-prazo-entrega",
+    "group": "frete",
+    "query": "Depois da confirmação simulada, a entrega leva de 4 a 8 dias úteis?",
+    "expectedStatus": "found",
+    "expectedSourceIds": ["faq-004"],
+    "top1Eligible": true,
+    "rationale": "A FAQ define o prazo ilustrativo de entrega como 4 a 8 dias úteis."
+  },
+  {
+    "id": "rag-pagamento-operacao-real",
+    "group": "pagamento",
+    "query": "A loja processa pagamentos e transferências financeiras?",
+    "expectedStatus": "found",
+    "expectedSourceIds": ["faq-005"],
+    "top1Eligible": true,
+    "rationale": "A política esclarece que a demonstração não realiza transações financeiras reais."
+  },
+  {
+    "id": "rag-troca-item-quebrado",
+    "group": "trocas",
+    "query": "Item quebrado pode ser registrado em 7 dias corridos?",
+    "expectedStatus": "found",
+    "expectedSourceIds": ["faq-011"],
+    "top1Eligible": true,
+    "rationale": "Item quebrado é uma formulação natural do caso documentado de item danificado."
+  },
+  {
+    "id": "rag-troca-produto-aberto",
+    "group": "trocas",
+    "query": "Produto aberto por preferência entra na troca?",
+    "expectedStatus": "found",
+    "expectedSourceIds": ["faq-012"],
+    "top1Eligible": true,
+    "rationale": "A política exclui produto aberto por simples preferência da troca demonstrativa."
+  },
+  {
+    "id": "rag-pedido-rastreamento",
+    "group": "pedidos",
+    "query": "Existe código de rastreamento ou status individual do pedido?",
+    "expectedStatus": "found",
+    "expectedSourceIds": ["faq-020"],
+    "top1Eligible": true,
+    "rationale": "A FAQ nega código de rastreamento e status de pedido reais."
+  },
+  {
+    "id": "rag-produto-promessa-clinica",
+    "group": "produtos",
+    "query": "A assistente pode prometer cura ou eficácia clínica?",
+    "expectedStatus": "found",
+    "expectedSourceIds": ["faq-018"],
+    "top1Eligible": true,
+    "rationale": "A política proíbe diagnóstico, promessa de cura e eficácia clínica."
+  },
+  {
+    "id": "rag-unknown-entrega-internacional-expressa",
+    "group": "inexistente",
+    "query": "Existe frete internacional expresso para Portugal?",
+    "expectedStatus": "not_found",
+    "expectedSourceIds": [],
+    "top1Eligible": false,
+    "rationale": "Não existe política de destino internacional nem modalidade expressa."
+  },
+  {
+    "id": "rag-unknown-parcelamento-cartao",
+    "group": "inexistente",
+    "query": "Posso parcelar o pagamento em 12 vezes no cartão?",
+    "expectedStatus": "not_found",
+    "expectedSourceIds": [],
+    "top1Eligible": false,
+    "rationale": "A base não define parcelamento, quantidade de parcelas ou condições de cartão."
+  },
+  {
+    "id": "rag-unknown-etiqueta-devolucao",
+    "group": "inexistente",
+    "query": "A loja fornece etiqueta de postagem para a devolução?",
+    "expectedStatus": "not_found",
+    "expectedSourceIds": [],
+    "top1Eligible": false,
+    "rationale": "A base não documenta etiqueta, postagem ou procedimento logístico de devolução."
+  }
+]

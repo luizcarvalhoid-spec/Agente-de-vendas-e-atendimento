@@ -103,9 +103,14 @@ function createFakeTool(options: {
   return { get executions() { return executions }, tool }
 }
 
-function runInput(signal?: AbortSignal) {
+function runInput(
+  signal?: AbortSignal,
+  groundingRequirement: 'not_required' | 'product' | 'faq' | 'any' =
+    'not_required',
+) {
   return {
     conversation: [{ role: 'user' as const, content: 'Preciso de ajuda.' }],
+    groundingRequirement,
     ...(signal ? { signal } : {}),
   }
 }
@@ -127,6 +132,7 @@ test('returns a direct text response with the permanent policy first', async () 
   assert.equal(result.message, 'Como posso ajudar?')
   assert.equal(result.usage.totalTokens, 14)
   assert.equal(result.usage.complete, true)
+  assert.equal(result.grounding.status, 'not_required')
   assert.deepEqual(calls[0]?.messages[0], {
     role: 'system',
     content: createConsultativeSystemInstruction(),
@@ -347,12 +353,154 @@ test('accepts an honest final answer after FAQ not_found without technical fallb
   const result = await createToolOrchestrator({
     model,
     tools: createAgentToolRegistry([faq]),
-  }).run(runInput())
+  }).run(runInput(undefined, 'faq'))
 
   assert.equal(result.status, 'completed')
   assert.equal(result.fallback, false)
   assert.equal(result.diagnostics.faqNotFound, true)
+  assert.equal(result.grounding.status, 'not_found')
   assert.deepEqual(result.faqSourceIds, [])
+})
+
+test('marks a validated FAQ result as verified grounding', async () => {
+  const faq = createSearchFaqTool({
+    searchFaq: () => [
+      {
+        sourceId: 'faq-004',
+        title: 'Qual é o prazo ilustrativo de entrega?',
+        category: 'frete',
+        classification: 'fictional-demo',
+        content:
+          'O cenário demonstrativo apresenta um prazo total de 4 a 8 dias úteis após uma confirmação igualmente simulada.',
+        score: 12,
+      },
+    ],
+  })
+  const { model } = createQueueModel([
+    assistant(null, [
+      toolCall('faq', 'search_faq', { query: 'qual é o prazo de entrega?' }),
+    ]),
+    assistant('Na demonstração, o prazo informado é de 4 a 8 dias úteis.'),
+  ])
+  const result = await createToolOrchestrator({
+    model,
+    tools: createAgentToolRegistry([faq]),
+  }).run(runInput(undefined, 'faq'))
+
+  assert.equal(result.status, 'completed')
+  assert.deepEqual(result.faqSourceIds, ['faq-004'])
+  assert.deepEqual(result.grounding, {
+    requirement: 'faq',
+    status: 'verified',
+    product: 'not_consulted',
+    faq: 'found',
+  })
+})
+
+test('falls back when every necessary tool fails operationally', async () => {
+  const failureSchema = z
+    .object({
+      ok: z.literal(false),
+      error: z
+        .object({
+          code: z.literal('EXECUTION_FAILED'),
+          message: z.string(),
+        })
+        .strict(),
+    })
+    .strict()
+  const product = createFakeTool({
+    name: 'search_products',
+    outputSchema: failureSchema,
+    execute: async () => ({
+      ok: false,
+      error: { code: 'EXECUTION_FAILED', message: 'Falha sanitizada.' },
+    }),
+  })
+  const faq = createFakeTool({
+    name: 'search_faq',
+    outputSchema: failureSchema,
+    execute: async () => ({
+      ok: false,
+      error: { code: 'EXECUTION_FAILED', message: 'Falha sanitizada.' },
+    }),
+  })
+  const { model } = createQueueModel([
+    assistant(null, [
+      toolCall('product', 'search_products', { value: 'shampoo' }),
+      toolCall('faq', 'search_faq', { value: 'prazo' }),
+    ]),
+    assistant('O produto custa R$ 39 e chega amanhã.'),
+  ])
+  const result = await createToolOrchestrator({
+    model,
+    tools: createAgentToolRegistry([product.tool, faq.tool]),
+  }).run(runInput(undefined, 'any'))
+
+  assert.equal(result.status, 'fallback')
+  assert.equal(result.termination, 'INSUFFICIENT_GROUNDING')
+  assert.equal(result.message.includes('Falha sanitizada'), false)
+  assert.deepEqual(result.grounding, {
+    requirement: 'any',
+    status: 'insufficient',
+    product: 'failed',
+    faq: 'failed',
+  })
+})
+
+test('rejects product claims and prices when catalog grounding is required', async (t) => {
+  await t.test('unsupported product claim', async () => {
+    const fake = createFakeTool({})
+    const { model } = createQueueModel([
+      assistant('O Shampoo X é o melhor produto para seu cabelo.'),
+    ])
+    const result = await createToolOrchestrator({
+      model,
+      tools: createAgentToolRegistry([fake.tool]),
+    }).run(runInput(undefined, 'product'))
+
+    assert.equal(result.status, 'fallback')
+    assert.equal(result.termination, 'INSUFFICIENT_GROUNDING')
+    assert.equal(result.grounding.status, 'insufficient')
+  })
+
+  await t.test('unsupported price', async () => {
+    const fake = createFakeTool({})
+    const { model } = createQueueModel([
+      assistant('O produto recomendado custa R$ 19,90.'),
+    ])
+    const result = await createToolOrchestrator({
+      model,
+      tools: createAgentToolRegistry([fake.tool]),
+    }).run(runInput(undefined, 'product'))
+
+    assert.equal(result.status, 'fallback')
+    assert.equal(result.termination, 'INSUFFICIENT_GROUNDING')
+    assert.deepEqual(result.recommendationProductIds, [])
+  })
+})
+
+test('does not ground a response with a Zod-invalid product result', async () => {
+  const invalid = createFakeTool({
+    name: 'search_products',
+    execute: async () => ({ ok: true, unexpected: 'product-13' }),
+  })
+  const { model } = createQueueModel([
+    assistant(null, [
+      toolCall('invalid-product', 'search_products', { value: 'anticaspa' }),
+    ]),
+    assistant('O produto 13 foi validado e custa R$ 39.'),
+  ])
+  const result = await createToolOrchestrator({
+    model,
+    tools: createAgentToolRegistry([invalid.tool]),
+  }).run(runInput(undefined, 'product'))
+
+  assert.equal(result.status, 'fallback')
+  assert.equal(result.termination, 'INSUFFICIENT_GROUNDING')
+  assert.deepEqual(result.recommendationProductIds, [])
+  assert.deepEqual(result.consultedProductIds, [])
+  assert.equal(result.grounding.product, 'failed')
 })
 
 test('keeps excluded detail lookups consulted but unauthorized for recommendations', async () => {
@@ -379,10 +527,11 @@ test('keeps excluded detail lookups consulted but unauthorized for recommendatio
     assistant('O produto acima do teto foi apenas consultado.'),
   ])
   const result = await createToolOrchestrator({ model, tools: registry }).run(
-    runInput(),
+    runInput(undefined, 'product'),
   )
 
   assert.equal(result.status, 'completed')
+  assert.equal(result.grounding.status, 'verified')
   assert.ok(result.consultedProductIds.includes(11))
   assert.equal(result.recommendationProductIds.includes(11), false)
   assert.ok(result.recommendationProductIds.every((id) => [1, 9, 12].includes(id)))
@@ -418,7 +567,7 @@ test('removes previously eligible IDs after a later search tightens the budget',
     assistant('Mantive somente os candidatos dentro do novo teto.'),
   ])
   const result = await createToolOrchestrator({ model, tools: registry }).run(
-    runInput(),
+    runInput(undefined, 'product'),
   )
 
   assert.ok(result.consultedProductIds.includes(11))
@@ -442,10 +591,11 @@ test('does not count a valid product ID as eligible when detail eligibility is f
   const result = await createToolOrchestrator({
     model,
     tools: createAgentToolRegistry([details]),
-  }).run(runInput())
+  }).run(runInput(undefined, 'product'))
 
   assert.deepEqual(result.consultedProductIds, [13])
   assert.deepEqual(result.recommendationProductIds, [])
+  assert.equal(result.grounding.status, 'verified')
 })
 
 test('enforces the total tool call limit without partially executing the next batch', async () => {
@@ -572,7 +722,7 @@ test('returns sanitized fallbacks for provider failure, model limit and context 
     const result = await createToolOrchestrator({
       model,
       tools: createAgentToolRegistry([fake.tool]),
-    }).run({ conversation })
+    }).run({ conversation, groundingRequirement: 'not_required' })
     assert.equal(result.status, 'fallback')
     assert.equal(result.termination, 'CONTEXT_LIMIT')
     assert.equal(called, false)
@@ -587,9 +737,11 @@ test('never promotes IDs written freely by the model to verified grounding', asy
   const result = await createToolOrchestrator({
     model,
     tools: createAgentToolRegistry([fake.tool]),
-  }).run(runInput())
+  }).run(runInput(undefined, 'product'))
 
-  assert.equal(result.status, 'completed')
+  assert.equal(result.status, 'fallback')
+  assert.equal(result.termination, 'INSUFFICIENT_GROUNDING')
+  assert.equal(result.grounding.status, 'insufficient')
   assert.deepEqual(result.recommendationProductIds, [])
   assert.deepEqual(result.faqSourceIds, [])
 })

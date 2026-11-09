@@ -23,7 +23,10 @@ import {
   type ProductSubcategory,
   type RestrictionCode,
 } from '../../catalog/product-schema.js'
-import type { AgentTool } from './agent-tool.js'
+import type {
+  AgentTool,
+  AgentToolExecutionContext,
+} from './agent-tool.js'
 
 export const SEARCH_PRODUCTS_TOOL_NAME = 'search_products'
 export const GET_PRODUCT_DETAILS_TOOL_NAME = 'get_product_details'
@@ -328,9 +331,13 @@ export interface ProductEligibilityConstraints {
 }
 
 export interface ProductEligibilityPolicy {
-  applySearchConstraints(input: SearchProductsInput): boolean
+  applySearchConstraints(
+    input: SearchProductsInput,
+    context: AgentToolExecutionContext,
+  ): boolean
   evaluate(
     product: Product,
+    context: AgentToolExecutionContext,
     scope?: Pick<SearchProductsInput, 'category' | 'subcategory'>,
   ): { eligible: boolean; reasons: readonly EligibilityReason[] }
 }
@@ -354,6 +361,7 @@ export interface ProductSearchIndex {
   search(
     input: SearchProductsInput,
     policy: ProductEligibilityPolicy,
+    context: AgentToolExecutionContext,
   ): readonly z.infer<typeof productSearchCandidateSchema>[]
 }
 
@@ -497,7 +505,7 @@ export function createProductSearchIndex(
       }
       return { resolvedIds, unresolvedTerms }
     },
-    search(input, policy) {
+    search(input, policy, context) {
       const queryTokens = [...new Set(tokenize(input.query ?? ''))]
       const hasHairCriteria = hairCriteriaFields.some(
         (field) => input[field] !== undefined,
@@ -508,7 +516,7 @@ export function createProductSearchIndex(
 
       return indexed
         .flatMap(({ product, nameTokens, profileTokens, descriptionTokens }) => {
-          const eligibility = policy.evaluate(product, input)
+          const eligibility = policy.evaluate(product, context, input)
           if (!eligibility.eligible) return []
           if (hasHairCriteria && product.applicationArea !== 'hair') return []
           if (hasBodyCriteria && product.applicationArea !== 'body') return []
@@ -608,20 +616,23 @@ export function createProductEligibilityPolicy(
     throw new TypeError('Restrição confiável de preço inválida.')
   }
 
-  let maxPrice = trusted.maxPrice
-  let requireInStock = trusted.requireInStock ?? false
-  const activeRestrictionCodes = new Set(trusted.activeRestrictionCodes ?? [])
-  const incompatibleIngredientIds = new Set(
-    trusted.incompatibleIngredientIds ?? [],
-  )
+  const trustedIngredientIds = new Set(trusted.incompatibleIngredientIds ?? [])
   if (
-    [...incompatibleIngredientIds].some((id) => !index.ingredientIds.has(id))
+    [...trustedIngredientIds].some((id) => !index.ingredientIds.has(id))
   ) {
     throw new TypeError('Restrição confiável de ingrediente inválida.')
   }
+  const stateKey = Symbol('product-eligibility')
+  const stateFor = (context: AgentToolExecutionContext) =>
+    context.getState(stateKey, () => ({
+      maxPrice: trusted.maxPrice,
+      requireInStock: trusted.requireInStock ?? false,
+      activeRestrictionCodes: new Set(trusted.activeRestrictionCodes ?? []),
+      incompatibleIngredientIds: new Set(trustedIngredientIds),
+    }))
 
   return {
-    applySearchConstraints(input) {
+    applySearchConstraints(input, context) {
       if (
         (trusted.category !== undefined &&
           input.category !== undefined &&
@@ -636,22 +647,24 @@ export function createProductEligibilityPolicy(
         return false
       }
 
+      const state = stateFor(context)
       if (input.maxPrice !== undefined) {
-        maxPrice =
-          maxPrice === undefined
+        state.maxPrice =
+          state.maxPrice === undefined
             ? input.maxPrice
-            : Math.min(maxPrice, input.maxPrice)
+            : Math.min(state.maxPrice, input.maxPrice)
       }
-      requireInStock ||= input.requireInStock
+      state.requireInStock ||= input.requireInStock
       for (const code of input.activeRestrictionCodes ?? []) {
-        activeRestrictionCodes.add(code)
+        state.activeRestrictionCodes.add(code)
       }
       for (const id of input.incompatibleIngredientIds ?? []) {
-        incompatibleIngredientIds.add(id)
+        state.incompatibleIngredientIds.add(id)
       }
       return true
     },
-    evaluate(product, scope = {}) {
+    evaluate(product, context, scope = {}) {
+      const state = stateFor(context)
       const reasons: EligibilityReason[] = []
       const category = trusted.category ?? scope.category
       const subcategory = trusted.subcategory ?? scope.subcategory
@@ -661,20 +674,22 @@ export function createProductEligibilityPolicy(
       if (subcategory !== undefined && product.subcategory !== subcategory) {
         reasons.push('subcategory-mismatch')
       }
-      if (maxPrice !== undefined && product.price > maxPrice) {
+      if (state.maxPrice !== undefined && product.price > state.maxPrice) {
         reasons.push('above-price-limit')
       }
-      if (requireInStock && product.stock <= 0) reasons.push('out-of-stock')
+      if (state.requireInStock && product.stock <= 0) {
+        reasons.push('out-of-stock')
+      }
       if (
         (product.restrictions ?? []).some((code) =>
-          activeRestrictionCodes.has(code),
+          state.activeRestrictionCodes.has(code),
         )
       ) {
         reasons.push('restriction-code')
       }
       if (
         [...productIngredientIds(product)].some((id) =>
-          incompatibleIngredientIds.has(id),
+          state.incompatibleIngredientIds.has(id),
         )
       ) {
         reasons.push('incompatible-ingredient')
@@ -717,18 +732,23 @@ export function createSearchProductsTool(
     description: SEARCH_PRODUCTS_TOOL_DESCRIPTION,
     inputSchema: searchProductsToolInputSchema,
     outputSchema: searchProductsExecutionResultSchema,
-    isRecommendationProductEligible(productId) {
+    isRecommendationProductEligible(productId, context) {
       const product = index.findById(productId)
-      return product !== undefined && eligibility.evaluate(product).eligible
+      return (
+        product !== undefined && eligibility.evaluate(product, context).eligible
+      )
     },
-    async execute(input) {
+    async execute(input, context) {
       const parsed = searchProductsToolInputSchema.safeParse(input)
-      if (!parsed.success || !eligibility.applySearchConstraints(parsed.data)) {
+      if (
+        !parsed.success ||
+        !eligibility.applySearchConstraints(parsed.data, context)
+      ) {
         return invalidArguments(SEARCH_PRODUCTS_TOOL_NAME)
       }
 
       try {
-        const products = index.search(parsed.data, eligibility)
+        const products = index.search(parsed.data, eligibility, context)
         if (products.length === 0) {
           return {
             ok: true,
@@ -792,11 +812,13 @@ export function createGetProductDetailsTool(
     description: GET_PRODUCT_DETAILS_TOOL_DESCRIPTION,
     inputSchema: getProductDetailsInputSchema,
     outputSchema: getProductDetailsExecutionResultSchema,
-    isRecommendationProductEligible(productId) {
+    isRecommendationProductEligible(productId, context) {
       const product = catalog.findById(productId)
-      return product !== undefined && eligibility.evaluate(product).eligible
+      return (
+        product !== undefined && eligibility.evaluate(product, context).eligible
+      )
     },
-    async execute(input) {
+    async execute(input, context) {
       const parsed = getProductDetailsInputSchema.safeParse(input)
       if (!parsed.success) return invalidArguments(GET_PRODUCT_DETAILS_TOOL_NAME)
 
@@ -811,7 +833,7 @@ export function createGetProductDetailsTool(
           }
         }
 
-        const eligibilityResult = eligibility.evaluate(product)
+        const eligibilityResult = eligibility.evaluate(product, context)
         const details = productDetailsSchema.parse({
           id: product.id,
           slug: product.slug,

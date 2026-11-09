@@ -6,6 +6,7 @@ const TOOL_NAME_PATTERN = /^[A-Za-z0-9_-]+$/
 
 export interface AgentToolExecutionContext {
   readonly signal: AbortSignal
+  getState<T>(key: symbol, initialize: () => T): T
 }
 
 export interface AgentTool {
@@ -13,11 +14,28 @@ export interface AgentTool {
   readonly description: string
   readonly inputSchema: z.ZodType
   readonly outputSchema: z.ZodType
-  isRecommendationProductEligible?(productId: number): boolean
+  isRecommendationProductEligible?(
+    productId: number,
+    context: AgentToolExecutionContext,
+  ): boolean
   execute(
     input: unknown,
     context: AgentToolExecutionContext,
   ): Promise<unknown>
+}
+
+export function createAgentToolExecutionContext(
+  signal: AbortSignal,
+): AgentToolExecutionContext {
+  const state = new Map<symbol, unknown>()
+
+  return {
+    signal,
+    getState<T>(key: symbol, initialize: () => T) {
+      if (!state.has(key)) state.set(key, initialize())
+      return state.get(key) as T
+    },
+  }
 }
 
 export interface AgentToolRegistry {

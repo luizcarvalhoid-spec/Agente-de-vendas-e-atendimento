@@ -8,7 +8,10 @@ import type {
   AgentToolCall,
 } from './agent-model-port.js'
 import { createConsultativeSystemInstruction } from './consultative-agent-policy.js'
-import type { AgentToolRegistry } from './tools/agent-tool.js'
+import {
+  createAgentToolExecutionContext,
+  type AgentToolRegistry,
+} from './tools/agent-tool.js'
 import {
   GET_PRODUCT_DETAILS_TOOL_NAME,
   SEARCH_PRODUCTS_TOOL_NAME,
@@ -40,6 +43,12 @@ const conversationMessageSchema = z
 const runInputSchema = z
   .object({
     conversation: z.array(conversationMessageSchema).min(1).max(16),
+    groundingRequirement: z.enum([
+      'not_required',
+      'product',
+      'faq',
+      'any',
+    ]),
     signal: z.custom<AbortSignal>(
       (value) => value instanceof AbortSignal,
     ).optional(),
@@ -75,6 +84,34 @@ export type ToolOrchestratorFallbackReason =
   | 'OPERATION_TIMEOUT'
   | 'MODEL_FAILED'
   | 'INVALID_MODEL_RESPONSE'
+  | 'INSUFFICIENT_GROUNDING'
+
+export type ToolOrchestratorGroundingStatus =
+  | 'not_required'
+  | 'verified'
+  | 'not_found'
+  | 'insufficient'
+
+export type ToolOrchestratorGroundingRequirement =
+  | 'not_required'
+  | 'product'
+  | 'faq'
+  | 'any'
+
+export type ToolOrchestratorGroundingDomainStatus =
+  | 'not_consulted'
+  | 'found'
+  | 'not_found'
+  | 'failed'
+
+export interface ToolOrchestratorGroundingSummary {
+  requirement: ToolOrchestratorGroundingRequirement
+  status: ToolOrchestratorGroundingStatus
+  product: ToolOrchestratorGroundingDomainStatus
+  faq: ToolOrchestratorGroundingDomainStatus
+}
+
+export type ToolOrchestratorRunInput = z.input<typeof runInputSchema>
 
 interface AggregatedUsage {
   inputTokens: number
@@ -104,6 +141,7 @@ interface GroundedResultFields {
   faqSourceIds: readonly string[]
   usage: AggregatedUsage
   diagnostics: SanitizedDiagnostics
+  grounding: ToolOrchestratorGroundingSummary
 }
 
 export type ToolOrchestratorResult =
@@ -220,6 +258,9 @@ export function createToolOrchestrator(
         operationTimedOut = true
         operationController.abort()
       }, timeoutMs)
+      const toolExecutionContext = createAgentToolExecutionContext(
+        operationController.signal,
+      )
 
       const messages: AgentMessage[] = [
         { role: 'system', content: systemInstruction() },
@@ -238,6 +279,11 @@ export function createToolOrchestrator(
       let toolErrors = 0
       let toolResultBytes = 0
       let faqNotFound = false
+      let productFound = false
+      let productNotFound = false
+      let productFailed = false
+      let faqFound = false
+      let faqFailed = false
       const toolOutcomes = {
         found: 0,
         notFound: 0,
@@ -248,6 +294,56 @@ export function createToolOrchestrator(
       let usageComplete = true
       const usage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 }
 
+      const domainStatus = (
+        found: boolean,
+        notFound: boolean,
+        failed: boolean,
+      ): ToolOrchestratorGroundingDomainStatus => {
+        if (found) return 'found'
+        if (failed) return 'failed'
+        if (notFound) return 'not_found'
+        return 'not_consulted'
+      }
+      const groundingSummary = (): ToolOrchestratorGroundingSummary => {
+        const requirement = parsedInput.data.groundingRequirement
+        const product = domainStatus(
+          productFound,
+          productNotFound,
+          productFailed,
+        )
+        const faq = domainStatus(faqFound, faqNotFound, faqFailed)
+        let status: ToolOrchestratorGroundingStatus
+
+        if (requirement === 'not_required') {
+          status = 'not_required'
+        } else if (requirement === 'product') {
+          status =
+            product === 'found'
+              ? 'verified'
+              : product === 'not_found'
+                ? 'not_found'
+                : 'insufficient'
+        } else if (requirement === 'faq') {
+          status =
+            faq === 'found'
+              ? 'verified'
+              : faq === 'not_found'
+                ? 'not_found'
+                : 'insufficient'
+        } else if (product === 'found' || faq === 'found') {
+          status = 'verified'
+        } else if (
+          product !== 'failed' &&
+          faq !== 'failed' &&
+          (product === 'not_found' || faq === 'not_found')
+        ) {
+          status = 'not_found'
+        } else {
+          status = 'insufficient'
+        }
+
+        return { requirement, status, product, faq }
+      }
       const groundedFields = (): GroundedResultFields => ({
         recommendationProductIds: (
           productSearchCompleted
@@ -263,7 +359,10 @@ export function createToolOrchestrator(
           return (
             validators.length > 0 &&
             validators.every((tool) =>
-              tool?.isRecommendationProductEligible?.(id),
+              tool?.isRecommendationProductEligible?.(
+                id,
+                toolExecutionContext,
+              ),
             )
           )
         }),
@@ -278,6 +377,7 @@ export function createToolOrchestrator(
           faqNotFound,
           toolOutcomes: { ...toolOutcomes },
         },
+        grounding: groundingSummary(),
       })
 
       const fallback = (
@@ -291,9 +391,12 @@ export function createToolOrchestrator(
         const timeoutReason = reason === 'OPERATION_TIMEOUT'
         return {
           status: 'fallback',
-          message: timeoutReason
-            ? 'A consulta excedeu o tempo seguro desta demonstração. Tente novamente.'
-            : 'Não foi possível concluir a consulta dentro dos limites seguros desta demonstração.',
+          message:
+            reason === 'INSUFFICIENT_GROUNDING'
+              ? 'Não foi possível verificar essa informação nas fontes da demonstração HidraSplash.'
+              : timeoutReason
+                ? 'A consulta excedeu o tempo seguro desta demonstração. Tente novamente.'
+                : 'Não foi possível concluir a consulta dentro dos limites seguros desta demonstração.',
           fallback: true,
           termination: reason,
           ...groundedFields(),
@@ -328,9 +431,12 @@ export function createToolOrchestrator(
           if (!parsed.success || !parsed.data.ok) return
           productSearchCompleted = true
           if (parsed.data.status === 'found') {
+            productFound = true
             const ids = parsed.data.products.map((product) => product.id)
             uniquePush(recommendationFromSearch, ids)
             uniquePush(consultedProductIds, ids)
+          } else {
+            productNotFound = true
           }
           return
         }
@@ -338,8 +444,10 @@ export function createToolOrchestrator(
         if (toolName === GET_PRODUCT_DETAILS_TOOL_NAME) {
           const parsed = getProductDetailsExecutionResultSchema.safeParse(result)
           if (!parsed.success || !parsed.data.ok || parsed.data.status !== 'found') {
+            if (parsed.success && parsed.data.ok) productNotFound = true
             return
           }
+          productFound = true
           uniquePush(consultedProductIds, [parsed.data.product.id])
           if (parsed.data.product.eligibility.eligible) {
             uniquePush(recommendationFromDetails, [parsed.data.product.id])
@@ -353,6 +461,7 @@ export function createToolOrchestrator(
           if (parsed.data.status === 'not_found') {
             faqNotFound = true
           } else {
+            faqFound = true
             uniquePush(
               faqSourceIds,
               parsed.data.sources.map((source) => source.sourceId),
@@ -418,9 +527,7 @@ export function createToolOrchestrator(
               executedSignatures.add(signature)
               try {
                 const rawResult = await raceWithAbort(
-                  tool.execute(parsedArguments.data, {
-                    signal: operationController.signal,
-                  }),
+                  tool.execute(parsedArguments.data, toolExecutionContext),
                   operationController.signal,
                 )
                 const parsedResult = tool.outputSchema.safeParse(rawResult)
@@ -501,6 +608,17 @@ export function createToolOrchestrator(
         } else {
           toolOutcomes.rejected += 1
         }
+        if (finalResult.ok === false) {
+          if (
+            toolCall.function.name === SEARCH_PRODUCTS_TOOL_NAME ||
+            toolCall.function.name === GET_PRODUCT_DETAILS_TOOL_NAME
+          ) {
+            productFailed = true
+          }
+          if (toolCall.function.name === SEARCH_FAQ_TOOL_NAME) {
+            faqFailed = true
+          }
+        }
         log({
           type: 'tool',
           toolName: toolCall.function.name,
@@ -556,6 +674,9 @@ export function createToolOrchestrator(
           if (calls.length === 0) {
             const finalText = modelResult.message.content?.trim()
             if (!finalText) return fallback('INVALID_MODEL_RESPONSE')
+            if (groundingSummary().status === 'insufficient') {
+              return fallback('INSUFFICIENT_GROUNDING')
+            }
             log({
               type: 'termination',
               status: 'ASSISTANT_RESPONSE',

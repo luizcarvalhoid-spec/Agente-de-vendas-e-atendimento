@@ -4,7 +4,10 @@ import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 import { openRouterFunctionToolSchema } from '../src/agent/openrouter/openrouter-client.js'
-import { createAgentToolRegistry } from '../src/agent/tools/agent-tool.js'
+import {
+  createAgentToolExecutionContext,
+  createAgentToolRegistry,
+} from '../src/agent/tools/agent-tool.js'
 import {
   GET_PRODUCT_DETAILS_TOOL_NAME,
   PRODUCT_SEARCH_DEFAULT_LIMIT,
@@ -25,6 +28,7 @@ const backendRoot = dirname(dirname(fileURLToPath(import.meta.url)))
 const catalogRoot = join(backendRoot, 'content', 'catalog')
 const productsFile = join(catalogRoot, 'products.json')
 const signal = new AbortController().signal
+const executionContext = () => createAgentToolExecutionContext(signal)
 
 async function loadCatalog() {
   return loadCatalogRepository({ catalogRoot, productsFile })
@@ -123,7 +127,7 @@ test('ranks anticaspa candidates commercially and breaks ties by canonical ID', 
         scalpTypes: ['oleoso'],
         limit: 5,
       },
-      { signal },
+      executionContext(),
     ),
   )
 
@@ -137,6 +141,7 @@ test('ranks anticaspa candidates commercially and breaks ties by canonical ID', 
 
 test('applies an inclusive budget and keeps hard constraints monotonic for details', async () => {
   const { search, details } = await createCanonicalTools()
+  const context = executionContext()
   const result = searchProductsExecutionResultSchema.parse(
     await search.execute(
       {
@@ -146,7 +151,7 @@ test('applies an inclusive budget and keeps hard constraints monotonic for detai
         maxPrice: 47,
         limit: 5,
       },
-      { signal },
+      context,
     ),
   )
   assert.equal(result.ok && result.status, 'found')
@@ -156,10 +161,10 @@ test('applies an inclusive budget and keeps hard constraints monotonic for detai
 
   await search.execute(
     { query: 'anticaspa', category: 'shampoos', maxPrice: 100 },
-    { signal },
+    context,
   )
   const detailResult = getProductDetailsExecutionResultSchema.parse(
-    await details.execute({ productId: 11 }, { signal }),
+    await details.execute({ productId: 11 }, context),
   )
   assert.equal(detailResult.ok && detailResult.status, 'found')
   if (!detailResult.ok || detailResult.status !== 'found') return
@@ -167,6 +172,152 @@ test('applies an inclusive budget and keeps hard constraints monotonic for detai
   assert.deepEqual(detailResult.product.eligibility.reasons, [
     'above-price-limit',
   ])
+})
+
+test('isolates budgets and detail eligibility between independent executions', async () => {
+  const { search, details } = await createCanonicalTools()
+  const executionA = executionContext()
+  const executionB = executionContext()
+
+  const resultA = searchProductsExecutionResultSchema.parse(
+    await search.execute(
+      {
+        query: 'anticaspa',
+        category: 'shampoos',
+        subcategory: 'anticaspa',
+        maxPrice: 40,
+      },
+      executionA,
+    ),
+  )
+  const resultB = searchProductsExecutionResultSchema.parse(
+    await search.execute(
+      {
+        query: 'anticaspa',
+        category: 'shampoos',
+        subcategory: 'anticaspa',
+        maxPrice: 100,
+        limit: 5,
+      },
+      executionB,
+    ),
+  )
+
+  assert.equal(resultA.ok && resultA.status, 'not_found')
+  assert.equal(resultB.ok && resultB.status, 'found')
+  if (resultB.ok && resultB.status === 'found') {
+    assert.ok(resultB.products.some((product) => product.price > 40))
+  }
+
+  const detailsA = getProductDetailsExecutionResultSchema.parse(
+    await details.execute({ productId: 11 }, executionA),
+  )
+  const detailsB = getProductDetailsExecutionResultSchema.parse(
+    await details.execute({ productId: 11 }, executionB),
+  )
+  assert.equal(
+    detailsA.ok && detailsA.status === 'found'
+      ? detailsA.product.eligibility.eligible
+      : undefined,
+    false,
+  )
+  assert.equal(
+    detailsB.ok && detailsB.status === 'found'
+      ? detailsB.product.eligibility.eligible
+      : undefined,
+    true,
+  )
+})
+
+test('keeps concurrent executions with different budgets independent', async () => {
+  const { search } = await createCanonicalTools()
+  const [rawA, rawB] = await Promise.all([
+    search.execute(
+      {
+        query: 'anticaspa',
+        category: 'shampoos',
+        subcategory: 'anticaspa',
+        maxPrice: 47,
+        limit: 5,
+      },
+      executionContext(),
+    ),
+    search.execute(
+      {
+        query: 'anticaspa',
+        category: 'shampoos',
+        subcategory: 'anticaspa',
+        maxPrice: 100,
+        limit: 5,
+      },
+      executionContext(),
+    ),
+  ])
+  const resultA = searchProductsExecutionResultSchema.parse(rawA)
+  const resultB = searchProductsExecutionResultSchema.parse(rawB)
+
+  assert.ok(
+    resultA.ok &&
+      resultA.status === 'found' &&
+      resultA.products.every((product) => product.price <= 47),
+  )
+  assert.ok(
+    resultB.ok &&
+      resultB.status === 'found' &&
+      resultB.products.some((product) => product.price > 47),
+  )
+})
+
+test('does not leak ingredient restrictions between executions', async () => {
+  const { search } = await createCanonicalTools()
+  const constrained = searchProductsExecutionResultSchema.parse(
+    await search.execute(
+      {
+        query: 'anticaspa',
+        category: 'shampoos',
+        subcategory: 'anticaspa',
+        incompatibleIngredientIds: ['cocamidopropil-betaina'],
+      },
+      executionContext(),
+    ),
+  )
+  const unconstrained = searchProductsExecutionResultSchema.parse(
+    await search.execute(
+      {
+        query: 'anticaspa',
+        category: 'shampoos',
+        subcategory: 'anticaspa',
+      },
+      executionContext(),
+    ),
+  )
+
+  assert.equal(constrained.ok && constrained.status, 'not_found')
+  assert.equal(unconstrained.ok && unconstrained.status, 'found')
+})
+
+test('does not leak requireInStock between executions', async () => {
+  const canonical = await loadCatalog()
+  const product = canonical.findById(9)
+  assert.ok(product)
+  if (!product) return
+  const outOfStock = productSchema.parse({ ...product, stock: 0 })
+  const index = createProductSearchIndex([outOfStock])
+  const eligibility = createProductEligibilityPolicy(index)
+  const search = createSearchProductsTool(index, eligibility)
+
+  const constrained = searchProductsExecutionResultSchema.parse(
+    await search.execute(
+      { query: 'anticaspa', requireInStock: true },
+      executionContext(),
+    ),
+  )
+  const unconstrained = searchProductsExecutionResultSchema.parse(
+    await search.execute({ query: 'anticaspa' }, executionContext()),
+  )
+
+  assert.equal(constrained.ok && constrained.status, 'not_found')
+  assert.equal(unconstrained.ok && unconstrained.status, 'found')
 })
 
 test('permits an out-of-stock informational lookup without making it eligible', async () => {
@@ -185,7 +336,7 @@ test('permits an out-of-stock informational lookup without making it eligible', 
   }
   const details = createGetProductDetailsTool(catalog, eligibility)
   const result = getProductDetailsExecutionResultSchema.parse(
-    await details.execute({ productId: 9 }, { signal }),
+    await details.execute({ productId: 9 }, executionContext()),
   )
 
   assert.equal(result.ok && result.status, 'found')
@@ -203,11 +354,12 @@ test('does not allow model criteria to relax trusted backend restrictions', asyn
       maxPrice: 47,
     },
   })
+  const context = executionContext()
 
   const relaxedPrice = searchProductsExecutionResultSchema.parse(
     await search.execute(
       { query: 'anticaspa', maxPrice: 100, limit: 5 },
-      { signal },
+      context,
     ),
   )
   assert.equal(relaxedPrice.ok && relaxedPrice.status, 'found')
@@ -217,7 +369,7 @@ test('does not allow model criteria to relax trusted backend restrictions', asyn
 
   const wrongCategory = await search.execute(
     { query: 'sabonete', category: 'sabonetes' },
-    { signal },
+    context,
   )
   assert.deepEqual(wrongCategory, {
     ok: false,
@@ -239,7 +391,7 @@ test('excludes synthetic ingredients without making a clinical safety claim', as
         incompatibleIngredientIds: ['cocamidopropil-betaina'],
         limit: 5,
       },
-      { signal },
+      executionContext(),
     ),
   )
 
@@ -257,7 +409,7 @@ test('uses the body taxonomy without leaking hair compatibility fields', async (
         bodyConcerns: ['sensibilidade'],
         limit: 5,
       },
-      { signal },
+      executionContext(),
     ),
   )
 
@@ -291,7 +443,7 @@ test('checks incompatible synthetic ingredients inside kit components', async ()
         subcategory: kit.subcategory,
         incompatibleIngredientIds: [ingredientId],
       },
-      { signal },
+      executionContext(),
     ),
   )
   assert.equal(result.ok && result.status, 'not_found')
@@ -299,8 +451,9 @@ test('checks incompatible synthetic ingredients inside kit components', async ()
 
 test('returns complete sanitized product details and honest not_found', async () => {
   const { details } = await createCanonicalTools()
+  const context = executionContext()
   const found = getProductDetailsExecutionResultSchema.parse(
-    await details.execute({ productId: 12 }, { signal }),
+    await details.execute({ productId: 12 }, context),
   )
   assert.equal(found.ok && found.status, 'found')
   if (found.ok && found.status === 'found') {
@@ -312,7 +465,7 @@ test('returns complete sanitized product details and honest not_found', async ()
     assert.equal(serialized.includes('absolutePath'), false)
   }
 
-  const missing = await details.execute({ productId: 999_999 }, { signal })
+  const missing = await details.execute({ productId: 999_999 }, context)
   assert.deepEqual(missing, {
     ok: true,
     status: 'not_found',

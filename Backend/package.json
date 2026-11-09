@@ -12,6 +12,7 @@
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/server.js",
     "test": "tsc -p tsconfig.json && tsx --test \"test/**/*.test.ts\"",
+    "smoke:openrouter": "tsx src/scripts/smoke-openrouter.ts",
     "validate:catalog": "tsx src/scripts/validate-catalog.ts",
     "validate:faq": "tsx src/scripts/validate-faq.ts"
   },

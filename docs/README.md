@@ -35,7 +35,7 @@ Marque a fase apenas quando **todos os critérios de aceite** de seus backlogs f
 - [x] **01. Fundação técnica e contratos** — [Abrir](./01-fundacao-tecnica.md)
 - [x] **02. Catálogo e CMS leve** — [Abrir](./02-catalogo-cms.md)
 - [x] **03. Navegação e páginas de produto** — [Abrir](./03-paginas-da-loja.md)
-- [ ] **04. FAQ fictícia e RAG** — [Abrir](./04-faq-rag.md)
+- [x] **04. FAQ fictícia e RAG** — [Abrir](./04-faq-rag.md)
 - [ ] **05. Agente com OpenRouter e ferramentas** — [Abrir](./05-agente-openrouter.md)
 - [ ] **06. Chat comercial, carrinho e checkout demo** — [Abrir](./06-chat-carrinho-checkout.md)
 - [ ] **07. Diferenciais de vendas consultivas** — [Abrir](./07-diferenciais-vendas.md)
@@ -46,6 +46,27 @@ Marque a fase apenas quando **todos os critérios de aceite** de seus backlogs f
 **Marco M1 (MVP demonstrável):** fases 01–06.  
 **Marco M2 (portfólio diferenciado):** fases 07–08.  
 **Marco M3 (publicação):** fases 09–10.
+
+## Acompanhamento da fase atual
+
+**Atualizado em:** 09/11/2026.
+
+**Referência atual:** branch `main`, commit
+`b0047a1cc0d65598e0033e6545567cc09db061af`. A referência histórica do
+diagnóstico inicial permanece registrada no início deste documento.
+
+- **Fase atual:** 05 — Agente com OpenRouter e ferramentas.
+- [x] **5.1** — Implementada e mesclada no PR #17.
+- [x] **5.2** — Implementada e mesclada no PR #18.
+- [x] **5.3** — Implementada e mesclada no PR #19.
+- [ ] **5.4** — Próxima tarefa: contrato `POST /api/chat`.
+- [ ] **5.5** — Pendente: falhas e controle de custos.
+- [ ] **Smoke real com OpenRouter** — pendente.
+- [ ] **Tool calling real com o modelo configurado** — pendente.
+
+A fase 05 permanece aberta: os itens concluídos acima foram revisados e
+mesclados, mas foram testados offline. O endpoint público e as validações
+manuais com o provedor real ainda não foram entregues.
 
 ## Dependências (caminho crítico)
 

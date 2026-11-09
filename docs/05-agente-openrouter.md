@@ -5,14 +5,21 @@
 
 ## 5.1 — Cliente OpenRouter seguro no backend
 
-- [ ] Integrar API OpenRouter **somente no backend**, com chave de ambiente e modelo configurável.
+- [x] Integrar API OpenRouter **somente no backend**, com chave de ambiente e modelo configurável.
 - [ ] Escolher e registrar um modelo com suporte confirmado a **tool/function calling**; testar sua compatibilidade antes de depender dele.
-- [ ] Definir timeouts, limites de tokens/resposta, tratamento de `429`, `5xx`, indisponibilidade e cancelamento.
-- [ ] Não registrar Authorization, prompt completo com segredos ou informações pessoais em logs.
-- [ ] Criar testes com cliente HTTP mockado; chamada real apenas em smoke test manual com chave própria.
+- [x] Definir timeouts, limites de tokens/resposta, tratamento de `429`, `5xx`, indisponibilidade e cancelamento.
+- [x] Não registrar Authorization, prompt completo com segredos ou informações pessoais em logs.
+- [x] Criar testes com cliente HTTP mockado; chamada real apenas em smoke test manual com chave própria.
 
 **Aceite:** API real retorna resposta pelo servidor, e nenhum segredo fica em artefato do Vite ou controle de versão.  
 **Commit:** `feat(agent): integrate OpenRouter client`.
+
+**Status de entrega:** implementada e mesclada no PR #17. O cliente
+backend-only, a configuração parametrizada, os limites, o cancelamento, a
+sanitização, os testes offline e o script de smoke manual estão implementados.
+O aceite operacional permanece pendente até uma chamada real com credencial
+própria confirmar resposta do provedor e compatibilidade de tool calling do
+modelo configurado.
 
 ### Registro técnico da 5.1
 
@@ -35,7 +42,7 @@ Esses limites controlam memória, latência e custo, mas não substituem uma
 contagem de tokens do contexto. O ciclo e o orçamento agregado do agente serão
 tratados nas tarefas posteriores.
 
-#### Modelos verificados em 09/11/2026
+#### Modelos consultados no catálogo em 09/11/2026
 
 Os dados abaixo vieram do
 [catálogo oficial da OpenRouter](https://openrouter.ai/api/v1/models). Preços
@@ -68,20 +75,26 @@ duas variáveis, o smoke informa que não foi executado e termina sem simular
 sucesso. Ele não faz parte da suíte padrão nem do CI.
 
 **Estado em 09/11/2026:** smoke real pendente por ausência de credencial local;
-nenhum sucesso foi simulado. Os checkboxes permanecem para validação técnica e
-manual após a revisão do PR.
+nenhum sucesso foi simulado. A implementação revisada não substitui a validação
+manual da compatibilidade real do modelo com tool calling.
 
 ## 5.2 — Prompt e política consultiva
 
-- [ ] Definir papel: consultor de cosméticos da HidraSplash, cordial e objetivo, com português brasileiro.
-- [ ] Fazer perguntas **adaptativas**, uma de cada vez quando útil: necessidade, tipo de cabelo/couro cabeludo, sensibilidade, orçamento e preferência.
-- [ ] Aproveitar dados já fornecidos; não repetir perguntas respondidas nem usar roteiro rígido.
-- [ ] Recomendar somente produtos reais do catálogo e não inventar estoque, preço, ingrediente ou benefício.
-- [ ] Evitar diagnósticos médicos, curas garantidas e afirmações sem suporte; diante de sinais clínicos, orientar procurar profissional.
-- [ ] Declarar que é demonstração fictícia quando apropriado.
+- [x] Definir papel: consultor de cosméticos da HidraSplash, cordial e objetivo, com português brasileiro.
+- [x] Fazer perguntas **adaptativas**, uma de cada vez quando útil: necessidade, tipo de cabelo/couro cabeludo, sensibilidade, orçamento e preferência.
+- [x] Aproveitar dados já fornecidos; não repetir perguntas respondidas nem usar roteiro rígido.
+- [x] Recomendar somente produtos reais do catálogo e não inventar estoque, preço, ingrediente ou benefício.
+- [x] Evitar diagnósticos médicos, curas garantidas e afirmações sem suporte; diante de sinais clínicos, orientar procurar profissional.
+- [x] Declarar que é demonstração fictícia quando apropriado.
 
 **Aceite:** em simulações, uma entrada genérica (“preciso de shampoo anticaspa”) leva a perguntas pertinentes; entrada completa permite recomendação direta.  
 **Commit:** `feat(agent): define consultative sales behavior`.
+
+**Status de entrega:** implementada e mesclada no PR #18. A política permanente
+define persona consultiva, perguntas adaptativas, grounding, fallback e limites
+clínicos; os testes estáticos e os 15 cenários esperados estão versionados. O
+aceite comportamental com um modelo real permanece pendente e não é comprovado
+pelos testes determinísticos.
 
 ### Registro técnico da 5.2
 
@@ -92,21 +105,27 @@ fundamentação por catálogo/FAQ, fallback e limites clínicos sem codificar
 produtos ou preços na mensagem permanente.
 
 O golden set contém 15 cenários esperados e separa validação estática,
-simulação controlada futura e avaliação manual com modelo real. Os testes desta
-etapa não chamam OpenRouter e não alegam provar obediência de um LLM. A
-integração da política, ferramentas e resultados no ciclo de execução permanece
-na tarefa 5.3.
+simulação controlada e avaliação manual com modelo real. Os testes desta etapa
+não chamam OpenRouter e não alegam provar obediência de um LLM. A política foi
+integrada ao ciclo provider-agnostic na 5.3, ainda sem execução contra um modelo
+real.
 
 ## 5.3 — Ferramentas e ciclo de execução
 
-- [ ] Implementar ferramentas `search_products`, `get_product_details`, `search_faq` com esquemas Zod claros.
-- [ ] Criar ciclo controlado: LLM decide tool → backend valida → executa → acrescenta retorno → LLM finaliza.
-- [ ] Limitar a quantidade de iterações/chamadas por requisição, tamanho dos argumentos e resultados.
-- [ ] Filtrar por restrições duras **no backend** (preço máximo, ingredientes incompatíveis declarados, estoque), depois classificar pertinência.
-- [ ] Testar tool inexistente, argumento inválido, zero resultados e timeout sem crash.
+- [x] Implementar ferramentas `search_products`, `get_product_details`, `search_faq` com esquemas Zod claros.
+- [x] Criar ciclo controlado: LLM decide tool → backend valida → executa → acrescenta retorno → LLM finaliza.
+- [x] Limitar a quantidade de iterações/chamadas por requisição, tamanho dos argumentos e resultados.
+- [x] Filtrar por restrições duras **no backend** (preço máximo, ingredientes incompatíveis declarados, estoque), depois classificar pertinência.
+- [x] Testar tool inexistente, argumento inválido, zero resultados e timeout sem crash.
 
 **Aceite:** tool calling real é observável nos logs de desenvolvimento, sem consultas arbitrárias ao banco/arquivos.  
 **Commit:** `feat(agent): add bounded tool orchestration`.
+
+**Status de entrega:** implementada e mesclada no PR #19. As três ferramentas
+estão no registry; o ciclo provider-agnostic, o isolamento de elegibilidade por
+execução, os limites, o cancelamento e o grounding estrutural foram revisados e
+aprovados por testes offline. O aceite operacional permanece pendente porque o
+ciclo ainda não foi executado com OpenRouter real.
 
 ### Registro técnico da 5.3
 

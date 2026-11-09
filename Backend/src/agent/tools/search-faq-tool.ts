@@ -88,6 +88,7 @@ export interface SearchFaqTool {
   readonly name: typeof SEARCH_FAQ_TOOL_NAME
   readonly description: string
   readonly inputSchema: typeof searchFaqToolInputSchema
+  readonly outputSchema: typeof searchFaqToolExecutionResultSchema
   execute(input: unknown): Promise<SearchFaqToolExecutionResult>
 }
 
@@ -183,6 +184,7 @@ export function createSearchFaqTool(
     name: SEARCH_FAQ_TOOL_NAME,
     description: SEARCH_FAQ_TOOL_DESCRIPTION,
     inputSchema: searchFaqToolInputSchema,
+    outputSchema: searchFaqToolExecutionResultSchema,
     async execute(input) {
       const parsedInput = searchFaqToolInputSchema.safeParse(input)
       if (!parsedInput.success) return createInvalidArgumentsResult()

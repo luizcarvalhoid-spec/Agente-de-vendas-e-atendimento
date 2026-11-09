@@ -117,9 +117,26 @@ const assistantMessageSchema = z
     'A mensagem assistant precisa de conteúdo ou chamadas de ferramenta.',
   )
 
+const toolMessageSchema = z
+  .object({
+    role: z.literal('tool'),
+    toolCallId: z
+      .string()
+      .trim()
+      .min(1)
+      .max(OPENROUTER_MAX_IDENTIFIER_CHARACTERS),
+    content: z
+      .string()
+      .trim()
+      .min(1)
+      .max(OPENROUTER_MAX_MESSAGE_CHARACTERS),
+  })
+  .strict()
+
 export const openRouterMessageSchema = z.union([
   textMessageSchema,
   assistantMessageSchema,
+  toolMessageSchema,
 ])
 
 export const openRouterChatInputSchema = z
@@ -400,6 +417,14 @@ function classifyHttpError(statusCode: number) {
 
 function toProviderMessages(messages: readonly OpenRouterMessage[]) {
   return messages.map((message) => {
+    if (message.role === 'tool') {
+      return {
+        role: message.role,
+        tool_call_id: message.toolCallId,
+        content: message.content,
+      }
+    }
+
     if (message.role !== 'assistant') return message
 
     return {

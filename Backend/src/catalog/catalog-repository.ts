@@ -42,6 +42,7 @@ export interface CatalogStats {
 }
 
 export interface CatalogRepository {
+  listAll(): readonly Product[]
   list(query: ProductListQuery): ProductPage
   findById(id: number): Product | undefined
   findBySlug(slug: string): Product | undefined
@@ -177,6 +178,9 @@ async function createCatalogRepository(
   const imagesByPublicPath = await createImageIndex(sortedProducts, catalogRoot)
 
   return {
+    listAll() {
+      return sortedProducts
+    },
     list(query) {
       const normalizedQuery =
         query.q === undefined ? undefined : normalizeSearchText(query.q)

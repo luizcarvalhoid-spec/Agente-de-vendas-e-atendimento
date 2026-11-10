@@ -11,11 +11,17 @@ import type {
   AgentModelResult,
   AgentToolCall,
 } from '../src/agent/agent-model-port.js'
+import { AgentModelError } from '../src/agent/agent-model-port.js'
 import { createConsultativeSystemInstruction } from '../src/agent/consultative-agent-policy.js'
 import {
   TOOL_ORCHESTRATOR_MAX_CONTEXT_BYTES,
   createToolOrchestrator,
 } from '../src/agent/tool-orchestrator.js'
+import {
+  createBudgetedAgentModel,
+  createUsageBudgetController,
+  type BudgetedModelUsageEvent,
+} from '../src/agent/usage-budget-controller.js'
 import {
   type AgentTool,
   createAgentToolRegistry,
@@ -651,6 +657,48 @@ test('applies the global timeout while a tool is still running', async () => {
   assert.equal(slow.executions, 1)
 })
 
+test('timeout reconciles a model promise that ignores cancellation', async () => {
+  let completeLate: ((result: AgentModelResult) => void) | undefined
+  const pending = new Promise<AgentModelResult>((resolve) => {
+    completeLate = resolve
+  })
+  let calls = 0
+  const events: BudgetedModelUsageEvent[] = []
+  const budgetedModel = createBudgetedAgentModel({
+    model: {
+      complete() {
+        calls += 1
+        return pending
+      },
+    },
+    budget: createUsageBudgetController().createExecution(),
+    onUsage(event) {
+      events.push(event)
+    },
+  })
+  const fake = createFakeTool({})
+  const result = await createToolOrchestrator({
+    model: budgetedModel,
+    tools: createAgentToolRegistry([fake.tool]),
+    timeoutMs: 20,
+  }).run(runInput())
+
+  assert.equal(result.status, 'fallback')
+  assert.equal(result.termination, 'OPERATION_TIMEOUT')
+  assert.equal(calls, 1)
+  assert.equal(events.length, 1)
+  assert.equal(events[0]?.outcome, 'timeout')
+  assert.equal(events[0]?.chargedUnits, events[0]?.reservedUnits)
+
+  completeLate?.({
+    message: { role: 'assistant', content: 'resultado tardio' },
+    usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+  })
+  await new Promise<void>((resolve) => setImmediate(resolve))
+  assert.equal(events.length, 1)
+  assert.equal(calls, 1)
+})
+
 test('stops after caller cancellation without additional model calls', async () => {
   const fake = createFakeTool({})
   let calls = 0
@@ -749,4 +797,36 @@ test('never promotes IDs written freely by the model to verified grounding', asy
   assert.equal(result.grounding.status, 'insufficient')
   assert.deepEqual(result.recommendationProductIds, [])
   assert.deepEqual(result.faqSourceIds, [])
+})
+
+test('preserves neutral model failure categories and configured output limit', async (t) => {
+  const fake = createFakeTool({})
+  const cases = [
+    ['PROVIDER_RATE_LIMITED', 'MODEL_RATE_LIMITED'],
+    ['PROVIDER_UNAVAILABLE', 'MODEL_UNAVAILABLE'],
+    ['MODEL_TIMEOUT', 'MODEL_TIMEOUT'],
+    ['INVALID_MODEL_RESPONSE', 'INVALID_MODEL_RESPONSE'],
+    ['TOOL_CALLING_INCOMPATIBLE', 'MODEL_TOOL_CALLING_INCOMPATIBLE'],
+    ['LOCAL_BUDGET_EXHAUSTED', 'LOCAL_BUDGET_EXHAUSTED'],
+  ] as const
+
+  for (const [code, termination] of cases) {
+    await t.test(code, async () => {
+      let observedOutput: number | undefined
+      const result = await createToolOrchestrator({
+        model: {
+          async complete(input) {
+            observedOutput = input.maxOutputTokens
+            throw new AgentModelError(code, code !== 'LOCAL_BUDGET_EXHAUSTED')
+          },
+        },
+        tools: createAgentToolRegistry([fake.tool]),
+        maxOutputTokens: 128,
+      }).run(runInput())
+      assert.equal(result.status, 'fallback')
+      assert.equal(result.termination, termination)
+      assert.equal(result.diagnostics.modelCalls, 1)
+      assert.equal(observedOutput, 128)
+    })
+  }
 })

@@ -21,6 +21,14 @@ import type { FaqDocument } from '../knowledge/faq-document-schema.js'
 import type { FaqSearchIndex } from '../knowledge/faq-search.js'
 import type { AgentMessage, AgentModelPort } from './agent-model-port.js'
 import {
+  createBudgetedAgentModel,
+  type UsageBudgetExecution,
+} from './usage-budget-controller.js'
+import {
+  observeChatOperation,
+  type ChatOperationalObserver,
+} from '../observability/chat-operational-events.js'
+import {
   planChatGrounding,
   type ChatGroundingPlan,
 } from './chat-grounding-planner.js'
@@ -62,6 +70,8 @@ export class ChatServiceError extends Error {
 export interface ChatExecutionOptions {
   readonly requestId: string
   readonly signal: AbortSignal
+  readonly usageBudget?: UsageBudgetExecution
+  readonly observer?: ChatOperationalObserver
 }
 
 export interface ChatService {
@@ -78,6 +88,8 @@ export interface CreateChatServiceOptions {
   readonly faqDocuments: readonly FaqDocument[]
   readonly model: AgentModelPort
   readonly timeoutMs?: number
+  readonly maxModelCalls?: number
+  readonly maxOutputTokens?: number
 }
 
 interface EffectiveCommercialContext {
@@ -754,10 +766,28 @@ function handleNonCompleted(result: ToolOrchestratorResult): never {
   if (result.status === 'cancelled') {
     throw new ChatServiceError('REQUEST_CANCELLED')
   }
-  if (result.termination === 'OPERATION_TIMEOUT') {
+  if (
+    result.termination === 'OPERATION_TIMEOUT' ||
+    result.termination === 'MODEL_TIMEOUT'
+  ) {
     throw new ChatServiceError('AI_TIMEOUT')
   }
-  if (result.termination === 'MODEL_FAILED' || requiredDomainFailed(result)) {
+  if (
+    result.termination === 'INVALID_MODEL_RESPONSE' ||
+    result.termination === 'MODEL_TOOL_CALLING_INCOMPATIBLE'
+  ) {
+    throw new ChatServiceError('AI_BAD_RESPONSE')
+  }
+  if (
+    result.termination === 'MODEL_FAILED' ||
+    result.termination === 'MODEL_CONFIGURATION_INVALID' ||
+    result.termination === 'MODEL_AUTHENTICATION_FAILED' ||
+    result.termination === 'MODEL_RATE_LIMITED' ||
+    result.termination === 'MODEL_UNAVAILABLE' ||
+    result.termination === 'MODEL_CANCELLED' ||
+    result.termination === 'LOCAL_BUDGET_EXHAUSTED' ||
+    requiredDomainFailed(result)
+  ) {
     throw new ChatServiceError('AI_UNAVAILABLE')
   }
   throw new ChatServiceError('AI_BAD_RESPONSE')
@@ -910,10 +940,43 @@ export function createChatService(
         createGetProductDetailsTool(options.catalog, policy),
         faqTool,
       ])
+      const model = execution.usageBudget
+        ? createBudgetedAgentModel({
+            model: options.model,
+            budget: execution.usageBudget,
+            onUsage: (event) =>
+              observeChatOperation(execution.observer, {
+                type: 'model_usage',
+                requestId: execution.requestId,
+                ...event,
+              }),
+          })
+        : options.model
       const orchestrator = createToolOrchestrator({
-        model: options.model,
+        model,
         tools: registry,
         timeoutMs: options.timeoutMs,
+        maxModelCalls: options.maxModelCalls,
+        maxOutputTokens: options.maxOutputTokens,
+        log: (event) => {
+          if (event.type !== 'termination') return
+          observeChatOperation(execution.observer, {
+            type: 'orchestrator_termination',
+            requestId: execution.requestId,
+            status: event.status,
+            modelCalls: event.modelCalls ?? 0,
+            toolCalls: event.toolCalls ?? 0,
+            toolErrors: event.toolErrors ?? 0,
+            inputTokens: event.usage?.inputTokens ?? 0,
+            outputTokens: event.usage?.outputTokens ?? 0,
+            totalTokens: event.usage?.totalTokens ?? 0,
+            usageComplete: event.usage?.complete ?? false,
+            groundingRequirement:
+              event.grounding?.requirement ?? 'not_required',
+            productGrounding: event.grounding?.product ?? 'not_consulted',
+            faqGrounding: event.grounding?.faq ?? 'not_consulted',
+          })
+        },
       })
       const result = await orchestrator.run({
         conversation: createConversation(request, commercial),

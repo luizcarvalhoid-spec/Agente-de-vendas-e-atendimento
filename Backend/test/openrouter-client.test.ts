@@ -2,6 +2,9 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  AgentModelError,
+} from '../src/agent/agent-model-port.js'
+import {
   OPENROUTER_CHAT_COMPLETIONS_ENDPOINT,
   OPENROUTER_DEFAULT_MAX_OUTPUT_TOKENS,
   OPENROUTER_MAX_MESSAGES,
@@ -432,6 +435,7 @@ test('provider adapter validates definitions and preserves tool messages', async
       },
     ],
     signal,
+    maxOutputTokens: 128,
   })
 
   assert.deepEqual(recorded?.messages, [
@@ -439,6 +443,7 @@ test('provider adapter validates definitions and preserves tool messages', async
   ])
   assert.equal(recorded?.toolChoice, 'auto')
   assert.equal(recorded?.signal, signal)
+  assert.equal(recorded?.maxOutputTokens, 128)
   assert.equal(result.message.content, 'Final.')
 })
 
@@ -846,7 +851,16 @@ test('404 with tools remains model availability failure without unsupported-tool
   await assertClientError(
     createClient(transport).createChatCompletion({
       messages: [{ role: 'user', content: 'Use health_check.' }],
-      tools: [createTool('health_check')],
+      tools: [
+        {
+          type: 'function',
+          function: {
+            name: 'health_check',
+            description: 'Ferramenta de teste.',
+            parameters: { type: 'object', properties: {} },
+          },
+        },
+      ],
       toolChoice: {
         type: 'function',
         function: { name: 'health_check' },
@@ -939,6 +953,67 @@ test('network failure is sanitized and never retried', async () => {
     return true
   })
   assert.equal(attempts, 1)
+})
+
+test('transport phase distinguishes local rejection from possible provider use', async () => {
+  let attempts = 0
+  const transport: OpenRouterTransport = async () => {
+    attempts += 1
+    return new Response('', { status: 429 })
+  }
+  await assert.rejects(
+    createClient(transport).createChatCompletion({ messages: [] }),
+    (error: unknown) => {
+      assert.ok(error instanceof OpenRouterClientError)
+      assert.equal(error.transportStarted, false)
+      return true
+    },
+  )
+  await assert.rejects(
+    createClient(transport).createChatCompletion(validInput),
+    (error: unknown) => {
+      assert.ok(error instanceof OpenRouterClientError)
+      assert.equal(error.transportStarted, true)
+      return true
+    },
+  )
+  assert.equal(attempts, 1)
+})
+
+test('provider adapter maps protocol incompatibility to a neutral sanitized error', async () => {
+  const model = createOpenRouterAgentModel({
+    async createChatCompletion() {
+      throw new OpenRouterClientError(
+        'OPENROUTER_TOOL_CALLING_INCOMPATIBLE',
+        undefined,
+        true,
+      )
+    },
+  })
+  await assert.rejects(
+    model.complete({
+      messages: [{ role: 'user', content: 'Use a ferramenta.' }],
+      tools: [
+        {
+          type: 'function',
+          function: {
+            name: 'health_check',
+            description: 'Ferramenta de teste.',
+            parameters: { type: 'object', properties: {} },
+          },
+        },
+      ],
+      signal: new AbortController().signal,
+      maxOutputTokens: 64,
+    }),
+    (error: unknown) => {
+      assert.ok(error instanceof AgentModelError)
+      assert.equal(error.code, 'TOOL_CALLING_INCOMPATIBLE')
+      assert.equal(error.transportStarted, true)
+      assert.doesNotMatch(String(error), /OpenRouter|health_check/)
+      return true
+    },
+  )
 })
 
 test('missing or invalid configuration fails before transport without leaking the key', () => {

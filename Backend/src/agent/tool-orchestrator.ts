@@ -7,6 +7,7 @@ import type {
   AgentModelPort,
   AgentToolCall,
 } from './agent-model-port.js'
+import { AgentModelError } from './agent-model-port.js'
 import { createConsultativeSystemInstruction } from './consultative-agent-policy.js'
 import {
   createAgentToolExecutionContext,
@@ -32,6 +33,7 @@ export const TOOL_ORCHESTRATOR_MAX_TOOL_RESULT_BYTES = 24_000
 export const TOOL_ORCHESTRATOR_MAX_CONTEXT_BYTES = 80_000
 export const TOOL_ORCHESTRATOR_MAX_MESSAGES = 32
 export const TOOL_ORCHESTRATOR_TIMEOUT_MS = 45_000
+export const TOOL_ORCHESTRATOR_DEFAULT_MAX_OUTPUT_TOKENS = 512
 
 const conversationMessageSchema = z
   .object({
@@ -84,6 +86,14 @@ export type ToolOrchestratorFallbackReason =
   | 'CONTEXT_LIMIT'
   | 'OPERATION_TIMEOUT'
   | 'MODEL_FAILED'
+  | 'MODEL_CONFIGURATION_INVALID'
+  | 'MODEL_AUTHENTICATION_FAILED'
+  | 'MODEL_RATE_LIMITED'
+  | 'MODEL_UNAVAILABLE'
+  | 'MODEL_TIMEOUT'
+  | 'MODEL_CANCELLED'
+  | 'MODEL_TOOL_CALLING_INCOMPATIBLE'
+  | 'LOCAL_BUDGET_EXHAUSTED'
   | 'INVALID_MODEL_RESPONSE'
   | 'INSUFFICIENT_GROUNDING'
 
@@ -173,6 +183,10 @@ export interface ToolOrchestratorEvent {
   readonly durationMs?: number
   readonly status: string
   readonly usage?: AggregatedUsage
+  readonly modelCalls?: number
+  readonly toolCalls?: number
+  readonly toolErrors?: number
+  readonly grounding?: ToolOrchestratorGroundingSummary
 }
 
 export interface CreateToolOrchestratorOptions {
@@ -180,6 +194,8 @@ export interface CreateToolOrchestratorOptions {
   readonly tools: AgentToolRegistry
   readonly systemInstruction?: () => string
   readonly timeoutMs?: number
+  readonly maxModelCalls?: number
+  readonly maxOutputTokens?: number
   readonly now?: () => number
   readonly log?: (event: ToolOrchestratorEvent) => void
 }
@@ -228,11 +244,29 @@ export function createToolOrchestrator(
   const systemInstruction =
     options.systemInstruction ?? createConsultativeSystemInstruction
   const timeoutMs = options.timeoutMs ?? TOOL_ORCHESTRATOR_TIMEOUT_MS
+  const maxModelCalls =
+    options.maxModelCalls ?? TOOL_ORCHESTRATOR_MAX_MODEL_CALLS
+  const maxOutputTokens =
+    options.maxOutputTokens ?? TOOL_ORCHESTRATOR_DEFAULT_MAX_OUTPUT_TOKENS
   const now = options.now ?? Date.now
   const log = options.log ?? (() => undefined)
 
   if (!Number.isInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 45_000) {
     throw new TypeError('Limite temporal inválido para o orquestrador.')
+  }
+  if (
+    !Number.isInteger(maxModelCalls) ||
+    maxModelCalls <= 0 ||
+    maxModelCalls > TOOL_ORCHESTRATOR_MAX_MODEL_CALLS
+  ) {
+    throw new TypeError('Limite de chamadas ao modelo inválido.')
+  }
+  if (
+    !Number.isInteger(maxOutputTokens) ||
+    maxOutputTokens <= 0 ||
+    maxOutputTokens > 4_096
+  ) {
+    throw new TypeError('Limite de saída do modelo inválido.')
   }
   if (options.tools.size === 0) {
     throw new TypeError('O orquestrador exige ferramentas registradas.')
@@ -251,14 +285,16 @@ export function createToolOrchestrator(
       let operationTimedOut = false
       const cancelFromCaller = () => {
         callerCancelled = true
-        operationController.abort()
+        operationController.abort(new AgentModelError('MODEL_CANCELLED', true))
       }
       callerSignal?.addEventListener('abort', cancelFromCaller, { once: true })
-      if (callerCancelled) operationController.abort()
+      if (callerCancelled) {
+        operationController.abort(new AgentModelError('MODEL_CANCELLED', true))
+      }
       const timeout = setTimeout(() => {
         if (operationController.signal.aborted) return
         operationTimedOut = true
-        operationController.abort()
+        operationController.abort(new AgentModelError('MODEL_TIMEOUT', true))
       }, timeoutMs)
       const toolExecutionContext = createAgentToolExecutionContext(
         operationController.signal,
@@ -399,6 +435,10 @@ export function createToolOrchestrator(
           type: 'termination',
           status: reason,
           usage: { ...usage, complete: usageComplete },
+          modelCalls,
+          toolCalls,
+          toolErrors,
+          grounding: groundingSummary(),
         })
         const timeoutReason = reason === 'OPERATION_TIMEOUT'
         return {
@@ -420,6 +460,10 @@ export function createToolOrchestrator(
           type: 'termination',
           status: 'CALLER_CANCELLED',
           usage: { ...usage, complete: usageComplete },
+          modelCalls,
+          toolCalls,
+          toolErrors,
+          grounding: groundingSummary(),
         })
         return {
           status: 'cancelled',
@@ -646,7 +690,7 @@ export function createToolOrchestrator(
       }
 
       try {
-        while (modelCalls < TOOL_ORCHESTRATOR_MAX_MODEL_CALLS) {
+        while (modelCalls < maxModelCalls) {
           if (operationController.signal.aborted) return abortResult()
           if (messages.length > TOOL_ORCHESTRATOR_MAX_MESSAGES) {
             return fallback('CONTEXT_LIMIT')
@@ -660,20 +704,36 @@ export function createToolOrchestrator(
           }
 
           let modelResult
+          modelCalls += 1
           try {
             modelResult = await raceWithAbort(
               options.model.complete({
                 messages,
                 tools: options.tools.definitions,
                 signal: operationController.signal,
+                maxOutputTokens,
               }),
               operationController.signal,
             )
-          } catch {
+          } catch (error) {
             if (operationController.signal.aborted) return abortResult()
+            if (error instanceof AgentModelError) {
+              const reasons = {
+                CONFIGURATION_INVALID: 'MODEL_CONFIGURATION_INVALID',
+                AUTHENTICATION_FAILED: 'MODEL_AUTHENTICATION_FAILED',
+                PROVIDER_RATE_LIMITED: 'MODEL_RATE_LIMITED',
+                PROVIDER_UNAVAILABLE: 'MODEL_UNAVAILABLE',
+                MODEL_TIMEOUT: 'MODEL_TIMEOUT',
+                MODEL_CANCELLED: 'MODEL_CANCELLED',
+                INVALID_MODEL_RESPONSE: 'INVALID_MODEL_RESPONSE',
+                TOOL_CALLING_INCOMPATIBLE:
+                  'MODEL_TOOL_CALLING_INCOMPATIBLE',
+                LOCAL_BUDGET_EXHAUSTED: 'LOCAL_BUDGET_EXHAUSTED',
+              } as const
+              return fallback(reasons[error.code])
+            }
             return fallback('MODEL_FAILED')
           }
-          modelCalls += 1
           if (modelResult.usage) {
             usage.inputTokens += modelResult.usage.inputTokens
             usage.outputTokens += modelResult.usage.outputTokens
@@ -693,6 +753,10 @@ export function createToolOrchestrator(
               type: 'termination',
               status: 'ASSISTANT_RESPONSE',
               usage: { ...usage, complete: usageComplete },
+              modelCalls,
+              toolCalls,
+              toolErrors,
+              grounding: groundingSummary(),
             })
             return {
               status: 'completed',

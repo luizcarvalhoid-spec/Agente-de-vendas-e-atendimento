@@ -1,5 +1,6 @@
-import { Minus, Send, X } from 'lucide-react'
+import { Minus, RefreshCw, RotateCcw, Send, X } from 'lucide-react'
 import {
+  Fragment,
   type FormEvent,
   useCallback,
   useEffect,
@@ -8,114 +9,89 @@ import {
   useState,
 } from 'react'
 
-interface Message {
-  id: number
-  from: 'bot' | 'user'
-  text: string
+import {
+  type ChatFailureReason,
+  useChatConversation,
+} from '../hooks/useChatConversation'
+
+const initialMessage =
+  'Olá! Sou a assistente consultiva demonstrativa da HidraSplash. Posso consultar o catálogo e as políticas fictícias quando a API estiver disponível. Não informe dados pessoais.'
+
+const failureMessages: Record<ChatFailureReason, string> = {
+  configuration:
+    'O atendimento consultivo não está configurado neste ambiente.',
+  network:
+    'Não foi possível alcançar a API. Verifique a conexão e tente novamente.',
+  validation:
+    'A mensagem não pôde ser enviada. Revise o conteúdo e tente outra vez.',
+  'rate-limited':
+    'Muitas solicitações foram feitas. Aguarde o prazo indicado antes de tentar novamente.',
+  unavailable:
+    'O atendimento consultivo está temporariamente indisponível.',
+  'bad-response':
+    'A API não conseguiu produzir uma resposta consultiva válida.',
+  timeout: 'A consulta demorou mais que o esperado e foi cancelada.',
+  'invalid-response':
+    'A API respondeu em um formato inesperado. Nenhum conteúdo parcial foi exibido.',
+  server: 'Não foi possível concluir a consulta neste momento.',
 }
-
-const INITIAL_MESSAGES: Message[] = [
-  {
-    id: 1,
-    from: 'bot',
-    text: 'Olá! Este chat é uma simulação visual da futura assistente HidraSplash. Nenhum atendimento real está ativo.',
-  },
-]
-
-const simulatedReplyDelayMs = 1_200
 
 export default function ChatbotButton() {
   const [open, setOpen] = useState(false)
   const [minimized, setMinimized] = useState(false)
-  const [messages, setMessages] = useState<Message[]>(INITIAL_MESSAGES)
   const [input, setInput] = useState('')
-  const [isTyping, setIsTyping] = useState(false)
+  const conversation = useChatConversation()
   const messagesContainerRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
-  const pendingReplyRef = useRef<number>()
   const titleId = useId()
   const descriptionId = useId()
   const dialogId = useId()
 
-  const cancelPendingReply = useCallback(() => {
-    if (pendingReplyRef.current !== undefined) {
-      window.clearTimeout(pendingReplyRef.current)
-      pendingReplyRef.current = undefined
-    }
-    setIsTyping(false)
-  }, [])
-
   const closeChat = useCallback(() => {
-    cancelPendingReply()
+    conversation.cancelActive()
     setOpen(false)
     setMinimized(false)
     window.requestAnimationFrame(() => triggerRef.current?.focus())
-  }, [cancelPendingReply])
-
-  useEffect(
-    () => () => {
-      if (pendingReplyRef.current !== undefined) {
-        window.clearTimeout(pendingReplyRef.current)
-      }
-    },
-    [],
-  )
+  }, [conversation])
 
   useEffect(() => {
-    if (!open || minimized) return
-
+    if (!open || minimized || conversation.isPending) return
     const animationFrame = window.requestAnimationFrame(() => {
       inputRef.current?.focus()
     })
-
     return () => window.cancelAnimationFrame(animationFrame)
-  }, [minimized, open])
+  }, [conversation.isPending, minimized, open])
 
   useEffect(() => {
     if (!open) return
-
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') closeChat()
     }
-
     window.addEventListener('keydown', handleEscape)
     return () => window.removeEventListener('keydown', handleEscape)
   }, [closeChat, open])
 
   useEffect(() => {
-    if (open && !minimized) {
-      const container = messagesContainerRef.current
-      container?.scrollTo({ top: container.scrollHeight, behavior: 'auto' })
-    }
-  }, [messages, open, minimized])
+    if (!open || minimized) return
+    const container = messagesContainerRef.current
+    container?.scrollTo({ top: container.scrollHeight, behavior: 'auto' })
+  }, [
+    conversation.failure,
+    conversation.isPending,
+    conversation.retryAfterSeconds,
+    conversation.turns,
+    minimized,
+    open,
+  ])
 
   const sendMessage = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    const text = input.trim()
-    if (!text) return
-
-    cancelPendingReply()
-    setMessages((previous) => [
-      ...previous,
-      { id: Date.now(), from: 'user', text },
-    ])
-    setInput('')
-    setIsTyping(true)
-
-    pendingReplyRef.current = window.setTimeout(() => {
-      setMessages((previous) => [
-        ...previous,
-        {
-          id: Date.now() + 1,
-          from: 'bot',
-          text: 'Resposta simulada: posso demonstrar a interface, mas ainda não consulto o catálogo nem ofereço atendimento real.',
-        },
-      ])
-      pendingReplyRef.current = undefined
-      setIsTyping(false)
-    }, simulatedReplyDelayMs)
+    if (conversation.send(input)) setInput('')
   }
+
+  const activeAttempt = conversation.pending ?? conversation.failure
+  const retryBlocked = conversation.retryAfterSeconds > 0
 
   return (
     <>
@@ -130,7 +106,8 @@ export default function ChatbotButton() {
           }`}
         >
           <p id={descriptionId} className="sr-only">
-            Interface simulada, sem agente de inteligência artificial e sem atendimento humano.
+            Atendimento consultivo demonstrativo sujeito à disponibilidade da
+            API e do modelo. Não informe dados pessoais.
           </p>
           <div className="flex min-h-16 flex-shrink-0 items-center justify-between gap-3 bg-gradient-to-r from-amber-800 to-amber-700 px-3 py-2 text-white sm:px-4">
             <div className="flex min-w-0 items-center gap-2.5">
@@ -141,18 +118,29 @@ export default function ChatbotButton() {
               />
               <div className="min-w-0 leading-tight">
                 <h2 id={titleId} className="truncate text-sm font-semibold">
-                  Chat demonstrativo
+                  Atendimento consultivo
                 </h2>
                 <p className="mt-0.5 flex items-center gap-1 text-[11px] text-amber-50">
                   <span
                     aria-hidden="true"
                     className="inline-block h-1.5 w-1.5 rounded-full bg-amber-200"
                   />
-                  Simulação local
+                  Demonstração sujeita à disponibilidade
                 </p>
               </div>
             </div>
             <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => {
+                  conversation.startNewConversation()
+                  setInput('')
+                }}
+                className="flex min-h-11 min-w-11 items-center justify-center rounded-full transition-colors hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                aria-label="Iniciar nova conversa"
+              >
+                <RotateCcw aria-hidden="true" size={17} />
+              </button>
               <button
                 type="button"
                 onClick={() => setMinimized((value) => !value)}
@@ -179,36 +167,21 @@ export default function ChatbotButton() {
                 role="log"
                 aria-live="polite"
                 aria-relevant="additions text"
-                aria-label="Mensagens do chat demonstrativo"
+                aria-label="Mensagens do atendimento consultivo"
+                aria-busy={conversation.isPending}
                 className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-gray-50 px-4 py-3 overscroll-contain"
               >
-                {messages.map((message) => (
-                  <div
-                    key={message.id}
-                    className={`flex ${
-                      message.from === 'user' ? 'justify-end' : 'justify-start'
-                    }`}
-                  >
-                    {message.from === 'bot' && (
-                      <img
-                        src="/chatbot.svg"
-                        alt=""
-                        className="mr-2 mt-1 h-6 w-6 flex-shrink-0 rounded-full"
-                      />
-                    )}
-                    <div
-                      className={`max-w-[80%] rounded-2xl px-3.5 py-2 text-sm leading-relaxed ${
-                        message.from === 'user'
-                          ? 'rounded-br-sm bg-amber-800 text-white'
-                          : 'rounded-bl-sm border border-gray-200 bg-white text-gray-700 shadow-sm'
-                      }`}
-                    >
-                      {message.text}
-                    </div>
-                  </div>
+                <AssistantMessage text={initialMessage} />
+                {conversation.turns.map((turn) => (
+                  <Fragment key={turn.id}>
+                    <UserMessage text={turn.userMessage} />
+                    <AssistantMessage text={turn.response.message} />
+                  </Fragment>
                 ))}
 
-                {isTyping && (
+                {activeAttempt && <UserMessage text={activeAttempt.message} />}
+
+                {conversation.isPending && (
                   <div className="flex items-end justify-start gap-2">
                     <img
                       src="/chatbot.svg"
@@ -217,7 +190,7 @@ export default function ChatbotButton() {
                     />
                     <div
                       className="flex gap-1 rounded-2xl rounded-bl-sm border border-gray-200 bg-white px-4 py-3 shadow-sm"
-                      aria-label="Preparando resposta simulada"
+                      aria-label="Preparando resposta consultiva"
                     >
                       {[0, 1, 2].map((index) => (
                         <span
@@ -230,32 +203,65 @@ export default function ChatbotButton() {
                     </div>
                   </div>
                 )}
+
+                {conversation.failure && (
+                  <div className="flex items-start gap-2" role="alert">
+                    <img
+                      src="/chatbot.svg"
+                      alt=""
+                      className="mt-1 h-6 w-6 flex-shrink-0 rounded-full"
+                    />
+                    <div className="max-w-[85%] rounded-2xl rounded-bl-sm border border-red-200 bg-white px-3.5 py-2 text-sm leading-relaxed text-gray-700 shadow-sm">
+                      <p>{failureMessages[conversation.failure.reason]}</p>
+                      {conversation.failure.canRetry && (
+                        <button
+                          type="button"
+                          onClick={conversation.retry}
+                          disabled={retryBlocked || conversation.isPending}
+                          className="mt-2 inline-flex min-h-10 items-center gap-1.5 rounded-full border border-amber-800 px-3 py-1.5 text-xs font-semibold text-amber-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-800 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          <RefreshCw aria-hidden="true" size={14} />
+                          {retryBlocked
+                            ? `Tente em ${conversation.retryAfterSeconds}s`
+                            : 'Tentar novamente'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
 
               <form
                 onSubmit={sendMessage}
-                className="flex flex-shrink-0 items-center gap-2 border-t border-gray-200 bg-white px-3 py-3"
+                className="border-t border-gray-200 bg-white px-3 py-3"
               >
-                <label htmlFor={`${dialogId}-message`} className="sr-only">
-                  Mensagem para o chat demonstrativo
-                </label>
-                <input
-                  ref={inputRef}
-                  id={`${dialogId}-message`}
-                  type="text"
-                  value={input}
-                  onChange={(event) => setInput(event.target.value)}
-                  placeholder="Digite uma mensagem de teste..."
-                  className="min-h-11 min-w-0 flex-1 rounded-full border border-gray-300 bg-gray-50 px-3.5 py-2 text-sm text-gray-700 placeholder-gray-500 transition-all focus:border-amber-700 focus:outline-none focus:ring-2 focus:ring-amber-700/40"
-                />
-                <button
-                  type="submit"
-                  disabled={!input.trim()}
-                  className="flex min-h-11 min-w-11 flex-shrink-0 items-center justify-center rounded-full bg-amber-800 text-white shadow-sm transition-colors hover:bg-amber-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-800 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-700"
-                  aria-label="Enviar mensagem simulada"
-                >
-                  <Send aria-hidden="true" size={17} />
-                </button>
+                <p className="mb-2 text-[11px] leading-snug text-gray-500">
+                  Demonstração fictícia. Não informe dados pessoais.
+                </p>
+                <div className="flex items-center gap-2">
+                  <label htmlFor={`${dialogId}-message`} className="sr-only">
+                    Mensagem para o atendimento consultivo
+                  </label>
+                  <input
+                    ref={inputRef}
+                    id={`${dialogId}-message`}
+                    type="text"
+                    value={input}
+                    maxLength={4_000}
+                    disabled={conversation.isPending}
+                    onChange={(event) => setInput(event.target.value)}
+                    placeholder="Como posso ajudar?"
+                    className="min-h-11 min-w-0 flex-1 rounded-full border border-gray-300 bg-gray-50 px-3.5 py-2 text-sm text-gray-700 placeholder-gray-500 transition-all focus:border-amber-700 focus:outline-none focus:ring-2 focus:ring-amber-700/40 disabled:cursor-wait disabled:opacity-70"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!input.trim() || !conversation.canSend}
+                    className="flex min-h-11 min-w-11 flex-shrink-0 items-center justify-center rounded-full bg-amber-800 text-white shadow-sm transition-colors hover:bg-amber-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-800 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-700"
+                    aria-label="Enviar mensagem"
+                  >
+                    <Send aria-hidden="true" size={17} />
+                  </button>
+                </div>
               </form>
             </>
           )}
@@ -273,9 +279,7 @@ export default function ChatbotButton() {
           }
         }}
         className="fixed bottom-6 right-4 z-50 h-14 w-14 rounded-full shadow-lg transition-transform duration-300 hover:scale-105 hover:shadow-xl focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-amber-700 focus-visible:ring-offset-2 active:scale-95 motion-reduce:transition-none motion-reduce:hover:scale-100 motion-reduce:active:scale-100 sm:right-6"
-        aria-label={
-          open ? 'Fechar chat demonstrativo' : 'Abrir chat demonstrativo'
-        }
+        aria-label={open ? 'Fechar chat' : 'Abrir atendimento consultivo'}
         aria-controls={open ? dialogId : undefined}
         aria-expanded={open}
       >
@@ -289,5 +293,30 @@ export default function ChatbotButton() {
         />
       </button>
     </>
+  )
+}
+
+function UserMessage({ text }: { text: string }) {
+  return (
+    <div className="flex justify-end">
+      <div className="max-w-[80%] rounded-2xl rounded-br-sm bg-amber-800 px-3.5 py-2 text-sm leading-relaxed text-white">
+        {text}
+      </div>
+    </div>
+  )
+}
+
+function AssistantMessage({ text }: { text: string }) {
+  return (
+    <div className="flex justify-start">
+      <img
+        src="/chatbot.svg"
+        alt=""
+        className="mr-2 mt-1 h-6 w-6 flex-shrink-0 rounded-full"
+      />
+      <div className="max-w-[80%] rounded-2xl rounded-bl-sm border border-gray-200 bg-white px-3.5 py-2 text-sm leading-relaxed text-gray-700 shadow-sm">
+        {text}
+      </div>
+    </div>
   )
 }

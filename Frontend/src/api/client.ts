@@ -10,8 +10,14 @@ import {
   type ProductListResponse,
   type ProductSubcategory,
 } from './contracts'
+import {
+  isChatResponse,
+  parseChatRequest,
+  type ChatResponse,
+} from './chat-contracts'
 
 export type ApiRequestErrorKind =
+  | 'invalid-request'
   | 'configuration'
   | 'network'
   | 'http'
@@ -21,23 +27,33 @@ export class ApiRequestError extends Error {
   readonly kind: ApiRequestErrorKind
   readonly status?: number
   readonly code?: ApiErrorCode
+  readonly requestId?: string
+  readonly retryAfterSeconds?: number
   readonly originalCause?: unknown
 
   constructor(
     kind: ApiRequestErrorKind,
-    options: { status?: number; code?: ApiErrorCode; cause?: unknown } = {},
+    options: {
+      status?: number
+      code?: ApiErrorCode
+      requestId?: string
+      retryAfterSeconds?: number
+      cause?: unknown
+    } = {},
   ) {
     super('Não foi possível consultar a API.')
     this.name = 'ApiRequestError'
     this.kind = kind
     this.status = options.status
     this.code = options.code
+    this.requestId = options.requestId
+    this.retryAfterSeconds = options.retryAfterSeconds
     this.originalCause = options.cause
   }
 }
 
-function getApiBaseUrl() {
-  const configuredUrl = import.meta.env.VITE_API_URL?.trim()
+function getApiBaseUrl(override?: string) {
+  const configuredUrl = (override ?? import.meta.env.VITE_API_URL)?.trim()
 
   if (!configuredUrl) {
     throw new ApiRequestError('configuration')
@@ -75,14 +91,62 @@ async function readJson(response: Response): Promise<unknown> {
   }
 }
 
-async function requestJson(path: string, signal?: AbortSignal) {
+export type ApiTransport = (
+  input: RequestInfo | URL,
+  init?: RequestInit,
+) => Promise<Response>
+
+export interface ApiRuntime {
+  apiUrl?: string
+  transport?: ApiTransport
+  now?: () => number
+}
+
+interface RequestJsonOptions {
+  signal?: AbortSignal
+  method?: 'GET' | 'POST'
+  body?: unknown
+  runtime?: ApiRuntime
+}
+
+function readRetryAfter(
+  value: string | null,
+  now: () => number,
+): number | undefined {
+  if (!value) return undefined
+  const seconds = Number(value)
+  if (Number.isSafeInteger(seconds) && seconds > 0) return seconds
+
+  const deadline = Date.parse(value)
+  if (!Number.isFinite(deadline) || deadline <= now()) return undefined
+  return Math.max(1, Math.ceil((deadline - now()) / 1_000))
+}
+
+async function requestJson(
+  path: string,
+  options: RequestJsonOptions = {},
+) {
   let response: Response
+  const runtime = options.runtime ?? {}
+  const signal = options.signal
 
   try {
-    response = await fetch(`${getApiBaseUrl()}${path}`, {
-      headers: { Accept: 'application/json' },
-      signal,
-    })
+    response = await (runtime.transport ?? fetch)(
+      `${getApiBaseUrl(runtime.apiUrl)}${path}`,
+      {
+        method: options.method ?? 'GET',
+        headers: {
+          Accept: 'application/json',
+          ...(options.body === undefined
+            ? {}
+            : { 'Content-Type': 'application/json' }),
+        },
+        ...(options.body === undefined
+          ? {}
+          : { body: JSON.stringify(options.body) }),
+        signal,
+      },
+    )
   } catch (error) {
     if (signal?.aborted) {
       throw error
@@ -97,10 +161,14 @@ async function requestJson(path: string, signal?: AbortSignal) {
 
   if (!response.ok) {
     let code: ApiErrorCode | undefined
+    let requestId: string | undefined
 
     try {
       const body = await response.json()
-      code = isApiError(body) ? body.code : undefined
+      if (isApiError(body)) {
+        code = body.code
+        requestId = body.requestId
+      }
     } catch {
       // A resposta HTTP continua sendo tratada mesmo sem um corpo JSON válido.
     }
@@ -108,6 +176,14 @@ async function requestJson(path: string, signal?: AbortSignal) {
     throw new ApiRequestError('http', {
       status: response.status,
       code,
+      requestId,
+      retryAfterSeconds:
+        response.status === 429
+          ? readRetryAfter(
+              response.headers.get('Retry-After'),
+              runtime.now ?? Date.now,
+            )
+          : undefined,
     })
   }
 
@@ -174,7 +250,7 @@ function createProductListPath(query: ProductListQuery) {
 }
 
 export async function getHealth(signal?: AbortSignal): Promise<HealthResponse> {
-  const body = await requestJson('/api/health', signal)
+  const body = await requestJson('/api/health', { signal })
 
   if (!isHealthResponse(body)) {
     throw new ApiRequestError('invalid-response')
@@ -189,7 +265,7 @@ export async function getProductBySlug(
 ): Promise<ProductDetailResponse> {
   const body = await requestJson(
     `/api/products/${encodeURIComponent(slug)}`,
-    signal,
+    { signal },
   )
 
   if (!isProductDetailResponse(body)) {
@@ -209,7 +285,7 @@ export async function getProducts(
   query: ProductListQuery,
   signal?: AbortSignal,
 ): Promise<ProductListResponse> {
-  const body = await requestJson(createProductListPath(query), signal)
+  const body = await requestJson(createProductListPath(query), { signal })
 
   if (!isProductListResponse(body)) {
     throw new ApiRequestError('invalid-response')
@@ -222,4 +298,24 @@ export async function getProducts(
       imageUrl: resolveApiResourceUrl(product.imageUrl),
     })),
   }
+}
+
+export async function sendChat(
+  request: unknown,
+  signal?: AbortSignal,
+  runtime?: ApiRuntime,
+): Promise<ChatResponse> {
+  const parsed = parseChatRequest(request)
+  if (!parsed) throw new ApiRequestError('invalid-request')
+
+  const body = await requestJson('/api/chat', {
+    method: 'POST',
+    body: parsed,
+    signal,
+    runtime,
+  })
+  if (!isChatResponse(body)) {
+    throw new ApiRequestError('invalid-response')
+  }
+  return body
 }

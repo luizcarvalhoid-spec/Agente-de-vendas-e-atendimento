@@ -2,11 +2,16 @@ export type ApiErrorCode =
   | 'VALIDATION_ERROR'
   | 'NOT_FOUND'
   | 'HTTP_ERROR'
+  | 'RATE_LIMITED'
+  | 'AI_UNAVAILABLE'
+  | 'AI_BAD_RESPONSE'
+  | 'AI_TIMEOUT'
   | 'INTERNAL_SERVER_ERROR'
 
 export interface ApiError {
   code: ApiErrorCode
   message: string
+  requestId?: string
 }
 
 export interface HealthResponse {
@@ -328,13 +333,18 @@ export function isApiError(value: unknown): value is ApiError {
     'VALIDATION_ERROR',
     'NOT_FOUND',
     'HTTP_ERROR',
+    'RATE_LIMITED',
+    'AI_UNAVAILABLE',
+    'AI_BAD_RESPONSE',
+    'AI_TIMEOUT',
     'INTERNAL_SERVER_ERROR',
   ]
 
   return (
     typeof value.code === 'string' &&
     codes.includes(value.code as ApiErrorCode) &&
-    typeof value.message === 'string'
+    typeof value.message === 'string' &&
+    (value.requestId === undefined || typeof value.requestId === 'string')
   )
 }
 

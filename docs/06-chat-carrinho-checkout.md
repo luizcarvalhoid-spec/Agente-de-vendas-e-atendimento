@@ -5,14 +5,17 @@
 
 ## 6.1 — Substituir o mock do chat
 
-- [ ] Refatorar `ChatbotButton.tsx` separando UI, hook de conversa e cliente de API **apenas quando isso simplificar o componente**.
-- [ ] Remover `setTimeout`/resposta fixa e chamar `POST /api/chat`.
-- [ ] Exibir loading, erro, retry e bloqueio de envios simultâneos; permitir Enter e botão de envio.
-- [ ] Preservar abrir, minimizar, fechar, autoscroll e identidade visual atual.
-- [ ] Persistir histórico local limitado enquanto a demonstração estiver aberta/recarregada, sem dados sensíveis.
+- [x] Refatorar `ChatbotButton.tsx` separando UI, hook de conversa e cliente de API **apenas quando isso simplificar o componente**.
+- [x] Remover `setTimeout`/resposta fixa e chamar `POST /api/chat`.
+- [x] Exibir loading, erro, retry e bloqueio de envios simultâneos; permitir Enter e botão de envio.
+- [x] Preservar abrir, minimizar, fechar, autoscroll e identidade visual atual.
+- [x] Persistir histórico local limitado enquanto a demonstração estiver aberta/recarregada, sem dados sensíveis.
 
-**Aceite:** resposta exibida vem da OpenRouter via backend; falha de rede é comunicada e o usuário pode repetir.  
+**Aceite offline:** integração com `POST /api/chat`, contratos estritos, histórico limitado, falhas recuperáveis, cancelamento e acessibilidade cobertos por transporte falso e testes de DOM. A validação operacional com OpenRouter real permanece pendente e não foi executada nesta tarefa.
+
 **Commit:** `feat(web): wire chat to live agent API`.
+
+**Registro de execução (2026-11-10, base `18552e63`):** o frontend envia somente `message`, `sessionId` e `history`; conserva no máximo cinco turnos concluídos em `sessionStorage`; remove pares antigos para respeitar 32.000 bytes UTF-8; não renderiza cartões nem CTAs nesta etapa. Respostas estruturadas são validadas e preservadas como snapshots históricos para a futura 6.2, que deverá atualizar dados canônicos antes de qualquer ação comercial sensível a preço ou disponibilidade.
 
 ## 6.2 — Cartão de recomendação no chat
 

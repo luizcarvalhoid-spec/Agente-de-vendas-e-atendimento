@@ -13,7 +13,11 @@ try {
   const config = loadConfig(process.env)
   const catalog = await loadCatalogRepository()
   let chatService
-  if (config.openRouterApiKey && config.openRouterModel) {
+  if (
+    config.openRouterStatus === 'configured' &&
+    config.openRouterApiKey &&
+    config.openRouterModel
+  ) {
     const faqDocuments = await loadFaqDocuments()
     const productIndex = createProductSearchIndex(catalog.listAll())
     const faqIndex = createFaqSearchIndex(faqDocuments)
@@ -27,7 +31,10 @@ try {
       faqIndex,
       faqDocuments,
       model: createOpenRouterAgentModel(client),
+      maxOutputTokens: config.openRouterMaxOutputTokens,
     })
+  } else if (config.openRouterStatus === 'invalid') {
+    console.error('Configuração do atendimento consultivo inválida.')
   }
   const app = buildApp({
     config,

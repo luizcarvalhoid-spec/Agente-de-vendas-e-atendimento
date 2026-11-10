@@ -7,6 +7,7 @@ export const apiErrorCodeSchema = z.enum([
   'AI_UNAVAILABLE',
   'AI_BAD_RESPONSE',
   'AI_TIMEOUT',
+  'RATE_LIMITED',
   'INTERNAL_SERVER_ERROR',
 ])
 

@@ -11,6 +11,7 @@ import type {
   AgentModelResult,
   AgentToolCall,
 } from '../src/agent/agent-model-port.js'
+import { AgentModelError } from '../src/agent/agent-model-port.js'
 import { createConsultativeSystemInstruction } from '../src/agent/consultative-agent-policy.js'
 import {
   TOOL_ORCHESTRATOR_MAX_CONTEXT_BYTES,
@@ -749,4 +750,36 @@ test('never promotes IDs written freely by the model to verified grounding', asy
   assert.equal(result.grounding.status, 'insufficient')
   assert.deepEqual(result.recommendationProductIds, [])
   assert.deepEqual(result.faqSourceIds, [])
+})
+
+test('preserves neutral model failure categories and configured output limit', async (t) => {
+  const fake = createFakeTool({})
+  const cases = [
+    ['PROVIDER_RATE_LIMITED', 'MODEL_RATE_LIMITED'],
+    ['PROVIDER_UNAVAILABLE', 'MODEL_UNAVAILABLE'],
+    ['MODEL_TIMEOUT', 'MODEL_TIMEOUT'],
+    ['INVALID_MODEL_RESPONSE', 'INVALID_MODEL_RESPONSE'],
+    ['TOOL_CALLING_INCOMPATIBLE', 'MODEL_TOOL_CALLING_INCOMPATIBLE'],
+    ['LOCAL_BUDGET_EXHAUSTED', 'LOCAL_BUDGET_EXHAUSTED'],
+  ] as const
+
+  for (const [code, termination] of cases) {
+    await t.test(code, async () => {
+      let observedOutput: number | undefined
+      const result = await createToolOrchestrator({
+        model: {
+          async complete(input) {
+            observedOutput = input.maxOutputTokens
+            throw new AgentModelError(code, code !== 'LOCAL_BUDGET_EXHAUSTED')
+          },
+        },
+        tools: createAgentToolRegistry([fake.tool]),
+        maxOutputTokens: 128,
+      }).run(runInput())
+      assert.equal(result.status, 'fallback')
+      assert.equal(result.termination, termination)
+      assert.equal(result.diagnostics.modelCalls, 1)
+      assert.equal(observedOutput, 128)
+    })
+  }
 })

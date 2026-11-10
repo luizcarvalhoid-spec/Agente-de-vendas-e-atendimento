@@ -60,7 +60,10 @@ export function registerErrorHandlers(app: FastifyInstance) {
       return reply.status(statusCode).send(httpError)
     }
 
-    request.log.error({ err: error }, 'Unhandled request error')
+    request.log.error(
+      { event: 'unhandled_request_error' },
+      'Unhandled request error',
+    )
     return reply.status(500).send(internalServerError)
   })
 }

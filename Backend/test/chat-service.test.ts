@@ -9,6 +9,7 @@ import type {
   AgentModelResult,
   AgentToolCall,
 } from '../src/agent/agent-model-port.js'
+import { AgentModelError } from '../src/agent/agent-model-port.js'
 import {
   ChatServiceError,
   createChatService,
@@ -16,6 +17,7 @@ import {
 } from '../src/agent/chat-service.js'
 import { planChatGrounding } from '../src/agent/chat-grounding-planner.js'
 import { createProductSearchIndex } from '../src/agent/tools/product-tools.js'
+import { createUsageBudgetController } from '../src/agent/usage-budget-controller.js'
 import {
   loadCatalogRepository,
   type CatalogRepository,
@@ -1220,4 +1222,48 @@ test('operational errors never expose provider secrets or internal paths', async
       return true
     },
   )
+})
+
+test('neutral provider failures preserve sanitized timeout and protocol categories', async () => {
+  const cases = [
+    ['MODEL_TIMEOUT', 'AI_TIMEOUT'],
+    ['TOOL_CALLING_INCOMPATIBLE', 'AI_BAD_RESPONSE'],
+    ['PROVIDER_RATE_LIMITED', 'AI_UNAVAILABLE'],
+  ] as const
+  for (const [modelCode, serviceCode] of cases) {
+    const service = await buildService({
+      async complete() {
+        throw new AgentModelError(modelCode, true)
+      },
+    })
+    await assert.rejects(
+      () => execute(service, { message: 'Qual é o prazo de entrega?' }),
+      (error: unknown) =>
+        error instanceof ChatServiceError && error.code === serviceCode,
+    )
+  }
+})
+
+test('preventive budget denial reaches the service before any model call', async () => {
+  let calls = 0
+  const service = await buildService({
+    async complete() {
+      calls += 1
+      return assistant('Não deveria executar.')
+    },
+  })
+  await assert.rejects(
+    () =>
+      service.execute(parseRequest({ message: 'Qual é o prazo de entrega?' }), {
+        requestId,
+        signal: new AbortController().signal,
+        usageBudget: createUsageBudgetController({
+          executionBudgetUnits: 1_000,
+          windowBudgetUnits: 10_000,
+        }).createExecution(),
+      }),
+    (error: unknown) =>
+      error instanceof ChatServiceError && error.code === 'AI_UNAVAILABLE',
+  )
+  assert.equal(calls, 0)
 })

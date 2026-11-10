@@ -49,24 +49,25 @@ Marque a fase apenas quando **todos os critérios de aceite** de seus backlogs f
 
 ## Acompanhamento da fase atual
 
-**Atualizado em:** 09/11/2026.
+**Atualizado em:** 10/11/2026.
 
 **Referência atual:** branch `main`, commit
-`b0047a1cc0d65598e0033e6545567cc09db061af`. A referência histórica do
+`8ff4a2152297618850be581a9ce0a8ad59e63939`. A referência histórica do
 diagnóstico inicial permanece registrada no início deste documento.
 
 - **Fase atual:** 05 — Agente com OpenRouter e ferramentas.
 - [x] **5.1** — Implementada e mesclada no PR #17.
 - [x] **5.2** — Implementada e mesclada no PR #18.
 - [x] **5.3** — Implementada e mesclada no PR #19.
-- [ ] **5.4** — Próxima tarefa: contrato `POST /api/chat`.
-- [ ] **5.5** — Pendente: falhas e controle de custos.
+- [x] **5.4** — Implementada e mesclada no PR #21.
+- [x] **5.5** — Implementada e validada offline; aguarda revisão e merge.
 - [ ] **Smoke real com OpenRouter** — pendente.
 - [ ] **Tool calling real com o modelo configurado** — pendente.
 
-A fase 05 permanece aberta: os itens concluídos acima foram revisados e
-mesclados, mas foram testados offline. O endpoint público e as validações
-manuais com o provedor real ainda não foram entregues.
+A fase 05 permanece aberta: 5.1 a 5.4 foram revisadas e mescladas; a 5.5 está
+implementada nesta branch e aguarda revisão. A validação manual com OpenRouter
+real e a compatibilidade operacional de tool calling ainda não foram
+comprovadas.
 
 ## Dependências (caminho crítico)
 

@@ -273,12 +273,18 @@ const errorMessages: Record<OpenRouterErrorCode, string> = {
 export class OpenRouterClientError extends Error {
   readonly code: OpenRouterErrorCode
   readonly statusCode?: number
+  readonly transportStarted: boolean
 
-  constructor(code: OpenRouterErrorCode, statusCode?: number) {
+  constructor(
+    code: OpenRouterErrorCode,
+    statusCode?: number,
+    transportStarted = statusCode !== undefined,
+  ) {
     super(errorMessages[code])
     this.name = 'OpenRouterClientError'
     this.code = code
     this.statusCode = statusCode
+    this.transportStarted = transportStarted
   }
 }
 
@@ -383,8 +389,9 @@ const providerResponseSchema = z
 function clientError(
   code: OpenRouterErrorCode,
   statusCode?: number,
+  transportStarted = statusCode !== undefined,
 ) {
-  return new OpenRouterClientError(code, statusCode)
+  return new OpenRouterClientError(code, statusCode, transportStarted)
 }
 
 function classifyHttpError(statusCode: number) {
@@ -461,26 +468,26 @@ function validateToolResponse(
   )
 
   if (toolCalls.length > 0 && configuredNames.size === 0) {
-    throw clientError('OPENROUTER_TOOL_CALLING_INCOMPATIBLE')
+    throw clientError('OPENROUTER_TOOL_CALLING_INCOMPATIBLE', undefined, true)
   }
 
   if (
     toolCalls.some((toolCall) => !configuredNames.has(toolCall.function.name))
   ) {
-    throw clientError('OPENROUTER_TOOL_CALLING_INCOMPATIBLE')
+    throw clientError('OPENROUTER_TOOL_CALLING_INCOMPATIBLE', undefined, true)
   }
 
   const toolCallIds = toolCalls.map((toolCall) => toolCall.id)
   if (new Set(toolCallIds).size !== toolCallIds.length) {
-    throw clientError('OPENROUTER_INVALID_RESPONSE')
+    throw clientError('OPENROUTER_INVALID_RESPONSE', undefined, true)
   }
 
   if (input.toolChoice === 'none' && toolCalls.length > 0) {
-    throw clientError('OPENROUTER_TOOL_CALLING_INCOMPATIBLE')
+    throw clientError('OPENROUTER_TOOL_CALLING_INCOMPATIBLE', undefined, true)
   }
 
   if (input.toolChoice === 'required' && toolCalls.length === 0) {
-    throw clientError('OPENROUTER_TOOL_CALLING_INCOMPATIBLE')
+    throw clientError('OPENROUTER_TOOL_CALLING_INCOMPATIBLE', undefined, true)
   }
 
   if (typeof input.toolChoice === 'object') {
@@ -489,7 +496,7 @@ function validateToolResponse(
       toolCalls.length === 0 ||
       toolCalls.some((toolCall) => toolCall.function.name !== expectedName)
     ) {
-      throw clientError('OPENROUTER_TOOL_CALLING_INCOMPATIBLE')
+      throw clientError('OPENROUTER_TOOL_CALLING_INCOMPATIBLE', undefined, true)
     }
   }
 }
@@ -500,11 +507,13 @@ function parseProviderResponse(
 ): OpenRouterChatResult {
   const parsed = providerResponseSchema.safeParse(rawResponse)
   if (!parsed.success) {
-    throw clientError('OPENROUTER_INVALID_RESPONSE')
+    throw clientError('OPENROUTER_INVALID_RESPONSE', undefined, true)
   }
 
   const choice = parsed.data.choices.find((candidate) => candidate.index === 0)
-  if (!choice) throw clientError('OPENROUTER_INVALID_RESPONSE')
+  if (!choice) {
+    throw clientError('OPENROUTER_INVALID_RESPONSE', undefined, true)
+  }
 
   const toolCalls: OpenRouterToolCall[] = (choice.message.tool_calls ?? []).map(
     (toolCall) => ({
@@ -518,7 +527,7 @@ function parseProviderResponse(
   )
   const hasText = Boolean(choice.message.content?.trim())
   if (!hasText && toolCalls.length === 0) {
-    throw clientError('OPENROUTER_INVALID_RESPONSE')
+    throw clientError('OPENROUTER_INVALID_RESPONSE', undefined, true)
   }
 
   validateToolResponse(input, toolCalls)
@@ -598,7 +607,7 @@ async function readResponseBodyWithinLimit(
 
       bytesRead += chunk.value.byteLength
       if (bytesRead > OPENROUTER_MAX_RESPONSE_BYTES) {
-        throw clientError('OPENROUTER_INVALID_RESPONSE')
+        throw clientError('OPENROUTER_INVALID_RESPONSE', undefined, true)
       }
 
       responseText += decoder.decode(chunk.value, { stream: true })
@@ -676,6 +685,7 @@ export function createOpenRouterClient(
       const requestController = new AbortController()
       let timedOut = false
       let cancelled = false
+      let transportStarted = false
       const abortFromCaller = () => {
         if (requestController.signal.aborted) return
         cancelled = true
@@ -691,6 +701,7 @@ export function createOpenRouterClient(
       }, timeoutMs)
 
       try {
+        transportStarted = true
         const response = await transport(
           OPENROUTER_CHAT_COMPLETIONS_ENDPOINT,
           {
@@ -707,6 +718,8 @@ export function createOpenRouterClient(
         if (requestController.signal.aborted) {
           throw clientError(
             timedOut ? 'OPENROUTER_TIMEOUT' : 'OPENROUTER_CANCELLED',
+            undefined,
+            transportStarted,
           )
         }
 
@@ -724,17 +737,31 @@ export function createOpenRouterClient(
         try {
           rawResponse = JSON.parse(responseText)
         } catch {
-          throw clientError('OPENROUTER_INVALID_JSON')
+          throw clientError('OPENROUTER_INVALID_JSON', undefined, true)
         }
 
         return parseProviderResponse(rawResponse, validatedInput)
       } catch (error) {
         if (error instanceof OpenRouterClientError) throw error
-        if (timedOut) throw clientError('OPENROUTER_TIMEOUT')
-        if (cancelled || validatedInput.signal?.aborted) {
-          throw clientError('OPENROUTER_CANCELLED')
+        if (timedOut) {
+          throw clientError(
+            'OPENROUTER_TIMEOUT',
+            undefined,
+            transportStarted,
+          )
         }
-        throw clientError('OPENROUTER_NETWORK_ERROR')
+        if (cancelled || validatedInput.signal?.aborted) {
+          throw clientError(
+            'OPENROUTER_CANCELLED',
+            undefined,
+            transportStarted,
+          )
+        }
+        throw clientError(
+          'OPENROUTER_NETWORK_ERROR',
+          undefined,
+          transportStarted,
+        )
       } finally {
         clearTimeout(timeout)
         validatedInput.signal?.removeEventListener(

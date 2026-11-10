@@ -159,18 +159,30 @@ limites e exemplos estão em [05.4 — API de chat estruturada](./05.4-chat-api.
 
 O aceite operacional com OpenRouter real continua pendente. A suíte não usa
 credencial, não faz chamadas pagas e não demonstra compatibilidade real de tool
-calling nem comportamento do modelo configurado. Os controles de sessão, rate
-limiting e custo permanecem na 5.5.
+calling nem comportamento do modelo configurado. Os controles de admissão,
+concorrência e uso foram implementados na 5.5.
 
 ## 5.5 — Falhas e custo controlado
 
-- [ ] Limitar tamanho da mensagem, histórico enviado, resposta e chamadas por sessão; aplicar rate limiting básico na API.
-- [ ] Criar mensagens de fallback (“Não consegui consultar o catálogo agora. Tente novamente.”) sem inventar informações.
-- [ ] Tratar API key ausente e modelo não compatível com tools como configuração inválida, de forma explícita.
-- [ ] Registrar duração e uso de tokens quando fornecidos, sem persistir dados pessoais.
+- [x] Limitar tamanho da mensagem, histórico enviado, resposta e chamadas por sessão; aplicar rate limiting básico na API.
+- [x] Criar mensagens de fallback (“Não consegui consultar o catálogo agora. Tente novamente.”) sem inventar informações.
+- [x] Tratar API key ausente e modelo não compatível com tools como configuração inválida, de forma explícita.
+- [x] Registrar duração e uso de tokens quando fornecidos, sem persistir dados pessoais.
 
 **Aceite:** falhas previsíveis não travam o chat nem vazam detalhes técnicos.  
 **Commit:** `fix(agent): handle failures and usage limits`.
+
+**Status de entrega:** implementada e validada offline na branch da tarefa 5.5.
+Rate limiting por origem e sessão, concorrência, orçamento preventivo,
+reconciliação conservadora, categorias neutras de falha e observabilidade
+sanitizada estão integrados ao endpoint. Os algoritmos, limites, contratos e o
+smoke opcional estão em
+[05.5 — Resiliência, limites e uso operacional](./05.5-agent-resilience.md).
+
+O aceite operacional da fase 05 permanece pendente: o smoke real não foi
+executado, e não há comprovação de compatibilidade, comportamento, uso ou custo
+do modelo configurado no OpenRouter. Os testes automáticos são exclusivamente
+offline e não usam credenciais nem chamadas pagas.
 
 ## Fora de escopo
 

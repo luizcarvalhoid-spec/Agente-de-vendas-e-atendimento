@@ -99,7 +99,7 @@ pelos testes determinísticos.
 ### Registro técnico da 5.2
 
 A política provider-agnostic está documentada em
-[05.2 — Política consultiva do agente](./05.2-consultative-policy.md). A fonte
+[05.2 — Política consultiva do agente](../agente/docs/05.2-consultative-policy.md). A fonte
 determinística define hierarquia de confiança, entrevista adaptativa,
 fundamentação por catálogo/FAQ, fallback e limites clínicos sem codificar
 produtos ou preços na mensagem permanente.
@@ -130,7 +130,7 @@ ciclo ainda não foi executado com OpenRouter real.
 ### Registro técnico da 5.3
 
 A arquitetura e os limites estão documentados em
-[05.3 — Ferramentas e ciclo limitado de execução](./05.3-tool-orchestration.md).
+[05.3 — Ferramentas e ciclo limitado de execução](../agente/docs/05.3-tool-orchestration.md).
 A implementação separa consulta, elegibilidade e autorização de produtos,
 reutiliza `search_faq`, gera definições de função dos schemas Zod e executa um
 ciclo provider-agnostic limitado, cancelável e testável sem rede.
@@ -155,7 +155,7 @@ estrito, planejador determinístico, `ChatService`, rota Fastify, composição n
 servidor e projeção canônica de cartões validados por testes offline. A seleção
 de cartões cruza o ranking recalculado com IDs autorizados e intenção comercial;
 consultas de detalhes isoladas não equivalem a uma escolha. A arquitetura, os
-limites e exemplos estão em [05.4 — API de chat estruturada](./05.4-chat-api.md).
+limites e exemplos estão em [05.4 — API de chat estruturada](../agente/docs/05.4-chat-api.md).
 
 O aceite operacional com OpenRouter real continua pendente. A suíte não usa
 credencial, não faz chamadas pagas e não demonstra compatibilidade real de tool
@@ -172,12 +172,12 @@ concorrência e uso foram implementados na 5.5.
 **Aceite:** falhas previsíveis não travam o chat nem vazam detalhes técnicos.  
 **Commit:** `fix(agent): handle failures and usage limits`.
 
-**Status de entrega:** implementada e validada offline na branch da tarefa 5.5.
+**Status de entrega:** implementada, revisada e mesclada no PR #22.
 Rate limiting por origem e sessão, concorrência, orçamento preventivo,
 reconciliação conservadora, categorias neutras de falha e observabilidade
 sanitizada estão integrados ao endpoint. Os algoritmos, limites, contratos e o
 smoke opcional estão em
-[05.5 — Resiliência, limites e uso operacional](./05.5-agent-resilience.md).
+[05.5 — Resiliência, limites e uso operacional](../agente/docs/05.5-agent-resilience.md).
 
 O aceite operacional da fase 05 permanece pendente: o smoke real não foi
 executado, e não há comprovação de compatibilidade, comportamento, uso ou custo

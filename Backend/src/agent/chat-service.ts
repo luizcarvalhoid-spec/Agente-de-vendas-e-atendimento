@@ -360,7 +360,6 @@ function hasSelectionDiscriminator(context: EffectiveCommercialContext) {
   const input = context.searchInput
   const normalized = normalize(input.query ?? '')
   return (
-    input.maxPrice !== undefined ||
     input.hairTypes !== undefined ||
     input.scalpTypes !== undefined ||
     input.skinTypes !== undefined ||
@@ -378,6 +377,7 @@ function consultativeQuestion(
 ) {
   if (
     plan.presentationIntent !== 'recommendation' ||
+    plan.groundingRequirement !== 'product' ||
     context.needsClarification ||
     hasSelectionDiscriminator(context)
   ) {
@@ -392,13 +392,50 @@ function consultativeQuestion(
   return 'Qual preferência é mais importante para você nessa escolha: perfil de uso, sensação ou orçamento?'
 }
 
+function hasFaqTopic(message: string) {
+  const normalized = normalize(message)
+  return (
+    /\b(?:frete|envio|entreg(?:a|am|ar|ue)|transportadora|receber|prazo de entrega)\b/.test(
+      normalized,
+    ) ||
+    /\b(?:troca|trocar|devolucao|devolver|desistir|reembolso|estorno|danificado)\b/.test(
+      normalized,
+    ) ||
+    /\b(?:pagamento|forma de pagar|parcelamento|pix|cartao|boleto)\b/.test(
+      normalized,
+    ) ||
+    /\b(?:pedido|cancelar pedido|rastreamento|rastrear)\b/.test(normalized) ||
+    /\b(?:politica|privacidade|dados pessoais|atacado|fidelidade|embalagem para presente)\b/.test(
+      normalized,
+    )
+  )
+}
+
+function isCommercialContinuation(message: string) {
+  const normalized = normalize(message)
+  if (
+    /\b(?:mudando de assunto|outro assunto|vamos falar de|agora sobre)\b/.test(
+      normalized,
+    )
+  ) {
+    return false
+  }
+  const budget = extractBudget(message)
+  return (
+    budget.value !== undefined ||
+    budget.ambiguous ||
+    inferSensoryTerms(message) !== undefined ||
+    inferScalpTypes(message) !== undefined
+  )
+}
+
 function preserveHistoricalRecommendationIntent(
   request: ChatRequest,
   currentPlan: ChatGroundingPlan,
 ): ChatGroundingPlan {
   if (
-    currentPlan.groundingRequirement !== 'product' ||
-    currentPlan.presentationIntent !== 'text'
+    currentPlan.presentationIntent !== 'text' ||
+    currentPlan.groundingRequirement === 'not_required'
   ) {
     return currentPlan
   }
@@ -410,15 +447,23 @@ function preserveHistoricalRecommendationIntent(
   const previousPlan = planChatGrounding(
     chatRequestSchema.parse({ message: previousUser.content }),
   )
-  return previousPlan.presentationIntent === 'recommendation'
-    ? { ...currentPlan, presentationIntent: 'recommendation' }
-    : currentPlan
+  if (previousPlan.presentationIntent !== 'recommendation') {
+    return currentPlan
+  }
+  if (currentPlan.groundingRequirement === 'product') {
+    return { ...currentPlan, presentationIntent: 'recommendation' }
+  }
+  if (!isCommercialContinuation(request.message)) return currentPlan
+  return {
+    groundingRequirement: hasFaqTopic(request.message) ? 'both' : 'product',
+    presentationIntent: 'recommendation',
+  }
 }
 
 function explicitComparisonIds(message: string, catalog: CatalogRepository) {
   const normalized = normalize(message)
   const match = normalized.match(
-    /\b(?:compare|comparar|comparacao entre)\s+(?:os\s+)?produtos?\s+(?:id\s*)?(\d{1,6})\s+(?:e|com|versus|vs)\s+(?:(?:o|com o)\s+)?(?:produto\s+)?(?:id\s*)?(\d{1,6})\b/,
+    /\b(?:compare|comparar|comparacao entre)\s+(?:os\s+)?(?:dois\s+)?produtos?\s+(?:id\s*)?(\d{1,6})\s+(?:e|com|versus|vs)\s+(?:(?:o|com o)\s+)?(?:produto\s+)?(?:id\s*)?(\d{1,6})\b/,
   )
   if (!match) return []
   const ids = [...new Set([Number(match[1]), Number(match[2])])].filter(
@@ -429,6 +474,15 @@ function explicitComparisonIds(message: string, catalog: CatalogRepository) {
 
 function mentionsExplicitProductId(message: string) {
   return /\bproduto\s+(?:id\s*)?\d{1,6}\b/.test(normalize(message))
+}
+
+function hasUnresolvedComparisonReference(message: string) {
+  const normalized = normalize(message)
+  return (
+    /\b(?:compare|comparar)\s+(?:(?:os|esses|estes)\s+)?dois\b/.test(
+      normalized,
+    ) || /\bambos\b/.test(normalized)
+  )
 }
 
 function createConversation(
@@ -773,6 +827,16 @@ export function createChatService(
         planChatGrounding(request),
       )
       const commercial = resolveCommercialContext(request, options.productIndex)
+      if (
+        plan.presentationIntent === 'comparison' &&
+        hasUnresolvedComparisonReference(request.message) &&
+        explicitComparisonIds(request.message, options.catalog).length !== 2
+      ) {
+        return controlledConsultativeQuestion(
+          'Quais são os dois produtos que você quer comparar? Informe os dois IDs.',
+          execution.requestId,
+        )
+      }
       const consultationQuestion = consultativeQuestion(plan, commercial)
       const policy = createProductEligibilityPolicy(
         options.productIndex,
@@ -797,6 +861,7 @@ export function createChatService(
       if (result.status !== 'completed') {
         if (
           consultationQuestion &&
+          plan.groundingRequirement === 'product' &&
           result.termination === 'INSUFFICIENT_GROUNDING'
         ) {
           return controlledConsultativeQuestion(
@@ -852,6 +917,7 @@ export function createChatService(
           explicitIds.length === 2
             ? explicitIds
             : !mentionsExplicitProductId(request.message) &&
+                !hasUnresolvedComparisonReference(request.message) &&
                 hasSelectionDiscriminator(commercial)
               ? rankedIds.slice(0, 2)
               : []

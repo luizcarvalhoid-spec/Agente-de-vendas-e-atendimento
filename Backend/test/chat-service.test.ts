@@ -332,21 +332,62 @@ test('explicit IDs remain valid when the request also says the two products', as
   assert.deepEqual(response.productIds, [9, 13])
 })
 
-test('anaphoric comparison without two reliable referents asks for IDs', async () => {
-  let called = false
-  const service = await buildService({
-    async complete() {
-      called = true
-      return assistant('Comparei os dois primeiros resultados.')
-    },
-  })
-  const response = await execute(service, { message: 'Compare os dois.' })
-  assert.equal(response.type, 'text')
-  if (response.type !== 'text') return
-  assert.equal(response.reason, 'clarification')
-  assert.match(response.message, /quais são os dois produtos/i)
-  assert.equal('products' in response, false)
-  assert.equal(called, false)
+test('anaphoric wording keeps an explicit valid pair', async () => {
+  const messages = [
+    'Qual dos dois produtos 9 e 13 é melhor?',
+    'Compare esses dois produtos 9 e 13.',
+    'Compare ambos os produtos 9 e 13.',
+  ]
+  for (const message of messages) {
+    const service = await buildService(
+      createQueueModel([
+        assistant(null, [
+          toolCall('details-9', 'get_product_details', { productId: 9 }),
+          toolCall('details-13', 'get_product_details', { productId: 13 }),
+        ]),
+        assistant('Comparação livre do modelo.'),
+      ]),
+    )
+    const response = await execute(service, { message })
+    assert.equal(response.type, 'comparison', message)
+    if (response.type !== 'comparison') continue
+    assert.deepEqual(response.productIds, [9, 13], message)
+  }
+})
+
+test('anaphoric comparisons never infer a pair from ranking or history', async () => {
+  const messages = [
+    'Qual dos dois?',
+    'Qual dos dois é melhor?',
+    'Compare esses dois.',
+    'Compare ambos.',
+  ]
+  for (const message of messages) {
+    let called = false
+    const service = await buildService({
+      async complete() {
+        called = true
+        return assistant('Comparei os dois primeiros resultados.')
+      },
+    })
+    const response = await execute(service, {
+      message,
+      history: [
+        {
+          role: 'user',
+          content:
+            'Quero shampoo anticaspa para couro oleoso, refrescante, até R$ 50.',
+        },
+        { role: 'assistant', content: 'Encontrei algumas opções.' },
+      ],
+    })
+    assert.equal(response.type, 'text', message)
+    if (response.type !== 'text') continue
+    assert.equal(response.reason, 'clarification', message)
+    assert.match(response.message, /quais são os dois produtos/i, message)
+    assert.equal('products' in response, false, message)
+    assert.equal(called, false, message)
+  }
 })
 
 test('open comparison with complete criteria keeps deterministic selection', async () => {
@@ -467,6 +508,136 @@ test('elliptical sensory preference continues the immediately preceding product 
     ],
   })
   assert.equal(response.type, 'recommendation')
+})
+
+test('recommendation intent survives two commercial clarification answers', async () => {
+  const service = await buildService(
+    createQueueModel([
+      (input) => {
+        const current = input.messages.at(-1)
+        const content = current?.role === 'user' ? current.content : ''
+        assert.match(content, /"scalpTypes":\["oleoso"\]/)
+        return assistant(null, [anticaspaSearch(50)])
+      },
+      assistant('Escolhi uma opção com frescor.'),
+    ]),
+  )
+  const response = await execute(service, {
+    message: 'Prefiro algo refrescante.',
+    history: [
+      { role: 'user', content: 'Preciso de shampoo anticaspa.' },
+      {
+        role: 'assistant',
+        content: 'Seu couro cabeludo é seco, normal ou oleoso?',
+      },
+      { role: 'user', content: 'É oleoso.' },
+      {
+        role: 'assistant',
+        content: 'Prefere alguma sensação específica?',
+      },
+    ],
+  })
+  assert.equal(response.type, 'recommendation')
+  if (response.type !== 'recommendation') return
+  assert.deepEqual(response.productIds, [13])
+})
+
+test('current budget wins after three prior clarification answers', async () => {
+  const service = await buildService(
+    createQueueModel([
+      (input) => {
+        const current = input.messages.at(-1)
+        const content = current?.role === 'user' ? current.content : ''
+        assert.match(content, /"scalpTypes":\["oleoso"\]/)
+        assert.match(content, /"maxPrice":50/)
+        assert.doesNotMatch(content, /"maxPrice":100/)
+        return assistant(null, [anticaspaSearch(50)])
+      },
+      assistant('Escolhi uma opção dentro do novo orçamento.'),
+    ]),
+  )
+  const response = await execute(service, {
+    message: 'Na verdade, até R$ 50.',
+    history: [
+      { role: 'user', content: 'Preciso de shampoo anticaspa.' },
+      {
+        role: 'assistant',
+        content: 'Seu couro cabeludo é seco, normal ou oleoso?',
+      },
+      { role: 'user', content: 'É oleoso.' },
+      {
+        role: 'assistant',
+        content: 'Prefere alguma sensação específica?',
+      },
+      { role: 'user', content: 'Prefiro algo refrescante.' },
+      { role: 'assistant', content: 'Qual é o seu orçamento?' },
+      { role: 'user', content: 'Até R$ 100.' },
+      { role: 'assistant', content: 'Quer manter esse teto?' },
+    ],
+  })
+  assert.equal(response.type, 'recommendation')
+  if (response.type !== 'recommendation') return
+  assert.deepEqual(response.productIds, [13])
+})
+
+test('an intervening explicit topic change stops historical recommendation intent', async () => {
+  const service = await buildService(
+    createQueueModel([
+      assistant(null, [
+        anticaspaSearch(50),
+        toolCall('faq', 'search_faq', { query: 'prazo de entrega' }),
+      ]),
+      assistant('Resposta conservadora.'),
+    ]),
+  )
+  const response = await execute(service, {
+    message: 'Prefiro algo refrescante.',
+    history: [
+      { role: 'user', content: 'Preciso de shampoo anticaspa.' },
+      {
+        role: 'assistant',
+        content: 'Seu couro cabeludo é seco, normal ou oleoso?',
+      },
+      { role: 'user', content: 'É oleoso.' },
+      { role: 'assistant', content: 'Prefere alguma sensação específica?' },
+      {
+        role: 'user',
+        content: 'Mudando de assunto: qual é o prazo de entrega?',
+      },
+      { role: 'assistant', content: 'Consultei a política de entrega.' },
+    ],
+  })
+  assert.equal(response.type, 'text')
+  assert.equal('products' in response, false)
+})
+
+test('a category change inside history discards incompatible earlier profile data', async () => {
+  const service = await buildService(
+    createQueueModel([
+      (input) => {
+        const current = input.messages.at(-1)
+        const content = current?.role === 'user' ? current.content : ''
+        assert.doesNotMatch(content, /scalpTypes/)
+        assert.doesNotMatch(content, /hairConcerns/)
+        assert.doesNotMatch(content, /refrescante/)
+        return assistant('Preciso de mais uma preferência.')
+      },
+    ]),
+  )
+  const response = await execute(service, {
+    message: 'Até R$ 50.',
+    history: [
+      {
+        role: 'user',
+        content: 'Quero shampoo anticaspa para couro oleoso e refrescante.',
+      },
+      { role: 'assistant', content: 'Entendi.' },
+      { role: 'user', content: 'Agora quero um sabonete corporal.' },
+      { role: 'assistant', content: 'Qual é o seu orçamento?' },
+    ],
+  })
+  assert.equal(response.type, 'text')
+  assert.equal('products' in response, false)
 })
 
 test('elliptical budget answer reuses explicit product criteria from history', async () => {

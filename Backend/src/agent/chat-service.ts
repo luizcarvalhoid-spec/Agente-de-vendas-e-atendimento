@@ -167,6 +167,43 @@ function inferSubcategory(message: string): ProductSubcategory | undefined {
   return undefined
 }
 
+function relevantHistoricalProductMessages(request: ChatRequest) {
+  const messages = historicalUserMessages(request)
+  let start = 0
+  let category: ProductCategory | undefined
+  let subcategory: ProductSubcategory | undefined
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index] ?? ''
+    const nextCategory = inferCategory(message)
+    const nextSubcategory = inferSubcategory(message)
+    if (
+      (nextCategory !== undefined &&
+        category !== undefined &&
+        nextCategory !== category) ||
+      (nextSubcategory !== undefined &&
+        subcategory !== undefined &&
+        nextSubcategory !== subcategory)
+    ) {
+      start = index
+    }
+    category = nextCategory ?? category
+    subcategory = nextSubcategory ?? subcategory
+  }
+  return messages.slice(start)
+}
+
+function latestRelevantHistoricalValue<T>(
+  request: ChatRequest,
+  infer: (message: string) => T | undefined,
+) {
+  const messages = relevantHistoricalProductMessages(request)
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const value = infer(messages[index] ?? '')
+    if (value !== undefined) return value
+  }
+  return undefined
+}
+
 function inferScalpTypes(message: string): readonly ScalpType[] | undefined {
   const normalized = normalize(message)
   const types: ScalpType[] = []
@@ -186,6 +223,21 @@ function inferEllipticalScalpTypes(
     /^(?:e|eh|meu couro e|meu couro eh)\s+(oleoso|seco|normal|sensivel)\b/,
   )
   return match?.[1] ? [match[1] as ScalpType] : undefined
+}
+
+function latestHistoricalScalpTypes(request: ChatRequest) {
+  let hasSafeScalpContext = false
+  let latest: readonly ScalpType[] | undefined
+  for (const message of relevantHistoricalProductMessages(request)) {
+    hasSafeScalpContext ||=
+      inferSubcategory(message) === 'anticaspa' ||
+      /\bcouro(?: cabeludo)?\b/.test(normalize(message))
+    latest =
+      inferScalpTypes(message) ??
+      inferEllipticalScalpTypes(message, hasSafeScalpContext) ??
+      latest
+  }
+  return latest
 }
 
 function inferHairConcerns(message: string): readonly ProductConcern[] | undefined {
@@ -255,7 +307,7 @@ function resolveCommercialContext(
     [...new Set(ingredientTerms)],
   )
   const historicalCategory = latestHistoricalValue(request, inferCategory)
-  const historicalSubcategory = latestHistoricalValue(
+  const historicalSubcategory = latestRelevantHistoricalValue(
     request,
     inferSubcategory,
   )
@@ -277,22 +329,19 @@ function resolveCommercialContext(
 
   const historyHasSafeScalpContext =
     historicalSubcategory === 'anticaspa' ||
-    historicalUserMessages(request).some((message) =>
+    relevantHistoricalProductMessages(request).some((message) =>
       /\bcouro(?: cabeludo)?\b/.test(normalize(message)),
     )
   const currentScalpTypes =
     inferScalpTypes(request.message) ??
     inferEllipticalScalpTypes(request.message, historyHasSafeScalpContext)
-  const historicalScalpTypes = latestHistoricalValue(
-    request,
-    inferScalpTypes,
-  )
+  const historicalScalpTypes = latestHistoricalScalpTypes(request)
   const scalpTypes =
     preferences.scalpTypes ??
     currentScalpTypes ??
     (productGoalChanged ? undefined : historicalScalpTypes)
   const currentHairConcerns = inferHairConcerns(request.message)
-  const historicalHairConcerns = latestHistoricalValue(
+  const historicalHairConcerns = latestRelevantHistoricalValue(
     request,
     inferHairConcerns,
   )
@@ -301,7 +350,7 @@ function resolveCommercialContext(
     currentHairConcerns ??
     (productGoalChanged ? undefined : historicalHairConcerns)
   const currentSensoryTerms = inferSensoryTerms(request.message)
-  const historicalSensoryTerms = latestHistoricalValue(
+  const historicalSensoryTerms = latestRelevantHistoricalValue(
     request,
     inferSensoryTerms,
   )
@@ -411,22 +460,38 @@ function hasFaqTopic(message: string) {
   )
 }
 
+function interruptsCommercialContinuity(message: string) {
+  const normalized = normalize(message)
+  return /\b(?:mudando de assunto|outro assunto|vamos falar de|agora sobre|nao quero mais|deixa pra la|deixe pra la|esquece|encerrar|encerra|cancelar essa busca|cancela essa busca)\b/.test(
+    normalized,
+  )
+}
+
 function isCommercialContinuation(message: string) {
   const normalized = normalize(message)
-  if (
-    /\b(?:mudando de assunto|outro assunto|vamos falar de|agora sobre)\b/.test(
-      normalized,
-    )
-  ) {
-    return false
-  }
+  if (interruptsCommercialContinuity(message)) return false
   const budget = extractBudget(message)
   return (
     budget.value !== undefined ||
     budget.ambiguous ||
     inferSensoryTerms(message) !== undefined ||
-    inferScalpTypes(message) !== undefined
+    inferScalpTypes(message) !== undefined ||
+    /^(?:e|eh)?\s*(?:oleoso|seco|normal|sensivel)\b/.test(normalized)
   )
+}
+
+function hasHistoricalRecommendationIntent(request: ChatRequest) {
+  const previousUsers = request.history.filter(
+    (message) => message.role === 'user',
+  )
+  for (let index = previousUsers.length - 1; index >= 0; index -= 1) {
+    const content = previousUsers[index]?.content ?? ''
+    if (interruptsCommercialContinuity(content)) return false
+    const plan = planChatGrounding(chatRequestSchema.parse({ message: content }))
+    if (plan.presentationIntent === 'recommendation') return true
+    if (!isCommercialContinuation(content)) return false
+  }
+  return false
 }
 
 function preserveHistoricalRecommendationIntent(
@@ -439,15 +504,7 @@ function preserveHistoricalRecommendationIntent(
   ) {
     return currentPlan
   }
-  const previousUsers = request.history.filter(
-    (message) => message.role === 'user',
-  )
-  const previousUser = previousUsers.at(-1)
-  if (!previousUser) return currentPlan
-  const previousPlan = planChatGrounding(
-    chatRequestSchema.parse({ message: previousUser.content }),
-  )
-  if (previousPlan.presentationIntent !== 'recommendation') {
+  if (!hasHistoricalRecommendationIntent(request)) {
     return currentPlan
   }
   if (currentPlan.groundingRequirement === 'product') {
@@ -462,9 +519,13 @@ function preserveHistoricalRecommendationIntent(
 
 function explicitComparisonIds(message: string, catalog: CatalogRepository) {
   const normalized = normalize(message)
-  const match = normalized.match(
-    /\b(?:compare|comparar|comparacao entre)\s+(?:os\s+)?(?:dois\s+)?produtos?\s+(?:id\s*)?(\d{1,6})\s+(?:e|com|versus|vs)\s+(?:(?:o|com o)\s+)?(?:produto\s+)?(?:id\s*)?(\d{1,6})\b/,
-  )
+  const match =
+    normalized.match(
+      /\b(?:compare|comparar|comparacao entre)\s+(?:(?:(?:os|esses|estes)\s+)?(?:dois\s+)?|ambos(?:\s+os)?\s+)produtos?\s+(?:id\s*)?(\d{1,6})\s+(?:e|com|versus|vs)\s+(?:(?:o|com o)\s+)?(?:produto\s+)?(?:id\s*)?(\d{1,6})\b/,
+    ) ??
+    normalized.match(
+      /\bqual dos dois\s+(?:produtos?\s+)?(?:id\s*)?(\d{1,6})\s+(?:e|com|versus|vs)\s+(?:(?:o|com o)\s+)?(?:produto\s+)?(?:id\s*)?(\d{1,6})\b/,
+    )
   if (!match) return []
   const ids = [...new Set([Number(match[1]), Number(match[2])])].filter(
     (id) => catalog.findById(id) !== undefined,
@@ -481,7 +542,9 @@ function hasUnresolvedComparisonReference(message: string) {
   return (
     /\b(?:compare|comparar)\s+(?:(?:os|esses|estes)\s+)?dois\b/.test(
       normalized,
-    ) || /\bambos\b/.test(normalized)
+    ) ||
+    /\bqual dos dois\b/.test(normalized) ||
+    /\bambos\b/.test(normalized)
   )
 }
 

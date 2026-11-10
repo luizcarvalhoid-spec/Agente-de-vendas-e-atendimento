@@ -971,6 +971,10 @@ export function createChatService(
             outputTokens: event.usage?.outputTokens ?? 0,
             totalTokens: event.usage?.totalTokens ?? 0,
             usageComplete: event.usage?.complete ?? false,
+            groundingRequirement:
+              event.grounding?.requirement ?? 'not_required',
+            productGrounding: event.grounding?.product ?? 'not_consulted',
+            faqGrounding: event.grounding?.faq ?? 'not_consulted',
           })
         },
       })

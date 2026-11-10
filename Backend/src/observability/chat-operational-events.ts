@@ -1,4 +1,8 @@
 import type { BudgetedModelUsageEvent } from '../agent/usage-budget-controller.js'
+import type {
+  ToolOrchestratorGroundingDomainStatus,
+  ToolOrchestratorGroundingRequirement,
+} from '../agent/tool-orchestrator.js'
 import type { ChatAdmissionRejectionReason } from '../http/chat-admission-controller.js'
 
 export type ChatOperationalEvent =
@@ -27,6 +31,9 @@ export type ChatOperationalEvent =
       readonly outputTokens: number
       readonly totalTokens: number
       readonly usageComplete: boolean
+      readonly groundingRequirement: ToolOrchestratorGroundingRequirement
+      readonly productGrounding: ToolOrchestratorGroundingDomainStatus
+      readonly faqGrounding: ToolOrchestratorGroundingDomainStatus
     }
   | {
       readonly type: 'execution_completed'

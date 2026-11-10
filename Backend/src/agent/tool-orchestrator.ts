@@ -186,6 +186,7 @@ export interface ToolOrchestratorEvent {
   readonly modelCalls?: number
   readonly toolCalls?: number
   readonly toolErrors?: number
+  readonly grounding?: ToolOrchestratorGroundingSummary
 }
 
 export interface CreateToolOrchestratorOptions {
@@ -284,14 +285,16 @@ export function createToolOrchestrator(
       let operationTimedOut = false
       const cancelFromCaller = () => {
         callerCancelled = true
-        operationController.abort()
+        operationController.abort(new AgentModelError('MODEL_CANCELLED', true))
       }
       callerSignal?.addEventListener('abort', cancelFromCaller, { once: true })
-      if (callerCancelled) operationController.abort()
+      if (callerCancelled) {
+        operationController.abort(new AgentModelError('MODEL_CANCELLED', true))
+      }
       const timeout = setTimeout(() => {
         if (operationController.signal.aborted) return
         operationTimedOut = true
-        operationController.abort()
+        operationController.abort(new AgentModelError('MODEL_TIMEOUT', true))
       }, timeoutMs)
       const toolExecutionContext = createAgentToolExecutionContext(
         operationController.signal,
@@ -435,6 +438,7 @@ export function createToolOrchestrator(
           modelCalls,
           toolCalls,
           toolErrors,
+          grounding: groundingSummary(),
         })
         const timeoutReason = reason === 'OPERATION_TIMEOUT'
         return {
@@ -459,6 +463,7 @@ export function createToolOrchestrator(
           modelCalls,
           toolCalls,
           toolErrors,
+          grounding: groundingSummary(),
         })
         return {
           status: 'cancelled',
@@ -751,6 +756,7 @@ export function createToolOrchestrator(
               modelCalls,
               toolCalls,
               toolErrors,
+              grounding: groundingSummary(),
             })
             return {
               status: 'completed',

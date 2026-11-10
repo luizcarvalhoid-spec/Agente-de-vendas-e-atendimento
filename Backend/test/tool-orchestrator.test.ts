@@ -18,6 +18,11 @@ import {
   createToolOrchestrator,
 } from '../src/agent/tool-orchestrator.js'
 import {
+  createBudgetedAgentModel,
+  createUsageBudgetController,
+  type BudgetedModelUsageEvent,
+} from '../src/agent/usage-budget-controller.js'
+import {
   type AgentTool,
   createAgentToolRegistry,
 } from '../src/agent/tools/agent-tool.js'
@@ -650,6 +655,48 @@ test('applies the global timeout while a tool is still running', async () => {
   assert.equal(result.status, 'fallback')
   assert.equal(result.termination, 'OPERATION_TIMEOUT')
   assert.equal(slow.executions, 1)
+})
+
+test('timeout reconciles a model promise that ignores cancellation', async () => {
+  let completeLate: ((result: AgentModelResult) => void) | undefined
+  const pending = new Promise<AgentModelResult>((resolve) => {
+    completeLate = resolve
+  })
+  let calls = 0
+  const events: BudgetedModelUsageEvent[] = []
+  const budgetedModel = createBudgetedAgentModel({
+    model: {
+      complete() {
+        calls += 1
+        return pending
+      },
+    },
+    budget: createUsageBudgetController().createExecution(),
+    onUsage(event) {
+      events.push(event)
+    },
+  })
+  const fake = createFakeTool({})
+  const result = await createToolOrchestrator({
+    model: budgetedModel,
+    tools: createAgentToolRegistry([fake.tool]),
+    timeoutMs: 20,
+  }).run(runInput())
+
+  assert.equal(result.status, 'fallback')
+  assert.equal(result.termination, 'OPERATION_TIMEOUT')
+  assert.equal(calls, 1)
+  assert.equal(events.length, 1)
+  assert.equal(events[0]?.outcome, 'timeout')
+  assert.equal(events[0]?.chargedUnits, events[0]?.reservedUnits)
+
+  completeLate?.({
+    message: { role: 'assistant', content: 'resultado tardio' },
+    usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+  })
+  await new Promise<void>((resolve) => setImmediate(resolve))
+  assert.equal(events.length, 1)
+  assert.equal(calls, 1)
 })
 
 test('stops after caller cancellation without additional model calls', async () => {

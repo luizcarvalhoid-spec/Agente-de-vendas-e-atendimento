@@ -254,6 +254,36 @@ function failureOutcome(error: unknown): UsageReconciliationOutcome {
   return { kind: 'possibly_sent' }
 }
 
+function abortError(signal: AbortSignal) {
+  if (signal.reason instanceof AgentModelError) return signal.reason
+  return new AgentModelError('MODEL_CANCELLED', true)
+}
+
+function raceModelWithAbort(
+  promise: Promise<AgentModelResult>,
+  signal: AbortSignal,
+) {
+  if (signal.aborted) return Promise.reject(abortError(signal))
+
+  return new Promise<AgentModelResult>((resolve, reject) => {
+    const abort = () => {
+      signal.removeEventListener('abort', abort)
+      reject(abortError(signal))
+    }
+    signal.addEventListener('abort', abort, { once: true })
+    promise.then(
+      (result) => {
+        signal.removeEventListener('abort', abort)
+        resolve(result)
+      },
+      (error: unknown) => {
+        signal.removeEventListener('abort', abort)
+        reject(error)
+      },
+    )
+  })
+}
+
 export function createBudgetedAgentModel(options: {
   readonly model: AgentModelPort
   readonly budget: UsageBudgetExecution
@@ -269,6 +299,7 @@ export function createBudgetedAgentModel(options: {
 
   return {
     async complete(input): Promise<AgentModelResult> {
+      if (input.signal.aborted) throw abortError(input.signal)
       const maxOutputTokens = input.maxOutputTokens ?? 512
       const estimatedInputTokens = estimateModelInputTokens(input)
       const reserved = options.budget.reserve({
@@ -280,10 +311,13 @@ export function createBudgetedAgentModel(options: {
       }
 
       try {
-        const result = await options.model.complete({
-          ...input,
-          maxOutputTokens,
-        })
+        const result = await raceModelWithAbort(
+          options.model.complete({
+            ...input,
+            maxOutputTokens,
+          }),
+          input.signal,
+        )
         const outcome: UsageReconciliationOutcome = result.usage
           ? { kind: 'reported', usage: result.usage }
           : { kind: 'sent_without_usage' }

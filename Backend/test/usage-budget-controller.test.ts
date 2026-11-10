@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   AgentModelError,
   type AgentModelPort,
+  type AgentModelResult,
 } from '../src/agent/agent-model-port.js'
 import {
   createBudgetedAgentModel,
@@ -190,6 +191,61 @@ test('configured maximum output is forwarded to the underlying model', async () 
   })
   await budgeted.complete({ ...modelInput, maxOutputTokens: 128 })
   assert.equal(observed, 128)
+})
+
+test('cancellation reconciles a non-cooperative model exactly once', async () => {
+  let completeLate: ((result: AgentModelResult) => void) | undefined
+  const pending = new Promise<AgentModelResult>((resolve) => {
+    completeLate = resolve
+  })
+  const events: {
+    chargedUnits: number
+    reservedUnits: number
+    outcome: string
+  }[] = []
+  const controller = createUsageBudgetController({
+    executionBudgetUnits: 20_000,
+    windowBudgetUnits: 20_000,
+    maxLedgerEntries: 1,
+  })
+  const budgeted = createBudgetedAgentModel({
+    model: { complete: () => pending },
+    budget: controller.createExecution(),
+    onUsage(event) {
+      events.push(event)
+    },
+  })
+  const abortController = new AbortController()
+  const call = budgeted.complete({
+    ...modelInput,
+    signal: abortController.signal,
+  })
+
+  abortController.abort(new AgentModelError('MODEL_CANCELLED', true))
+  await assert.rejects(
+    call,
+    (error: unknown) =>
+      error instanceof AgentModelError && error.code === 'MODEL_CANCELLED',
+  )
+  assert.equal(events.length, 1)
+  assert.equal(events[0]?.outcome, 'cancelled')
+  assert.equal(events[0]?.chargedUnits, events[0]?.reservedUnits)
+  const laterReservation = controller.createExecution().reserve({
+    estimatedInputTokens: 1,
+    maxOutputTokens: 1,
+  })
+  assert.equal(laterReservation.reserved, false)
+  if (!laterReservation.reserved) {
+    assert.equal(laterReservation.reason, 'ledger_capacity')
+  }
+
+  completeLate?.({
+    message: { role: 'assistant', content: 'resultado tardio' },
+    usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+  })
+  await new Promise<void>((resolve) => setImmediate(resolve))
+  assert.equal(events.length, 1)
+  assert.equal(events[0]?.chargedUnits, events[0]?.reservedUnits)
 })
 
 test('window capacity becomes available only after committed usage expires', () => {

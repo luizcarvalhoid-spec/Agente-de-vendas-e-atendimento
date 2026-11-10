@@ -1,9 +1,6 @@
 import { createChatService } from '../agent/chat-service.js'
 import { createOpenRouterAgentModel } from '../agent/openrouter/openrouter-agent-model.js'
-import {
-  createOpenRouterClient,
-  type OpenRouterTransport,
-} from '../agent/openrouter/openrouter-client.js'
+import { createOpenRouterClient } from '../agent/openrouter/openrouter-client.js'
 import { createProductSearchIndex } from '../agent/tools/product-tools.js'
 import {
   createUsageBudgetController,
@@ -14,13 +11,17 @@ import { loadConfig, loadLocalEnvFile } from '../config/env.js'
 import { loadFaqDocuments } from '../knowledge/faq-content-loader.js'
 import { createFaqSearchIndex } from '../knowledge/faq-search.js'
 import type { ChatOperationalEvent } from '../observability/chat-operational-events.js'
+import {
+  assertSmokeCaseEvidence,
+  createSmokeCostGuard,
+  SMOKE_MAX_OUTPUT_TOKENS,
+  type SmokeCaseKind,
+  type SmokeGroundingEvidence,
+} from './smoke-chat-guards.js'
 
 const CONFIRMATION = 'I_ACCEPT_COST'
 const MAX_EXECUTIONS = 3
 const MAX_MODEL_CALLS_PER_EXECUTION = 2
-const MAX_PROVIDER_CALLS = 6
-const MAX_OUTPUT_TOKENS = 128
-const MAX_INPUT_UNITS_PER_CALL = 80_000
 
 function requiredPositiveNumber(name: string) {
   const value = Number(process.env[name])
@@ -28,16 +29,6 @@ function requiredPositiveNumber(name: string) {
     throw new Error(`Variável operacional ausente ou inválida: ${name}.`)
   }
   return value
-}
-
-function assertSmokeRequest(init: RequestInit | undefined) {
-  if (typeof init?.body !== 'string') {
-    throw new Error('O smoke recusou um transporte sem corpo JSON verificável.')
-  }
-  const body = JSON.parse(init.body) as { max_completion_tokens?: unknown }
-  if (body.max_completion_tokens !== MAX_OUTPUT_TOKENS) {
-    throw new Error('O smoke recusou um teto de saída diferente de 128 tokens.')
-  }
 }
 
 try {
@@ -66,29 +57,16 @@ try {
   const monetaryCeiling = requiredPositiveNumber(
     'HIDRASPLASH_SMOKE_MAX_USD',
   )
-  const estimatedMaximumCost =
-    (MAX_PROVIDER_CALLS * MAX_INPUT_UNITS_PER_CALL * inputPrice +
-      MAX_PROVIDER_CALLS * MAX_OUTPUT_TOKENS * outputPrice) /
-    1_000_000
-  if (estimatedMaximumCost > monetaryCeiling) {
-    throw new Error(
-      'O teto monetário informado não cobre a estimativa conservadora do smoke.',
-    )
-  }
-
-  let providerCalls = 0
-  const transport: OpenRouterTransport = async (input, init) => {
-    if (providerCalls >= MAX_PROVIDER_CALLS) {
-      throw new Error('O limite absoluto de transportes do smoke foi atingido.')
-    }
-    assertSmokeRequest(init)
-    providerCalls += 1
-    return fetch(input, init)
-  }
+  const costGuard = createSmokeCostGuard({
+    inputPricePerMillion: inputPrice,
+    outputPricePerMillion: outputPrice,
+    monetaryCeilingUsd: monetaryCeiling,
+  })
+  const transport = costGuard.wrapTransport(fetch)
   const client = createOpenRouterClient({
     apiKey: config.openRouterApiKey,
     model: config.openRouterModel,
-    maxOutputTokens: MAX_OUTPUT_TOKENS,
+    maxOutputTokens: SMOKE_MAX_OUTPUT_TOKENS,
     transport,
   })
   const catalog = await loadCatalogRepository()
@@ -100,29 +78,47 @@ try {
     faqDocuments,
     model: createOpenRouterAgentModel(client),
     maxModelCalls: MAX_MODEL_CALLS_PER_EXECUTION,
-    maxOutputTokens: MAX_OUTPUT_TOKENS,
+    maxOutputTokens: SMOKE_MAX_OUTPUT_TOKENS,
   })
   const usageController = createUsageBudgetController()
   const cases = [
     {
+      kind: 'product' as const,
       message:
         'Quero um shampoo anticaspa para couro cabeludo oleoso, com sensação refrescante, até R$ 50.',
     },
-    { message: 'Qual é a política demonstrativa de frete e entrega?' },
     {
+      kind: 'faq' as const,
+      message: 'Qual é a política demonstrativa de frete e entrega?',
+    },
+    {
+      kind: 'mixed' as const,
       message:
         'Quero um shampoo anticaspa para couro oleoso, com frescor, até R$ 50, e qual é o prazo de entrega?',
     },
-  ] as const
+  ] satisfies readonly { kind: SmokeCaseKind; message: string }[]
   const usageEvents: BudgetedModelUsageEvent[] = []
+  const terminationEvents: SmokeGroundingEvidence[] = []
   const observer = {
     record(event: ChatOperationalEvent) {
-      if (event.type === 'model_usage') usageEvents.push(event)
+      if (event.type === 'model_usage') {
+        usageEvents.push(event)
+        costGuard.reconcileUsage(event.reportedUsage)
+      }
+      if (event.type === 'orchestrator_termination') {
+        terminationEvents.push({
+          status: event.status,
+          groundingRequirement: event.groundingRequirement,
+          productGrounding: event.productGrounding,
+          faqGrounding: event.faqGrounding,
+        })
+      }
     },
   }
 
   for (let index = 0; index < Math.min(cases.length, MAX_EXECUTIONS); index += 1) {
     const before = usageEvents.length
+    const terminationsBefore = terminationEvents.length
     const result = await chatService.execute(
       {
         message: cases[index]?.message ?? '',
@@ -145,14 +141,25 @@ try {
         'O smoke foi interrompido porque o provedor não informou uso completo.',
       )
     }
+    costGuard.assertHealthy()
+    assertSmokeCaseEvidence({
+      kind: cases[index]?.kind ?? 'product',
+      response: result,
+      termination: terminationEvents.slice(terminationsBefore).at(-1),
+    })
+    const termination = terminationEvents.at(-1)
     console.log('Execução manual concluída.', {
       ordinal: index + 1,
-      responseType: result.type,
+      scenario: cases[index]?.kind,
       modelCalls: executionUsage.length,
+      productGrounded: termination?.productGrounding === 'found',
+      faqGrounded: termination?.faqGrounding === 'found',
+      productCount: 'productIds' in result ? result.productIds.length : 0,
+      sourceCount: result.sourceIds.length,
     })
   }
 
-  const callsBeforeLocalDenial = providerCalls
+  const callsBeforeLocalDenial = costGuard.snapshot().providerCalls
   let locallyDenied = false
   try {
     await chatService.execute(
@@ -174,7 +181,10 @@ try {
   } catch {
     locallyDenied = true
   }
-  if (!locallyDenied || providerCalls !== callsBeforeLocalDenial) {
+  if (
+    !locallyDenied ||
+    costGuard.snapshot().providerCalls !== callsBeforeLocalDenial
+  ) {
     throw new Error('A verificação local de orçamento falhou.')
   }
 
@@ -186,17 +196,16 @@ try {
     }),
     { inputTokens: 0, outputTokens: 0 },
   )
-  const reportedCost =
-    (reportedUsage.inputTokens * inputPrice +
-      reportedUsage.outputTokens * outputPrice) /
-    1_000_000
+  costGuard.assertHealthy()
+  const costSnapshot = costGuard.snapshot()
   console.log('Smoke manual concluído.', {
     executions: MAX_EXECUTIONS,
-    providerCalls,
+    providerCalls: costSnapshot.providerCalls,
     usageComplete: true,
     reportedUsage,
-    reportedCostUsd: reportedCost,
-    estimatedMaximumCostUsd: estimatedMaximumCost,
+    estimatedCostUsd: costSnapshot.estimatedCommittedCostUsd,
+    estimateIsNotActualCharge: true,
+    usageOverEstimate: costSnapshot.usageOverEstimate,
   })
 } catch {
   console.error(

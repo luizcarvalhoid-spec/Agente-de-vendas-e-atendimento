@@ -24,6 +24,8 @@ function apiResponse(message: string, status = 200, headers?: HeadersInit) {
             code:
               status === 429
                 ? 'RATE_LIMITED'
+                : status === 400
+                  ? 'VALIDATION_ERROR'
                 : status === 503
                   ? 'AI_UNAVAILABLE'
                   : 'INTERNAL_SERVER_ERROR',
@@ -185,6 +187,56 @@ describe('ChatbotButton', () => {
     expect(container.textContent?.match(/Minha tentativa/g)).toHaveLength(1)
   })
 
+  test('restores a rejected validation message for editing without adding it to history', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(apiResponse('Resposta anterior'))
+      .mockResolvedValueOnce(apiResponse('validation', 400))
+      .mockResolvedValueOnce(apiResponse('Resposta corrigida'))
+    vi.stubGlobal('fetch', fetchMock)
+    openChat()
+
+    setInputValue(input(), 'Contexto válido')
+    act(() => sendButton().click())
+    await settle()
+
+    const rejectedMessage = 'Texto rejeitado integralmente'
+    setInputValue(input(), rejectedMessage)
+    act(() => sendButton().click())
+    await settle()
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(container.textContent).toContain('Revise o conteúdo')
+    expect(container.textContent?.match(new RegExp(rejectedMessage, 'g'))).toHaveLength(1)
+
+    const editButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent?.includes('Editar mensagem'),
+    )
+    act(() => editButton?.click())
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(input().value).toBe(rejectedMessage)
+    expect(document.activeElement).toBe(input())
+    expect(container.textContent).not.toContain(rejectedMessage)
+
+    setInputValue(input(), 'Texto corrigido')
+    act(() => sendButton().click())
+    await settle()
+
+    const correctedBody = JSON.parse(
+      String(fetchMock.mock.calls[2]?.[1]?.body),
+    ) as { history: unknown[] }
+    expect(correctedBody.history).toEqual([
+      { role: 'user', content: 'Contexto válido' },
+      { role: 'assistant', content: 'Resposta anterior' },
+    ])
+    expect(JSON.stringify(correctedBody)).not.toContain(rejectedMessage)
+    expect(container.textContent).not.toContain(rejectedMessage)
+    expect(container.textContent?.match(/Texto corrigido/g)).toHaveLength(1)
+    expect(container.textContent).toContain('Resposta anterior')
+    expect(container.textContent).toContain('Resposta corrigida')
+  })
+
   test('closing aborts the request and ignores a late response', async () => {
     const request = deferred<Response>()
     let signal: AbortSignal | undefined
@@ -207,6 +259,37 @@ describe('ChatbotButton', () => {
     expect(container.textContent).not.toContain('Resposta tardia')
     expect(window.sessionStorage.getItem('hidrasplash:chat:v1')).not.toContain(
       'Pergunta cancelada',
+    )
+  })
+
+  test('new conversation cancels an active request and ignores its late response', async () => {
+    const request = deferred<Response>()
+    let signal: AbortSignal | undefined
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url, init: RequestInit) => {
+        signal = init.signal as AbortSignal
+        return request.promise
+      }),
+    )
+    openChat()
+    setInputValue(input(), 'Pergunta da sessão anterior')
+    act(() => sendButton().click())
+    act(() =>
+      container
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label="Iniciar nova conversa"]',
+        )!
+        .click(),
+    )
+    expect(signal?.aborted).toBe(true)
+
+    request.resolve(apiResponse('Resposta antiga tardia'))
+    await settle()
+    expect(container.textContent).not.toContain('Pergunta da sessão anterior')
+    expect(container.textContent).not.toContain('Resposta antiga tardia')
+    expect(window.sessionStorage.getItem('hidrasplash:chat:v1')).not.toContain(
+      'Pergunta da sessão anterior',
     )
   })
 
@@ -262,5 +345,69 @@ describe('ChatbotButton', () => {
     await settle()
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(container.textContent).toContain('Resposta após espera')
+  })
+
+  test('new conversation clears old turns, changes session and preserves rate limiting', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-11-10T12:00:00Z'))
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(apiResponse('Resposta antiga'))
+      .mockResolvedValueOnce(apiResponse('rate', 429, { 'Retry-After': '3' }))
+      .mockResolvedValueOnce(apiResponse('Resposta da nova sessão'))
+    vi.stubGlobal('fetch', fetchMock)
+    openChat()
+
+    setInputValue(input(), 'Pergunta antiga')
+    act(() => sendButton().click())
+    await settle()
+    const firstBody = JSON.parse(
+      String(fetchMock.mock.calls[0]?.[1]?.body),
+    ) as { sessionId: string }
+
+    setInputValue(input(), 'Consulta limitada')
+    act(() => sendButton().click())
+    await settle()
+    expect(container.textContent).toContain('Tente em 3s')
+
+    act(() =>
+      container
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label="Iniciar nova conversa"]',
+        )!
+        .click(),
+    )
+    await settle()
+
+    const stored = JSON.parse(
+      window.sessionStorage.getItem('hidrasplash:chat:v1')!,
+    ) as { sessionId: string; turns: unknown[] }
+    expect(stored.sessionId).not.toBe(firstBody.sessionId)
+    expect(stored.turns).toEqual([])
+    expect(container.textContent).not.toContain('Pergunta antiga')
+    expect(container.textContent).not.toContain('Resposta antiga')
+
+    setInputValue(input(), 'Pergunta prematura')
+    act(() =>
+      container
+        .querySelector<HTMLFormElement>('form')!
+        .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })),
+    )
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+
+    act(() => vi.advanceTimersByTime(1_000))
+    act(() => vi.advanceTimersByTime(1_000))
+    act(() => vi.advanceTimersByTime(1_000))
+    setInputValue(input(), 'Pergunta da nova sessão')
+    act(() => sendButton().click())
+    await settle()
+
+    const newBody = JSON.parse(
+      String(fetchMock.mock.calls[2]?.[1]?.body),
+    ) as { sessionId: string; history: unknown[] }
+    expect(newBody.sessionId).toBe(stored.sessionId)
+    expect(newBody.history).toEqual([])
+    expect(container.textContent).not.toContain('Resposta antiga')
+    expect(container.textContent).toContain('Resposta da nova sessão')
   })
 })

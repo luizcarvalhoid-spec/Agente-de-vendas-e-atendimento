@@ -90,6 +90,13 @@ export default function ChatbotButton() {
     if (conversation.send(input)) setInput('')
   }
 
+  const editValidationMessage = () => {
+    const message = conversation.takeValidationMessageForEditing()
+    if (message === undefined) return
+    setInput(message)
+    window.requestAnimationFrame(() => inputRef.current?.focus())
+  }
+
   const activeAttempt = conversation.pending ?? conversation.failure
   const retryBlocked = conversation.retryAfterSeconds > 0
 
@@ -213,6 +220,15 @@ export default function ChatbotButton() {
                     />
                     <div className="max-w-[85%] rounded-2xl rounded-bl-sm border border-red-200 bg-white px-3.5 py-2 text-sm leading-relaxed text-gray-700 shadow-sm">
                       <p>{failureMessages[conversation.failure.reason]}</p>
+                      {conversation.failure.reason === 'validation' && (
+                        <button
+                          type="button"
+                          onClick={editValidationMessage}
+                          className="mt-2 inline-flex min-h-10 items-center rounded-full border border-amber-800 px-3 py-1.5 text-xs font-semibold text-amber-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-800"
+                        >
+                          Editar mensagem
+                        </button>
+                      )}
                       {conversation.failure.canRetry && (
                         <button
                           type="button"

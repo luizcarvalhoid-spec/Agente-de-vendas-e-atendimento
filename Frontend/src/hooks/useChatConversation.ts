@@ -280,6 +280,11 @@ export function useChatConversation() {
     }
     return startRequest(failure.message, failure.id)
   }, [failure, startRequest])
+  const takeValidationMessageForEditing = useCallback(() => {
+    if (failure?.reason !== 'validation') return undefined
+    setFailure(undefined)
+    return failure.message
+  }, [failure])
   const startNewConversation = useCallback(() => {
     cancelActive()
     if (storageRef.current) clearChatSession(storageRef.current)
@@ -307,6 +312,7 @@ export function useChatConversation() {
     canSend: pending === undefined && retryAfterSeconds === 0,
     send,
     retry,
+    takeValidationMessageForEditing,
     cancelActive,
     startNewConversation,
   }

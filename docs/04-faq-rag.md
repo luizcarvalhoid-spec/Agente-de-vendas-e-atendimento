@@ -136,7 +136,7 @@ ou alterações de catálogo e FAQs.
 **Aceite:** testes de recuperação passam localmente e podem rodar em CI sem chave OpenRouter.  
 **Commit:** `test(rag): cover retrieval and unknown answers`.
 
-**Relatório:** [Avaliação independente do RAG textual](./04.4-rag-evaluation.md).
+**Relatório:** [Avaliação independente do RAG textual](../agente/docs/04.4-rag-evaluation.md).
 
 ### Registro de execução — 08/11/2026
 

@@ -15,6 +15,10 @@ Esta pasta funciona como **plano de execução + fonte de backlogs**. Cada docum
 4. Revise o diff, execute os testes indicados, teste manualmente e só então marque os checkboxes.
 5. Faça um commit com escopo claro. Atualize a tabela abaixo ao concluir a fase.
 
+Os recursos especializados já implementados do agente estão reunidos no
+[índice técnico `agente/`](../agente/README.md); os documentos numerados desta
+pasta continuam sendo o roadmap geral.
+
 **Prompt reutilizável para o Codex:**
 
 ```text
@@ -52,7 +56,7 @@ Marque a fase apenas quando **todos os critérios de aceite** de seus backlogs f
 **Atualizado em:** 10/11/2026.
 
 **Referência atual:** branch `main`, commit
-`8ff4a2152297618850be581a9ce0a8ad59e63939`. A referência histórica do
+`cb3a19cd51b79bf4c873ffa13e9eaaeedc4d17c8`. A referência histórica do
 diagnóstico inicial permanece registrada no início deste documento.
 
 - **Fase atual:** 05 — Agente com OpenRouter e ferramentas.
@@ -60,12 +64,12 @@ diagnóstico inicial permanece registrada no início deste documento.
 - [x] **5.2** — Implementada e mesclada no PR #18.
 - [x] **5.3** — Implementada e mesclada no PR #19.
 - [x] **5.4** — Implementada e mesclada no PR #21.
-- [x] **5.5** — Implementada e validada offline; aguarda revisão e merge.
+- [x] **5.5** — Implementada, revisada e mesclada no PR #22.
 - [ ] **Smoke real com OpenRouter** — pendente.
 - [ ] **Tool calling real com o modelo configurado** — pendente.
 
-A fase 05 permanece aberta: 5.1 a 5.4 foram revisadas e mescladas; a 5.5 está
-implementada nesta branch e aguarda revisão. A validação manual com OpenRouter
+A fase 05 permanece aberta: 5.1 a 5.5 foram implementadas, revisadas e
+mescladas. A validação manual com OpenRouter
 real e a compatibilidade operacional de tool calling ainda não foram
 comprovadas.
 
@@ -103,6 +107,7 @@ Uma seção só termina quando: funcionalidade observável funciona, dados são 
 Agente-de-vendas-e-atendimento/
 ├─ Frontend/          # existente
 ├─ Backend/           # a criar na fase 01
+├─ agente/            # índice e documentação técnica especializada do agente
 ├─ docs/              # estes documentos
 ├─ .gitignore         # existente; revisar
 └─ README.md          # a criar na fase 10

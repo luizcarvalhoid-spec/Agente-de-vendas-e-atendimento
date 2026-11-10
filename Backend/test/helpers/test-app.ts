@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url'
 
 import type { FastifyServerOptions } from 'fastify'
 
+import type { ChatService } from '../../src/agent/chat-service.js'
 import { buildApp } from '../../src/app.js'
 import {
   loadCatalogRepository,
@@ -23,6 +24,7 @@ export function loadTestCatalog() {
 
 export async function buildTestApp(options: {
   config?: AppConfig
+  chatService?: ChatService
   fastify?: FastifyServerOptions
 } = {}) {
   const catalog = await loadTestCatalog()
@@ -30,6 +32,7 @@ export async function buildTestApp(options: {
   return buildApp({
     config: options.config ?? loadConfig({}),
     catalog,
+    chatService: options.chatService,
     fastify: options.fastify,
   })
 }

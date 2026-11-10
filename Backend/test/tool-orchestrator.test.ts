@@ -105,7 +105,12 @@ function createFakeTool(options: {
 
 function runInput(
   signal?: AbortSignal,
-  groundingRequirement: 'not_required' | 'product' | 'faq' | 'any' =
+  groundingRequirement:
+    | 'not_required'
+    | 'product'
+    | 'faq'
+    | 'any'
+    | 'both' =
     'not_required',
 ) {
   return {

@@ -67,10 +67,14 @@ Durante a confirmação, outras confirmações e mutações são recusadas como 
 
 ## 6.5 — Teste de ponta a ponta do M1
 
-- [ ] Testar conversa de anticaspa com perguntas adaptativas → recomendação → detalhes → carrinho → checkout-demo.
-- [ ] Testar dúvidas de frete e devolução recuperadas pela FAQ.
-- [ ] Testar resposta quando nenhum produto é adequado.
+- [x] Testar offline a conversa de anticaspa com perguntas adaptativas → recomendação → detalhes → carrinho → checkout-demo.
+- [x] Testar dúvidas de frete e devolução recuperadas pela FAQ canônica.
+- [x] Testar resposta quando nenhum produto é adequado ou a restrição é incompatível.
+- [x] Preparar servidor Fastify local determinístico, restrito ao loopback e sem OpenRouter.
+- [ ] Executar e aprovar a inspeção visual desktop e mobile em navegador real.
 - [ ] Registrar vídeo curto de demonstração local para comparar com evolução posterior.
 
-**Aceite:** jornada principal demonstrada manualmente, com dados corretos e sem ações falsas.  
+**Estado:** aceite automatizado concluído; aceite visual e vídeo pendentes. Os testes de frontend são integração DOM offline e não equivalem a E2E visual. A automação do navegador foi encerrada porque o controlador não conseguiu confirmar a URL local com segurança. A OpenRouter real não foi executada. O M1 não deve ser marcado como integralmente validado enquanto essas evidências permanecerem pendentes.
+
+**Relatório:** [`06.5-mvp-validation.md`](./06.5-mvp-validation.md).
 **Commit:** `test(e2e): validate portfolio MVP journey`.

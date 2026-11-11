@@ -149,7 +149,10 @@ describe('shared cart integrations', () => {
               <ProductCard product={summary} catalogReturnTo="/" />
             </div>
             <div data-testid="pdp">
-              <ProductDetailView response={detail} returnTo="/" />
+              <ProductDetailView
+                response={detail}
+                returnTarget={{ to: '/', label: 'Voltar à vitrine' }}
+              />
             </div>
             <div data-testid="chat">
               <ChatProductCards response={recommendation} restored={false} />

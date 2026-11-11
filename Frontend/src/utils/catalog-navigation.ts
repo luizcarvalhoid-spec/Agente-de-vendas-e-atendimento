@@ -17,6 +17,11 @@ export interface PaginationFocusIntent {
   requestKey?: string
 }
 
+export interface ProductReturnTarget {
+  to: string
+  label: 'Voltar à vitrine' | 'Voltar ao carrinho'
+}
+
 interface CatalogRequestState {
   status: 'loading' | 'success' | 'error'
   requestKey: string
@@ -146,4 +151,17 @@ export function getSafeCatalogReturnTo(value: unknown) {
     : '/'
 
   return `${url.pathname}${url.search}` === canonicalPath ? canonicalPath : '/'
+}
+
+export function getSafeProductReturnTarget(
+  value: unknown,
+): ProductReturnTarget {
+  if (value === '/carrinho') {
+    return { to: '/carrinho', label: 'Voltar ao carrinho' }
+  }
+
+  return {
+    to: getSafeCatalogReturnTo(value),
+    label: 'Voltar à vitrine',
+  }
 }

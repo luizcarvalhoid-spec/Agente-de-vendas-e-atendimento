@@ -21,14 +21,14 @@
 
 - [x] Renderizar mensagens `recommendation` e `comparison` com justificativa curta, foto real do produto, nome, preço e disponibilidade.
 - [x] Oferecer CTA funcional **Detalhes**, associado ao `productId/slug` validado pelo backend e sem inferir campos comerciais do texto do modelo.
-- [ ] Ativar **Adicionar ao carrinho** após a implementação do estado compartilhado na 6.3.
+- [x] Ativar **Adicionar ao carrinho** após a implementação do estado compartilhado na 6.3.
 - [ ] Ativar **Finalizar compra** após a implementação do checkout demonstrativo na 6.4.
 - [x] Tratar snapshot histórico, imagem inválida, produto removido, divergência de identidade e indisponibilidade sem quebrar a UI.
 - [x] Garantir leitura em mobile e teclado, com cartões de comparação empilhados.
 
 **Aceite visual:** recomendações e comparações exibem dados validados, atualizam snapshots restaurados pelo catálogo canônico e navegam para a PDP existente.
 
-**Aceite comercial pendente:** os três CTAs somente estarão completos após a integração do carrinho na 6.3 e do checkout na 6.4; nenhum carrinho temporário ou confirmação falsa é oferecido nesta etapa.
+**Aceite comercial parcial:** **Detalhes** e **Adicionar ao carrinho** usam identidades validadas e o mesmo estado compartilhado. **Finalizar compra** continua pendente até o checkout fictício da 6.4; nenhum pedido ou confirmação falsa é oferecido nesta etapa.
 
 **Commit:** `feat(web): render actionable product recommendations`.
 
@@ -36,14 +36,20 @@
 
 ## 6.3 — Carrinho real no frontend
 
-- [ ] Criar estado único de carrinho em contexto/hook simples com `localStorage` (sem backend de compras).
-- [ ] Implementar adicionar, remover, alterar quantidade, subtotal e contador no `Header.tsx`.
-- [ ] Conectar botão rápido de `ProductCard.tsx`, página de detalhe e CTA do chat à **mesma ação**.
-- [ ] Calcular frete grátis (> R$ 100 conforme política definida; documentar diferença entre `>` e `>=` e ser consistente).
-- [ ] Recalcular valores a partir do catálogo, nunca confiar em preços persistidos no navegador.
+- [x] Criar estado único de carrinho em contexto/hook simples com `localStorage` (sem backend de compras).
+- [x] Implementar adicionar, remover, alterar quantidade, subtotal e contador no `Header.tsx`.
+- [x] Conectar botão rápido de `ProductCard.tsx`, página de detalhe e CTA do chat à **mesma ação**.
+- [x] Calcular frete grátis (> R$ 100 conforme política definida; documentar diferença entre `>` e `>=` e ser consistente).
+- [x] Recalcular valores a partir do catálogo, nunca confiar em preços persistidos no navegador.
 
-**Aceite:** contador deixa de ser `2` fixo; ações em qualquer parte da aplicação refletem no mesmo carrinho.  
+**Aceite:** o `Header` apresenta a quantidade total de unidades confirmadas e ações da vitrine, PDP ou chat refletem no mesmo carrinho.
 **Commit:** `feat(web): implement shared demo cart`.
+
+**Registro de execução (2026-11-10, base `41444fee`):** `CartProvider` e `useCart()` mantêm uma única instância dentro do roteador. A persistência `hidrasplash:cart:v1` contém exclusivamente `productId`, `slug` e quantidade, limitada a 20 produtos, 20 unidades por produto e 16 KiB. Referências recuperadas são dados não confiáveis e só entram nos totais após nova consulta ao catálogo, com igualdade estrita de ID/slug, preço em centavos e estoque suficiente. Operações ficam bloqueadas durante a hidratação, exceto `clearCart()`, que aborta e invalida resultados antigos; mutações por produto também são serializadas e canceláveis.
+
+Carrinho vazio não exibe frete. Com unidades válidas, subtotal de até R$ 100,00 — inclusive R$ 100,00 exatos — usa o frete fictício de R$ 12,90; somente subtotal **maior** que R$ 100,00 recebe frete grátis. Itens removidos, esgotados, divergentes ou temporariamente não validados permanecem identificáveis, mas são excluídos dos valores, que ficam explicitamente parciais. `/carrinho` apresenta apenas o estado real temporário; edição completa e checkout permanecem na 6.4.
+
+O CTA do chat revalida cartões `fresh` e `current`; snapshots `refreshing`, `removed` ou `failed` não autorizam inclusão. O `POST /api/chat` permanece sem o campo `cart`: uma integração futura deverá enviar somente IDs e quantidades válidos, nunca preços do navegador. Todos os testes desta tarefa são offline e não acionam a OpenRouter.
 
 ## 6.4 — Checkout fictício
 

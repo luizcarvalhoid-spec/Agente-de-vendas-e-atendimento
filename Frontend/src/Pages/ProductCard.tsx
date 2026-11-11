@@ -1,8 +1,13 @@
-import { ImageOff, Star } from 'lucide-react'
+import { ImageOff, ShoppingBag, Star } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router'
 
 import type { CatalogProductSummary } from '../api/contracts'
+import {
+  formatCartOperationFeedback,
+  priceToCents,
+} from '../cart/cart-model'
+import { useCart } from '../cart/useCart'
 
 interface ProductCardProps {
   product: CatalogProductSummary
@@ -18,21 +23,39 @@ export default function ProductCard({
   product,
   catalogReturnTo,
 }: ProductCardProps) {
+  const { phase, addProduct, isProductPending } = useCart()
   const [imageUnavailable, setImageUnavailable] = useState(false)
+  const [cartMessage, setCartMessage] = useState('')
+  const [cartMessageIsError, setCartMessageIsError] = useState(false)
+  const pending = isProductPending(product.id)
   const discount = product.originalPrice
     ? Math.round((1 - product.price / product.originalPrice) * 100)
     : undefined
 
   useEffect(() => {
     setImageUnavailable(false)
-  }, [product.imageUrl])
+    setCartMessage('')
+    setCartMessageIsError(false)
+  }, [product.id, product.imageUrl])
+
+  async function handleAddToCart() {
+    setCartMessage('Validando preço e disponibilidade no catálogo atual.')
+    setCartMessageIsError(false)
+    const result = await addProduct({
+      productId: product.id,
+      slug: product.slug,
+      observedPriceCents: priceToCents(product.price),
+    })
+    setCartMessage(formatCartOperationFeedback(result, product.name))
+    setCartMessageIsError(result.status === 'rejected')
+  }
 
   return (
-    <article className="h-full overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm transition-all duration-300 hover:border-[#527A36]/50 hover:shadow-lg">
+    <article className="flex h-full flex-col overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm transition-all duration-300 hover:border-[#527A36]/50 hover:shadow-lg">
       <Link
         to={`/produtos/${product.slug}`}
         state={{ catalogReturnTo }}
-        className="group flex h-full flex-col rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#527A36] focus-visible:ring-offset-2"
+        className="group flex flex-1 flex-col rounded-t-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#527A36] focus-visible:ring-offset-2"
         aria-label={`Ver produto ${product.name}`}
       >
         <div className="relative aspect-square overflow-hidden bg-gray-50">
@@ -112,6 +135,34 @@ export default function ProductCard({
           </div>
         </div>
       </Link>
+      <div className="px-4 pb-4">
+        <button
+          type="button"
+          disabled={product.stock === 0 || phase === 'hydrating' || pending}
+          onClick={() => void handleAddToCart()}
+          aria-describedby={`cart-feedback-${product.id}`}
+          className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-full bg-[#527A36] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#466B2D] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#527A36] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-700"
+        >
+          <ShoppingBag aria-hidden="true" size={17} />
+          {product.stock === 0
+            ? 'Produto esgotado'
+            : phase === 'hydrating'
+              ? 'Validando carrinho…'
+              : pending
+                ? 'Adicionando…'
+                : 'Adicionar ao carrinho'}
+        </button>
+        <p
+          id={`cart-feedback-${product.id}`}
+          role="status"
+          aria-live="polite"
+          className={`mt-2 min-h-8 text-center text-xs leading-relaxed ${
+            cartMessageIsError ? 'font-medium text-red-700' : 'text-gray-600'
+          }`}
+        >
+          {cartMessage}
+        </p>
+      </div>
     </article>
   )
 }

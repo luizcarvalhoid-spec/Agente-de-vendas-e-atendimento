@@ -14,6 +14,7 @@ import type {
   ChatRecommendationResponse,
 } from '../src/api/chat-contracts'
 import type { ProductDetailResponse } from '../src/api/contracts'
+import CartProvider from '../src/cart/CartProvider'
 import ChatProductCards, {
   CHAT_PRODUCT_REFRESH_TIMEOUT_MS,
 } from '../src/components/ChatProductCards'
@@ -165,7 +166,9 @@ describe('ChatProductCards', () => {
     act(() =>
       root.render(
         <MemoryRouter initialEntries={[initialEntry]}>
-          <ChatProductCards response={response} restored={restored} />
+          <CartProvider storage={null}>
+            <ChatProductCards response={response} restored={restored} />
+          </CartProvider>
         </MemoryRouter>,
       ),
     )
@@ -190,6 +193,7 @@ describe('ChatProductCards', () => {
       'http://api.test/api/catalog/images/shampoo-anticaspa.jpg',
     )
     expect(fetchMock).not.toHaveBeenCalled()
+    expect(container.textContent).toContain('Adicionar ao carrinho')
   })
 
   test('renders two distinct comparison cards in a single-column layout', () => {
@@ -228,18 +232,20 @@ describe('ChatProductCards', () => {
         <MemoryRouter
           initialEntries={['/?category=shampoos&subcategory=anticaspa']}
         >
-          <Routes>
-            <Route
-              path="/"
-              element={
-                <ChatProductCards
-                  response={recommendation}
-                  restored={false}
-                />
-              }
-            />
-            <Route path="/produtos/:slug" element={<Destination />} />
-          </Routes>
+          <CartProvider storage={null}>
+            <Routes>
+              <Route
+                path="/"
+                element={
+                  <ChatProductCards
+                    response={recommendation}
+                    restored={false}
+                  />
+                }
+              />
+              <Route path="/produtos/:slug" element={<Destination />} />
+            </Routes>
+          </CartProvider>
         </MemoryRouter>,
       ),
     )
@@ -276,6 +282,7 @@ describe('ChatProductCards', () => {
     expect(container.textContent).toContain(
       'Snapshot histórico — verificando dados atuais',
     )
+    expect(container.textContent).not.toContain('Adicionar ao carrinho')
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const [url, init] = fetchMock.mock.calls[0] ?? []
     expect(url).toBe(`http://api.test/api/products/${product.slug}`)
@@ -317,6 +324,7 @@ describe('ChatProductCards', () => {
 
     expect(container.textContent).toContain('Produto indisponível no catálogo atual')
     expect(container.querySelector('a')).toBeNull()
+    expect(container.textContent).not.toContain('Adicionar ao carrinho')
     expect(container.textContent).not.toContain('Dados atuais confirmados')
   })
 
@@ -335,6 +343,7 @@ describe('ChatProductCards', () => {
 
     expect(container.textContent).toContain('Produto indisponível no catálogo atual')
     expect(container.querySelector('a')).toBeNull()
+    expect(container.textContent).not.toContain('Adicionar ao carrinho')
   })
 
   test('keeps a failed refresh explicitly historical and leaves Details safe', async () => {
@@ -349,6 +358,7 @@ describe('ChatProductCards', () => {
     expect(container.querySelector('a')?.getAttribute('href')).toBe(
       `/produtos/${product.slug}`,
     )
+    expect(container.textContent).not.toContain('Adicionar ao carrinho')
   })
 
   test('times out a non-cooperative refresh and ignores its late result', async () => {

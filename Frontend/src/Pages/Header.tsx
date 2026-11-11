@@ -7,7 +7,10 @@ import {
   useSearchParams,
 } from 'react-router'
 
+import { useCart } from '../cart/useCart'
+
 export default function Header() {
+  const { phase, totalUnits } = useCart()
   const location = useLocation()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
@@ -123,11 +126,34 @@ export default function Header() {
             <Link
               to="/carrinho"
               className="group relative flex min-h-11 min-w-11 flex-col items-center justify-center rounded-sm text-gray-600 transition-colors hover:text-[#527A36] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#527A36] focus-visible:ring-offset-2"
-              aria-label="Carrinho de compras"
+              aria-label={
+                phase === 'hydrating'
+                  ? 'Carrinho de compras — validando itens salvos'
+                  : `Carrinho de compras — ${totalUnits} ${
+                      totalUnits === 1 ? 'unidade confirmada' : 'unidades confirmadas'
+                    }`
+              }
             >
               <ShoppingCart size={22} strokeWidth={1.8} />
+              <span
+                aria-hidden="true"
+                className="absolute right-0 top-0 flex min-h-5 min-w-5 items-center justify-center rounded-full bg-[#527A36] px-1 text-[10px] font-bold leading-none text-white"
+              >
+                {phase === 'hydrating'
+                  ? '…'
+                  : totalUnits > 99
+                    ? '99+'
+                    : totalUnits}
+              </span>
               <span className="mt-0.5 hidden text-[10px] font-medium group-hover:text-[#527A36] sm:block">
                 Carrinho
+              </span>
+              <span className="sr-only" aria-live="polite">
+                {phase === 'ready'
+                  ? `${totalUnits} ${
+                      totalUnits === 1 ? 'unidade confirmada' : 'unidades confirmadas'
+                    }`
+                  : 'Validando carrinho salvo'}
               </span>
             </Link>
           </div>

@@ -119,7 +119,7 @@ export default function ChatProductCards({
   return (
     <section
       aria-label={title}
-      className="ml-8 min-w-0 max-w-[calc(100%_-_2rem)]"
+      className="ml-7 min-w-0 max-w-[calc(100%_-_1.75rem)]"
       data-testid="chat-product-cards"
     >
       <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-600">
@@ -287,7 +287,10 @@ function ChatProductCardItem({
       className="min-w-0 max-w-full overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm"
       data-product-id={product.id}
     >
-      <div className="aspect-[4/3] w-full overflow-hidden bg-gray-100">
+      <div
+        className="flex h-36 w-full items-center justify-center overflow-hidden bg-gray-50 p-3 sm:h-40"
+        data-testid="chat-product-media"
+      >
         {imageUnavailable || !product.imageUrl ? (
           <div className="flex h-full flex-col items-center justify-center gap-2 text-gray-600">
             <ImageOff aria-hidden="true" size={26} strokeWidth={1.5} />
@@ -297,14 +300,14 @@ function ChatProductCardItem({
           <img
             src={product.imageUrl}
             alt={product.name}
-            className="h-full w-full object-cover"
+            className="h-full w-full object-contain"
             loading="lazy"
             onError={() => setImageUnavailable(true)}
           />
         )}
       </div>
 
-      <div className="min-w-0 p-3">
+      <div className="min-w-0 p-3 sm:p-3.5">
         <p className="text-[10px] font-semibold uppercase tracking-wide text-[#527A36]">
           Catálogo demonstrativo
         </p>
@@ -348,34 +351,36 @@ function ChatProductCardItem({
           </div>
         )}
 
-        {state.status !== 'removed' && (
-          <Link
-            to={`/produtos/${product.slug}`}
-            state={{ catalogReturnTo }}
-            className="mt-3 inline-flex min-h-11 w-full items-center justify-center rounded-full bg-[#527A36] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#466B2D] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#527A36] focus-visible:ring-offset-2"
-            aria-label={`Ver detalhes de ${product.name}`}
-          >
-            Detalhes
-          </Link>
-        )}
-        {canOfferCartAction && (
-          <button
-            type="button"
-            disabled={product.stock === 0 || phase === 'hydrating' || pending}
-            onClick={() => void handleAddToCart()}
-            className="mt-2 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-full border-2 border-[#527A36] px-4 py-2 text-sm font-semibold text-[#527A36] transition-colors hover:bg-[#527A36] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#527A36] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:border-gray-300 disabled:bg-gray-100 disabled:text-gray-600"
-            aria-describedby={cartFeedbackId}
-          >
-            <ShoppingBag aria-hidden="true" size={16} />
-            {product.stock === 0
-              ? 'Produto esgotado'
-              : phase === 'hydrating'
-                ? 'Validando carrinho…'
-                : pending
-                  ? 'Adicionando…'
-                  : 'Adicionar ao carrinho'}
-          </button>
-        )}
+        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+          {state.status !== 'removed' && (
+            <Link
+              to={`/produtos/${product.slug}`}
+              state={{ catalogReturnTo }}
+              className="inline-flex min-h-11 w-full items-center justify-center rounded-full bg-[#527A36] px-3 py-2 text-center text-sm font-semibold text-white transition-colors hover:bg-[#466B2D] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#527A36] focus-visible:ring-offset-2"
+              aria-label={`Ver detalhes de ${product.name}`}
+            >
+              Ver detalhes
+            </Link>
+          )}
+          {canOfferCartAction && (
+            <button
+              type="button"
+              disabled={product.stock === 0 || phase === 'hydrating' || pending}
+              onClick={() => void handleAddToCart()}
+              className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-full border-2 border-[#527A36] px-3 py-2 text-center text-sm font-semibold text-[#527A36] transition-colors hover:bg-[#527A36] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#527A36] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:border-gray-300 disabled:bg-gray-100 disabled:text-gray-600"
+              aria-describedby={cartFeedbackId}
+            >
+              <ShoppingBag aria-hidden="true" size={16} />
+              {product.stock === 0
+                ? 'Produto esgotado'
+                : phase === 'hydrating'
+                  ? 'Validando carrinho…'
+                  : pending
+                    ? 'Adicionando…'
+                    : 'Adicionar ao carrinho'}
+            </button>
+          )}
+        </div>
         {canOfferCheckout && (
           <Link
             to="/checkout-demo"

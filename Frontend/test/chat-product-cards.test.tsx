@@ -214,6 +214,19 @@ describe('ChatProductCards', () => {
     expect(container.textContent).not.toContain('Finalizar compra')
   })
 
+  test('keeps the complete product visible inside a stable media area', () => {
+    renderCards(recommendation)
+
+    const media = container.querySelector<HTMLElement>(
+      '[data-testid="chat-product-media"]',
+    )!
+    const image = media.querySelector('img')!
+    expect(media.className).toContain('h-36')
+    expect(media.className).toContain('sm:h-40')
+    expect(image.className).toContain('object-contain')
+    expect(image.className).not.toContain('object-cover')
+  })
+
   test('offers checkout only after the exact product is confirmed in the shared cart', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(detailResponse()))
     vi.stubGlobal('fetch', fetchMock)

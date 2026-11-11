@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
-    "test": "node --experimental-strip-types --test test/product-gallery.test.ts test/catalog-navigation.test.ts && vitest run --environment jsdom test/chat-contracts.test.ts test/chat-client.test.ts test/chat-conversation.test.ts test/chatbot-button.test.tsx test/chat-product-cards.test.tsx test/cart-model.test.ts test/cart-provider.test.tsx test/cart-integration.test.tsx test/cart-checkout-pages.test.tsx test/mvp-journey.test.tsx",
+    "test": "node --experimental-strip-types --test test/product-gallery.test.ts test/catalog-navigation.test.ts && vitest run --environment jsdom test/chat-contracts.test.ts test/chat-client.test.ts test/chat-conversation.test.ts test/chatbot-button.test.tsx test/chat-product-cards.test.tsx test/cart-model.test.ts test/cart-provider.test.tsx test/cart-integration.test.tsx test/cart-checkout-pages.test.tsx test/mini-cart.test.tsx test/mvp-journey.test.tsx",
     "test:legacy": "node --experimental-strip-types --test test/product-gallery.test.ts test/catalog-navigation.test.ts",
     "test:chat": "vitest run --environment jsdom test/chat-contracts.test.ts test/chat-client.test.ts test/chat-conversation.test.ts test/chatbot-button.test.tsx test/chat-product-cards.test.tsx",
     "preview": "vite preview"

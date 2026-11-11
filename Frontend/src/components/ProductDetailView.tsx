@@ -14,6 +14,11 @@ import type {
   ScalpType,
   SkinType,
 } from '../api/contracts'
+import {
+  formatCartOperationFeedback,
+  priceToCents,
+} from '../cart/cart-model'
+import { useCart } from '../cart/useCart'
 import ProductGallery from './ProductGallery'
 
 const categoryLabels: Record<ProductCategory, string> = {
@@ -261,14 +266,30 @@ export default function ProductDetailView({
   returnTo,
 }: ProductDetailViewProps) {
   const { item: product, media } = response
+  const { phase, addProduct, isProductPending } = useCart()
   const [purchaseMessage, setPurchaseMessage] = useState('')
+  const [purchaseMessageIsError, setPurchaseMessageIsError] = useState(false)
+  const pending = isProductPending(product.id)
   const discount = product.originalPrice
     ? Math.round((1 - product.price / product.originalPrice) * 100)
     : undefined
 
   useEffect(() => {
     setPurchaseMessage('')
+    setPurchaseMessageIsError(false)
   }, [product.slug])
+
+  async function handleAddToCart() {
+    setPurchaseMessage('Validando preço e disponibilidade no catálogo atual.')
+    setPurchaseMessageIsError(false)
+    const result = await addProduct({
+      productId: product.id,
+      slug: product.slug,
+      observedPriceCents: priceToCents(product.price),
+    })
+    setPurchaseMessage(formatCartOperationFeedback(result, product.name))
+    setPurchaseMessageIsError(result.status === 'rejected')
+  }
 
   const compatibility =
     product.applicationArea === 'hair'
@@ -449,18 +470,18 @@ export default function ProductDetailView({
 
           <button
             type="button"
-            disabled={product.stock === 0}
-            onClick={() =>
-              setPurchaseMessage(
-                'Nenhum item foi adicionado. O carrinho será implementado em uma etapa futura.',
-              )
-            }
+            disabled={product.stock === 0 || phase === 'hydrating' || pending}
+            onClick={() => void handleAddToCart()}
             className="mt-7 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-full bg-[#527A36] px-6 py-3.5 text-sm font-semibold text-white transition-colors hover:bg-[#466B2D] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#527A36] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-700"
           >
             <ShoppingBag aria-hidden="true" size={18} />
-            {product.stock > 0
-              ? 'Adicionar ao carrinho (demonstração)'
-              : 'Produto esgotado'}
+            {product.stock === 0
+              ? 'Produto esgotado'
+              : phase === 'hydrating'
+                ? 'Validando carrinho…'
+                : pending
+                  ? 'Adicionando…'
+                  : 'Adicionar ao carrinho'}
           </button>
           <p className="mt-3 text-center text-xs leading-relaxed text-gray-500">
             Experiência demonstrativa: nenhum pedido ou pagamento real será criado.
@@ -468,7 +489,9 @@ export default function ProductDetailView({
           <p
             role="status"
             aria-live="polite"
-            className="mt-3 min-h-5 text-center text-sm font-medium text-[#527A36]"
+            className={`mt-3 min-h-5 text-center text-sm font-medium ${
+              purchaseMessageIsError ? 'text-red-700' : 'text-[#527A36]'
+            }`}
           >
             {purchaseMessage}
           </p>

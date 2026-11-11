@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
 import ChatbotButton from '../src/Pages/ChatbotButton'
 import type { ChatProductCard } from '../src/api/chat-contracts'
+import CartProvider from '../src/cart/CartProvider'
 import { CHAT_LOCAL_TIMEOUT_MS } from '../src/hooks/useChatConversation'
 
 const requestId = '00000000-0000-4000-8000-000000000001'
@@ -115,7 +116,9 @@ describe('ChatbotButton', () => {
     act(() =>
       root.render(
         <MemoryRouter>
-          <ChatbotButton />
+          <CartProvider storage={null}>
+            <ChatbotButton />
+          </CartProvider>
         </MemoryRouter>,
       ),
     )

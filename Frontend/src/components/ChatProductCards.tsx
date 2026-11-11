@@ -1,5 +1,5 @@
-import { ImageOff } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { ImageOff, ShoppingBag } from 'lucide-react'
+import { useEffect, useId, useState } from 'react'
 import { Link, useLocation } from 'react-router'
 
 import {
@@ -13,6 +13,11 @@ import type {
   ChatRecommendationResponse,
 } from '../api/chat-contracts'
 import type { ProductDetailResponse } from '../api/contracts'
+import {
+  formatCartOperationFeedback,
+  priceToCents,
+} from '../cart/cart-model'
+import { useCart } from '../cart/useCart'
 import { getSafeCatalogReturnTo } from '../utils/catalog-navigation'
 
 export const CHAT_PRODUCT_REFRESH_TIMEOUT_MS = 5_000
@@ -132,8 +137,8 @@ export default function ChatProductCards({
         )}
       </div>
       <p className="mt-2 text-[11px] leading-relaxed text-gray-500">
-        Carrinho e checkout demonstrativos serão habilitados nas próximas
-        etapas. Nenhuma compra é realizada por estes cartões.
+        A inclusão revalida o catálogo atual. O checkout demonstrativo será
+        habilitado na próxima etapa; nenhuma compra é realizada por estes cartões.
       </p>
     </section>
   )
@@ -147,6 +152,8 @@ function ChatProductCardItem({
   restored: boolean
 }) {
   const location = useLocation()
+  const { phase, addProduct, isProductPending } = useCart()
+  const cartFeedbackId = `chat-cart-feedback-${useId()}`
   const snapshotProduct = fromSnapshot(snapshot)
   const [state, setState] = useState<ProductState>(() =>
     restored
@@ -156,9 +163,13 @@ function ChatProductCardItem({
   const [imageUnavailable, setImageUnavailable] = useState(
     snapshotProduct.imageUrl === undefined,
   )
+  const [cartMessage, setCartMessage] = useState('')
+  const [cartMessageIsError, setCartMessageIsError] = useState(false)
 
   useEffect(() => {
     const historicalProduct = fromSnapshot(snapshot)
+    setCartMessage('')
+    setCartMessageIsError(false)
     if (!restored) {
       setState({ status: 'fresh', product: historicalProduct })
       return
@@ -221,6 +232,9 @@ function ChatProductCardItem({
   }, [restored, snapshot])
 
   const product = state.product
+  const pending = isProductPending(product.id)
+  const canOfferCartAction =
+    state.status === 'fresh' || state.status === 'current'
   const isHistorical =
     state.status === 'refreshing' || state.status === 'failed'
   const catalogReturnTo = getSafeCatalogReturnTo(
@@ -230,6 +244,18 @@ function ChatProductCardItem({
   useEffect(() => {
     setImageUnavailable(product.imageUrl === undefined)
   }, [product.imageUrl])
+
+  async function handleAddToCart() {
+    setCartMessage('Validando preço e disponibilidade no catálogo atual.')
+    setCartMessageIsError(false)
+    const result = await addProduct({
+      productId: product.id,
+      slug: product.slug,
+      observedPriceCents: priceToCents(product.price),
+    })
+    setCartMessage(formatCartOperationFeedback(result, product.name))
+    setCartMessageIsError(result.status === 'rejected')
+  }
 
   return (
     <article
@@ -308,6 +334,34 @@ function ChatProductCardItem({
             Detalhes
           </Link>
         )}
+        {canOfferCartAction && (
+          <button
+            type="button"
+            disabled={product.stock === 0 || phase === 'hydrating' || pending}
+            onClick={() => void handleAddToCart()}
+            className="mt-2 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-full border-2 border-[#527A36] px-4 py-2 text-sm font-semibold text-[#527A36] transition-colors hover:bg-[#527A36] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#527A36] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:border-gray-300 disabled:bg-gray-100 disabled:text-gray-600"
+            aria-describedby={cartFeedbackId}
+          >
+            <ShoppingBag aria-hidden="true" size={16} />
+            {product.stock === 0
+              ? 'Produto esgotado'
+              : phase === 'hydrating'
+                ? 'Validando carrinho…'
+                : pending
+                  ? 'Adicionando…'
+                  : 'Adicionar ao carrinho'}
+          </button>
+        )}
+        <p
+          id={cartFeedbackId}
+          role="status"
+          aria-live="polite"
+          className={`mt-2 min-h-5 text-[11px] font-medium ${
+            cartMessageIsError ? 'text-red-700' : 'text-gray-600'
+          }`}
+        >
+          {cartMessage}
+        </p>
       </div>
     </article>
   )

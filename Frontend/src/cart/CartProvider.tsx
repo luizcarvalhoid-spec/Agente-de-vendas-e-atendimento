@@ -20,7 +20,10 @@ import {
   type CartProblemReason,
   type CartReference,
   type CartStorage,
+  type DemoCheckoutCommercialChange,
+  type DemoCheckoutResult,
   calculateCartTotals,
+  calculateCartLineSubtotalCents,
   clearStoredCart,
   isValidCartProductId,
   isValidCartQuantity,
@@ -47,12 +50,19 @@ interface CartState {
   items: CartItem[]
   pendingProductIds: ReadonlySet<number>
   persistenceStatus: 'available' | 'unavailable'
+  checkoutValidationStatus: 'idle' | 'validating'
 }
 
 interface ActiveOperation {
   controller: AbortController
   token: number
   generation: number
+}
+
+interface ActiveCheckoutValidation {
+  token: number
+  generation: number
+  controllers: Set<AbortController>
 }
 
 class CartValidationTimeoutError extends Error {
@@ -194,6 +204,7 @@ export default function CartProvider({
     items: [],
     pendingProductIds: new Set(),
     persistenceStatus: storage ? 'available' : 'unavailable',
+    checkoutValidationStatus: 'idle',
   }
   const [state, setState] = useState<CartState>(initialState)
   const stateRef = useRef(state)
@@ -202,6 +213,7 @@ export default function CartProvider({
   const operationTokenRef = useRef(0)
   const activeOperationsRef = useRef(new Map<number, ActiveOperation>())
   const hydrationControllersRef = useRef(new Set<AbortController>())
+  const checkoutValidationRef = useRef<ActiveCheckoutValidation>()
 
   const commitState = useCallback(
     (
@@ -237,6 +249,14 @@ export default function CartProvider({
         operation.controller.abort()
       }
       activeOperations.clear()
+      const checkoutValidation = checkoutValidationRef.current
+      if (checkoutValidation) {
+        for (const controller of checkoutValidation.controllers) {
+          controller.abort()
+        }
+        checkoutValidation.controllers.clear()
+        checkoutValidationRef.current = undefined
+      }
     }
   }, [])
 
@@ -251,6 +271,7 @@ export default function CartProvider({
       items: [],
       pendingProductIds: new Set(),
       persistenceStatus: stored.status,
+      checkoutValidationStatus: 'idle',
     }))
 
     if (stored.references.length === 0) {
@@ -306,6 +327,9 @@ export default function CartProvider({
       expectedExistingQuantity?: number,
     ): Promise<CartOperationResult> => {
       const current = stateRef.current
+      if (checkoutValidationRef.current) {
+        return { status: 'rejected', reason: 'busy' }
+      }
       if (current.phase === 'hydrating') {
         return { status: 'rejected', reason: 'hydrating' }
       }
@@ -474,6 +498,9 @@ export default function CartProvider({
 
   const setQuantity = useCallback(
     (productId: number, quantity: number): Promise<CartOperationResult> => {
+      if (checkoutValidationRef.current) {
+        return Promise.resolve({ status: 'rejected', reason: 'busy' })
+      }
       if (stateRef.current.phase === 'hydrating') {
         return Promise.resolve({ status: 'rejected', reason: 'hydrating' })
       }
@@ -497,7 +524,10 @@ export default function CartProvider({
 
   const removeProduct = useCallback(
     (productId: number) => {
-      if (stateRef.current.phase === 'hydrating') return
+      if (
+        stateRef.current.phase === 'hydrating' ||
+        checkoutValidationRef.current
+      ) return
       const active = activeOperationsRef.current.get(productId)
       if (active) {
         active.controller.abort()
@@ -529,12 +559,21 @@ export default function CartProvider({
       operation.controller.abort()
     }
     activeOperationsRef.current.clear()
+    const checkoutValidation = checkoutValidationRef.current
+    if (checkoutValidation) {
+      for (const controller of checkoutValidation.controllers) {
+        controller.abort()
+      }
+      checkoutValidation.controllers.clear()
+      checkoutValidationRef.current = undefined
+    }
     commitState(
       (current) => ({
         ...current,
         phase: 'ready',
         items: [],
         pendingProductIds: new Set(),
+        checkoutValidationStatus: 'idle',
       }),
       'clear',
     )
@@ -542,6 +581,9 @@ export default function CartProvider({
 
   const retryValidation = useCallback(
     (productId: number): Promise<CartOperationResult> => {
+      if (checkoutValidationRef.current) {
+        return Promise.resolve({ status: 'rejected', reason: 'busy' })
+      }
       if (stateRef.current.phase === 'hydrating') {
         return Promise.resolve({ status: 'rejected', reason: 'hydrating' })
       }
@@ -563,6 +605,184 @@ export default function CartProvider({
     [validateAndCommit],
   )
 
+  const confirmDemoCheckout = useCallback(
+    async (): Promise<DemoCheckoutResult> => {
+      const current = stateRef.current
+      if (checkoutValidationRef.current) {
+        return { status: 'blocked', reason: 'busy' }
+      }
+      if (current.phase === 'hydrating') {
+        return { status: 'blocked', reason: 'hydrating' }
+      }
+      if (
+        activeOperationsRef.current.size > 0 ||
+        current.pendingProductIds.size > 0
+      ) {
+        return { status: 'blocked', reason: 'busy' }
+      }
+      if (current.items.length === 0) {
+        return { status: 'blocked', reason: 'empty' }
+      }
+      if (current.items.some((item) => item.status === 'problem')) {
+        return { status: 'blocked', reason: 'problem_items' }
+      }
+
+      const snapshot = current.items.filter(
+        (item): item is Extract<CartItem, { status: 'ready' }> =>
+          item.status === 'ready',
+      )
+      if (snapshot.length === 0) {
+        return { status: 'blocked', reason: 'empty' }
+      }
+
+      const token = operationTokenRef.current + 1
+      operationTokenRef.current = token
+      const generation = generationRef.current
+      const controllers = new Set<AbortController>()
+      checkoutValidationRef.current = { token, generation, controllers }
+      commitState((latest) => ({
+        ...latest,
+        checkoutValidationStatus: 'validating',
+        pendingProductIds: new Set(snapshot.map((item) => item.productId)),
+      }))
+
+      const validations = snapshot.map((item) => {
+        const controller = new AbortController()
+        controllers.add(controller)
+        return validateStoredReference(item, loadProduct, controller).finally(
+          () => controllers.delete(controller),
+        )
+      })
+
+      try {
+        const validatedItems = await Promise.all(validations)
+        const active = checkoutValidationRef.current
+        if (
+          !active ||
+          active.token !== token ||
+          active.generation !== generation ||
+          generationRef.current !== generation
+        ) {
+          return { status: 'blocked', reason: 'cancelled' }
+        }
+
+        const changes: DemoCheckoutCommercialChange[] = []
+        for (let index = 0; index < snapshot.length; index += 1) {
+          const before = snapshot[index]
+          const after = validatedItems[index]
+          if (!before || !after || after.status !== 'ready') continue
+          if (before.product.unitPriceCents !== after.product.unitPriceCents) {
+            changes.push({ productId: before.productId, kind: 'price' })
+          }
+          if (before.product.stock !== after.product.stock) {
+            changes.push({ productId: before.productId, kind: 'stock' })
+          }
+        }
+
+        const problemItems = validatedItems.filter(
+          (item) => item.status === 'problem',
+        )
+        if (problemItems.length > 0) {
+          checkoutValidationRef.current = undefined
+          commitState(
+            (latest) => ({
+              ...latest,
+              items: validatedItems,
+              pendingProductIds: new Set(),
+              checkoutValidationStatus: 'idle',
+            }),
+            'write',
+          )
+          return {
+            status: 'blocked',
+            reason: problemItems.some(
+              (item) =>
+                item.status === 'problem' &&
+                item.reason === 'validation_failed',
+            )
+              ? 'validation_failed'
+              : 'problem_items',
+          }
+        }
+
+        if (changes.length > 0) {
+          checkoutValidationRef.current = undefined
+          commitState(
+            (latest) => ({
+              ...latest,
+              items: validatedItems,
+              pendingProductIds: new Set(),
+              checkoutValidationStatus: 'idle',
+            }),
+            'write',
+          )
+          return { status: 'review_required', changes }
+        }
+
+        const totals = calculateCartTotals(validatedItems)
+        const summary = {
+          items: validatedItems.map((item) => {
+            if (item.status !== 'ready') {
+              throw new Error('Unexpected invalid checkout item')
+            }
+            return {
+              productId: item.productId,
+              slug: item.slug,
+              name: item.product.name,
+              imageUrl: item.product.imageUrl,
+              quantity: item.quantity,
+              unitPriceCents: item.product.unitPriceCents,
+              lineSubtotalCents: calculateCartLineSubtotalCents(
+                item.product.unitPriceCents,
+                item.quantity,
+              ),
+            }
+          }),
+          totalUnits: totals.totalUnits,
+          subtotalCents: totals.subtotalCents,
+          shippingCents: totals.shippingCents,
+          totalCents: totals.totalCents,
+        }
+
+        const latestActive = checkoutValidationRef.current
+        if (
+          !latestActive ||
+          latestActive.token !== token ||
+          generationRef.current !== generation
+        ) {
+          return { status: 'blocked', reason: 'cancelled' }
+        }
+
+        checkoutValidationRef.current = undefined
+        generationRef.current += 1
+        commitState(
+          (latest) => ({
+            ...latest,
+            phase: 'ready',
+            items: [],
+            pendingProductIds: new Set(),
+            checkoutValidationStatus: 'idle',
+          }),
+          'clear',
+        )
+        return { status: 'confirmed', summary }
+      } finally {
+        const active = checkoutValidationRef.current
+        if (active?.token === token) {
+          for (const controller of active.controllers) controller.abort()
+          active.controllers.clear()
+          checkoutValidationRef.current = undefined
+          commitState((latest) => ({
+            ...latest,
+            pendingProductIds: new Set(),
+            checkoutValidationStatus: 'idle',
+          }))
+        }
+      }
+    },
+    [commitState, loadProduct],
+  )
+
   const totals = calculateCartTotals(state.items)
   const value = useMemo<CartContextValue>(
     () => ({
@@ -578,16 +798,19 @@ export default function CartProvider({
         state.pendingProductIds.size > 0,
       issueCount: state.items.filter((item) => item.status === 'problem').length,
       persistenceStatus: state.persistenceStatus,
+      checkoutValidationStatus: state.checkoutValidationStatus,
       addProduct,
       setQuantity,
       removeProduct,
       clearCart,
       retryValidation,
+      confirmDemoCheckout,
       isProductPending: (productId) => state.pendingProductIds.has(productId),
     }),
     [
       addProduct,
       clearCart,
+      confirmDemoCheckout,
       removeProduct,
       retryValidation,
       setQuantity,

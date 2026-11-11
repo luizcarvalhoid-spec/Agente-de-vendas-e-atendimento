@@ -137,8 +137,8 @@ export default function ChatProductCards({
         )}
       </div>
       <p className="mt-2 text-[11px] leading-relaxed text-gray-500">
-        A inclusão revalida o catálogo atual. O checkout demonstrativo será
-        habilitado na próxima etapa; nenhuma compra é realizada por estes cartões.
+        A inclusão e a confirmação revalidam o catálogo atual. Nenhuma compra é
+        realizada por estes cartões.
       </p>
     </section>
   )
@@ -152,8 +152,18 @@ function ChatProductCardItem({
   restored: boolean
 }) {
   const location = useLocation()
-  const { phase, addProduct, isProductPending } = useCart()
+  const {
+    phase,
+    items,
+    totalUnits,
+    issueCount,
+    isPartial,
+    checkoutValidationStatus,
+    addProduct,
+    isProductPending,
+  } = useCart()
   const cartFeedbackId = `chat-cart-feedback-${useId()}`
+  const checkoutFeedbackId = `${cartFeedbackId}-checkout`
   const snapshotProduct = fromSnapshot(snapshot)
   const [state, setState] = useState<ProductState>(() =>
     restored
@@ -235,6 +245,20 @@ function ChatProductCardItem({
   const pending = isProductPending(product.id)
   const canOfferCartAction =
     state.status === 'fresh' || state.status === 'current'
+  const matchingCartItem = items.find(
+    (item) => item.productId === product.id && item.slug === product.slug,
+  )
+  const matchingCartItemIsReady = matchingCartItem?.status === 'ready'
+  const cartIsValidForCheckout =
+    phase === 'ready' &&
+    totalUnits > 0 &&
+    issueCount === 0 &&
+    !isPartial &&
+    checkoutValidationStatus === 'idle'
+  const canOfferCheckout =
+    canOfferCartAction && matchingCartItemIsReady && cartIsValidForCheckout
+  const shouldReviewCart =
+    canOfferCartAction && matchingCartItem !== undefined && !canOfferCheckout
   const isHistorical =
     state.status === 'refreshing' || state.status === 'failed'
   const catalogReturnTo = getSafeCatalogReturnTo(
@@ -351,6 +375,32 @@ function ChatProductCardItem({
                   ? 'Adicionando…'
                   : 'Adicionar ao carrinho'}
           </button>
+        )}
+        {canOfferCheckout && (
+          <Link
+            to="/checkout-demo"
+            className="mt-2 inline-flex min-h-11 w-full items-center justify-center rounded-full bg-[#527A36] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#466B2D] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#527A36] focus-visible:ring-offset-2"
+            aria-label={`Finalizar compra demonstrativa com ${product.name}`}
+          >
+            Finalizar compra
+          </Link>
+        )}
+        {shouldReviewCart && (
+          <div
+            id={checkoutFeedbackId}
+            className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-[11px] leading-relaxed text-amber-900"
+          >
+            <p>
+              Revise as pendências do carrinho antes de continuar para o checkout
+              demonstrativo.
+            </p>
+            <Link
+              to="/carrinho"
+              className="mt-2 inline-flex min-h-11 items-center font-semibold text-amber-950 underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-800"
+            >
+              Revisar carrinho
+            </Link>
+          </div>
         )}
         <p
           id={cartFeedbackId}

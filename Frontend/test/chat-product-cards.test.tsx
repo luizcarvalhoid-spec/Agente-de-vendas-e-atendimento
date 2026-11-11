@@ -15,6 +15,7 @@ import type {
 } from '../src/api/chat-contracts'
 import type { ProductDetailResponse } from '../src/api/contracts'
 import CartProvider from '../src/cart/CartProvider'
+import { CART_STORAGE_KEY, type CartStorage } from '../src/cart/cart-model'
 import ChatProductCards, {
   CHAT_PRODUCT_REFRESH_TIMEOUT_MS,
 } from '../src/components/ChatProductCards'
@@ -130,6 +131,22 @@ function deferred<T>() {
   return { promise, resolve }
 }
 
+class MemoryStorage implements CartStorage {
+  readonly values = new Map<string, string>()
+
+  getItem(key: string) {
+    return this.values.get(key) ?? null
+  }
+
+  setItem(key: string, value: string) {
+    this.values.set(key, value)
+  }
+
+  removeItem(key: string) {
+    this.values.delete(key)
+  }
+}
+
 async function settle() {
   await act(async () => {
     await Promise.resolve()
@@ -194,6 +211,61 @@ describe('ChatProductCards', () => {
     )
     expect(fetchMock).not.toHaveBeenCalled()
     expect(container.textContent).toContain('Adicionar ao carrinho')
+    expect(container.textContent).not.toContain('Finalizar compra')
+  })
+
+  test('offers checkout only after the exact product is confirmed in the shared cart', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(detailResponse()))
+    vi.stubGlobal('fetch', fetchMock)
+    renderCards(recommendation)
+
+    expect(container.querySelector('a[href="/checkout-demo"]')).toBeNull()
+    const add = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent?.includes('Adicionar ao carrinho'),
+    )!
+    await act(async () => {
+      add.click()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    const checkout = container.querySelector<HTMLAnchorElement>(
+      'a[href="/checkout-demo"]',
+    )
+    expect(checkout?.textContent).toContain('Finalizar compra')
+    expect(checkout?.getAttribute('aria-label')).toContain(product.name)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  test('directs an invalid matching cart reference to review instead of checkout', async () => {
+    vi.stubGlobal('fetch', vi.fn())
+    const storage = new MemoryStorage()
+    storage.setItem(
+      CART_STORAGE_KEY,
+      JSON.stringify({
+        version: 1,
+        items: [{ productId: product.id, slug: product.slug, quantity: 1 }],
+      }),
+    )
+    act(() =>
+      root.render(
+        <MemoryRouter>
+          <CartProvider
+            storage={storage}
+            loadProduct={vi.fn().mockRejectedValue(new Error('offline'))}
+          >
+            <ChatProductCards response={recommendation} restored={false} />
+          </CartProvider>
+        </MemoryRouter>,
+      ),
+    )
+    await settle()
+
+    expect(container.querySelector('a[href="/checkout-demo"]')).toBeNull()
+    expect(container.querySelector('a[href="/carrinho"]')?.textContent).toContain(
+      'Revisar carrinho',
+    )
+    expect(container.textContent).toContain('Revise as pendências do carrinho')
   })
 
   test('renders two distinct comparison cards in a single-column layout', () => {

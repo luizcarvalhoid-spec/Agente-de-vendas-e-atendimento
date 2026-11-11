@@ -4,10 +4,18 @@ import test from 'node:test'
 
 import { CHAT_MODEL_INPUT_MARGIN_UNITS } from '../src/agent/usage-budget-controller.js'
 import {
+  assertSmokeWorstCaseBudget,
   assertSmokeCaseEvidence,
+  classifySmokeFailure,
   createSmokeCostGuard,
+  SMOKE_MAX_EXECUTIONS,
+  SMOKE_MAX_INPUT_UNITS_PER_CALL,
+  SMOKE_MAX_MODEL_CALLS_PER_EXECUTION,
+  SMOKE_MAX_MONETARY_CEILING_USD,
   SMOKE_MAX_OUTPUT_TOKENS,
+  SMOKE_MAX_PROVIDER_CALLS,
   SmokeGuardError,
+  SmokeSetupError,
 } from '../src/scripts/smoke-chat-guards.js'
 
 function requestBody(content = 'consulta') {
@@ -113,15 +121,24 @@ test('missing usage blocks the smoke and every later transport', async () => {
   const transport = guard.wrapTransport(fake.transport)
   await transport('https://invalid.example', request())
 
-  assert.throws(() => guard.reconcileUsage(undefined), SmokeGuardError)
+  assert.throws(
+    () => guard.reconcileUsage(undefined),
+    (error: unknown) =>
+      error instanceof SmokeGuardError && error.code === 'USAGE_REPORTING',
+  )
   await assert.rejects(
     () => transport('https://invalid.example', request()),
-    SmokeGuardError,
+    (error: unknown) =>
+      error instanceof SmokeGuardError && error.code === 'USAGE_REPORTING',
   )
   assert.equal(fake.calls, 1)
 })
 
-test('enforces the six-transport and 128-output-token protections', async () => {
+test('enforces three executions, two calls each, six transports and 512 output tokens', async () => {
+  assert.equal(SMOKE_MAX_EXECUTIONS, 3)
+  assert.equal(SMOKE_MAX_MODEL_CALLS_PER_EXECUTION, 2)
+  assert.equal(SMOKE_MAX_PROVIDER_CALLS, 6)
+  assert.equal(SMOKE_MAX_OUTPUT_TOKENS, 512)
   const fake = createTransportCounter()
   const guard = createSmokeCostGuard({
     inputPricePerMillion: 1,
@@ -135,7 +152,8 @@ test('enforces the six-transport and 128-output-token protections', async () => 
   }
   await assert.rejects(
     () => transport('https://invalid.example', request()),
-    SmokeGuardError,
+    (error: unknown) =>
+      error instanceof SmokeGuardError && error.code === 'PROVIDER_CALL_LIMIT',
   )
   assert.equal(fake.calls, 6)
 
@@ -159,6 +177,70 @@ test('enforces the six-transport and 128-output-token protections', async () => 
     SmokeGuardError,
   )
   assert.equal(wrongOutputFake.calls, 0)
+})
+
+test('worst-case six-call reservation fits the 0.30 USD ceiling at the reviewed rates', () => {
+  const worstCaseReservedCostUsd = assertSmokeWorstCaseBudget({
+    inputPricePerMillion: 0.4,
+    outputPricePerMillion: 1.6,
+    monetaryCeilingUsd: SMOKE_MAX_MONETARY_CEILING_USD,
+  })
+
+  assert.equal(SMOKE_MAX_INPUT_UNITS_PER_CALL, 102_048)
+  assert.equal(worstCaseReservedCostUsd, 0.2498304)
+  assert.ok(worstCaseReservedCostUsd <= SMOKE_MAX_MONETARY_CEILING_USD)
+})
+
+test('worst-case preflight rejects an unsafe price or a ceiling above 0.30 USD', () => {
+  assert.throws(
+    () =>
+      assertSmokeWorstCaseBudget({
+        inputPricePerMillion: 0.4,
+        outputPricePerMillion: 100,
+        monetaryCeilingUsd: SMOKE_MAX_MONETARY_CEILING_USD,
+      }),
+    (error: unknown) =>
+      error instanceof SmokeGuardError && error.code === 'MONETARY_BUDGET',
+  )
+  assert.throws(
+    () =>
+      assertSmokeWorstCaseBudget({
+        inputPricePerMillion: 0.01,
+        outputPricePerMillion: 0.01,
+        monetaryCeilingUsd: SMOKE_MAX_MONETARY_CEILING_USD + 0.01,
+      }),
+    (error: unknown) =>
+      error instanceof SmokeGuardError && error.code === 'MONETARY_BUDGET',
+  )
+})
+
+test('sanitized diagnostics classify setup, guard and provider failures without messages', () => {
+  const secret = 'OPENROUTER_API_KEY=must-not-leak C:\\private\\payload.json'
+  const cases = [
+    [new SmokeSetupError('CONFIRMATION_REQUIRED'), 'CONFIRMATION_REQUIRED'],
+    [new SmokeGuardError('USAGE_REPORTING'), 'USAGE_REPORTING'],
+    [Object.assign(new Error(secret), { code: 'AI_UNAVAILABLE' }), 'MODEL_UNAVAILABLE'],
+    [Object.assign(new Error(secret), { code: 'AI_BAD_RESPONSE' }), 'MODEL_INVALID_RESPONSE'],
+    [Object.assign(new Error(secret), { code: 'AI_TIMEOUT' }), 'MODEL_TIMEOUT'],
+    [Object.assign(new Error(secret), { code: 'REQUEST_CANCELLED' }), 'MODEL_CANCELLED'],
+    [
+      Object.assign(new Error(secret), { code: 'AI_UNAVAILABLE' }),
+      'MODEL_AUTHENTICATION_FAILED',
+      'MODEL_AUTHENTICATION_FAILED',
+    ],
+    [
+      Object.assign(new Error(secret), { code: 'AI_UNAVAILABLE' }),
+      'MODEL_RATE_LIMITED',
+      'MODEL_RATE_LIMITED',
+    ],
+    [new Error(secret), 'UNEXPECTED_FAILURE'],
+  ] as const
+
+  for (const [error, expected, terminationStatus] of cases) {
+    const category = classifySmokeFailure(error, terminationStatus)
+    assert.equal(category, expected)
+    assert.doesNotMatch(category, /OPENROUTER|private|payload|must-not-leak/i)
+  }
 })
 
 test('requires domain-specific evidence before declaring smoke scenarios successful', () => {

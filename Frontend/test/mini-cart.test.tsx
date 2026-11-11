@@ -96,6 +96,7 @@ async function settle() {
 describe('Header mini-cart', () => {
   let container: HTMLDivElement
   let root: Root
+  let rootMounted: boolean
 
   beforeEach(() => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
@@ -107,18 +108,25 @@ describe('Header mini-cart', () => {
     container = document.createElement('div')
     document.body.append(container)
     root = createRoot(container)
+    rootMounted = true
   })
 
   afterEach(() => {
-    act(() => root.unmount())
+    if (rootMounted) act(() => root.unmount())
     container.remove()
     vi.unstubAllGlobals()
     vi.restoreAllMocks()
   })
 
-  function renderHeader({ includeProblem = false } = {}) {
+  function renderHeader({
+    includeProblem = false,
+    productDetail = detail,
+  }: {
+    includeProblem?: boolean
+    productDetail?: ProductDetailResponse
+  } = {}) {
     const loadProduct = vi.fn((requestedSlug: string) => {
-      if (requestedSlug === slug) return Promise.resolve(detail)
+      if (requestedSlug === slug) return Promise.resolve(productDetail)
       return Promise.reject(new Error('Falha controlada de validação'))
     })
     act(() =>
@@ -188,20 +196,99 @@ describe('Header mini-cart', () => {
     expect(document.activeElement).toBe(trigger())
   })
 
+  test('keeps Tab and Shift+Tab contained inside the modal mini-cart', async () => {
+    renderHeader()
+    await settle()
+    openMiniCart()
+
+    const dialog = container.querySelector<HTMLElement>('[role="dialog"]')!
+    const focusableElements = Array.from(
+      dialog.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ),
+    )
+    const firstElement = focusableElements[0]
+    const lastElement = focusableElements[focusableElements.length - 1]
+
+    expect(dialog.getAttribute('aria-modal')).toBe('true')
+    act(() => lastElement.focus())
+    act(() =>
+      document.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }),
+      ),
+    )
+    expect(document.activeElement).toBe(firstElement)
+
+    act(() => firstElement.focus())
+    act(() =>
+      document.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'Tab',
+          shiftKey: true,
+          bubbles: true,
+        }),
+      ),
+    )
+    expect(document.activeElement).toBe(lastElement)
+  })
+
   test('removes an item through the shared CartProvider without leaving a ghost line', async () => {
     renderHeader()
     await settle()
     openMiniCart()
 
-    act(() =>
-      container
-        .querySelector<HTMLButtonElement>(`button[aria-label^="Remover ${detail.item.name}"]`)!
-        .click(),
-    )
+    const removeButton = container.querySelector<HTMLButtonElement>(
+      `button[aria-label^="Remover ${detail.item.name}"]`,
+    )!
+    const closeButton = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Fechar resumo do carrinho"]',
+    )!
+    act(() => removeButton.focus())
+    act(() => removeButton.click())
 
     expect(container.textContent).toContain('Seu carrinho está vazio')
     expect(container.textContent).not.toContain(detail.item.name)
     expect(trigger().getAttribute('aria-label')).toContain('0 unidades confirmadas')
+    expect(document.activeElement).toBe(closeButton)
+  })
+
+  test('shows an accessible fallback when the product image URL is absent', async () => {
+    renderHeader({
+      productDetail: {
+        ...detail,
+        media: { ...detail.media, primaryUrl: '' },
+      },
+    })
+    await settle()
+    openMiniCart()
+
+    const dialog = container.querySelector<HTMLElement>('[role="dialog"]')!
+    expect(dialog.querySelector('img')).toBeNull()
+    expect(
+      dialog
+        .querySelector('[role="img"]')
+        ?.getAttribute('aria-label'),
+    ).toBe(`Imagem indisponível para ${detail.item.name}`)
+  })
+
+  test('isolates a real image loading error behind the accessible fallback', async () => {
+    renderHeader()
+    await settle()
+    openMiniCart()
+
+    const dialog = container.querySelector<HTMLElement>('[role="dialog"]')!
+    const image = dialog.querySelector<HTMLImageElement>('img.object-contain')!
+    expect(image).not.toBeNull()
+    expect(image.className).toContain('object-contain')
+
+    act(() => image.dispatchEvent(new Event('error', { bubbles: true })))
+
+    expect(dialog.querySelector('img.object-contain')).toBeNull()
+    expect(
+      dialog
+        .querySelector('[role="img"]')
+        ?.getAttribute('aria-label'),
+    ).toBe(`Imagem indisponível para ${detail.item.name}`)
   })
 
   test('reports partial validation honestly and blocks direct checkout', async () => {
@@ -233,9 +320,11 @@ describe('Header mini-cart', () => {
     )!
     expect(checkoutLink).not.toBeNull()
 
+    act(() => checkoutLink.focus())
     act(() => checkoutLink.click())
     expect(container.textContent).toContain('Rota do checkout demonstrativo')
     expect(container.querySelector('[role="dialog"]')).toBeNull()
+    expect(document.activeElement).not.toBe(trigger())
   })
 
   test('navigates to the complete cart without starting checkout', async () => {
@@ -243,13 +332,66 @@ describe('Header mini-cart', () => {
     await settle()
     openMiniCart()
 
-    act(() =>
-      container
-        .querySelector<HTMLAnchorElement>('[role="dialog"] a[href="/carrinho"]')!
-        .click(),
-    )
+    const cartLink = container.querySelector<HTMLAnchorElement>(
+      '[role="dialog"] a[href="/carrinho"]',
+    )!
+    act(() => cartLink.focus())
+    act(() => cartLink.click())
     expect(container.textContent).toContain('Rota do carrinho')
     expect(container.textContent).not.toContain('Rota do checkout demonstrativo')
     expect(container.querySelector('[role="dialog"]')).toBeNull()
+    expect(document.activeElement).not.toBe(trigger())
+  })
+
+  test('removes document listeners after closing and unmounting', async () => {
+    renderHeader()
+    await settle()
+    const addListenerSpy = vi.spyOn(document, 'addEventListener')
+    const removeListenerSpy = vi.spyOn(document, 'removeEventListener')
+
+    openMiniCart()
+    const firstKeydownHandler = addListenerSpy.mock.calls.find(
+      ([eventName]) => eventName === 'keydown',
+    )?.[1]
+    const firstPointerHandler = addListenerSpy.mock.calls.find(
+      ([eventName]) => eventName === 'pointerdown',
+    )?.[1]
+    expect(firstKeydownHandler).toBeTypeOf('function')
+    expect(firstPointerHandler).toBeTypeOf('function')
+
+    act(() =>
+      container
+        .querySelector<HTMLButtonElement>('button[aria-label="Fechar resumo do carrinho"]')!
+        .click(),
+    )
+    expect(removeListenerSpy).toHaveBeenCalledWith(
+      'keydown',
+      firstKeydownHandler,
+    )
+    expect(removeListenerSpy).toHaveBeenCalledWith(
+      'pointerdown',
+      firstPointerHandler,
+    )
+
+    openMiniCart()
+    const keydownHandlers = addListenerSpy.mock.calls.filter(
+      ([eventName]) => eventName === 'keydown',
+    )
+    const pointerHandlers = addListenerSpy.mock.calls.filter(
+      ([eventName]) => eventName === 'pointerdown',
+    )
+    const lastKeydownHandler = keydownHandlers.at(-1)?.[1]
+    const lastPointerHandler = pointerHandlers.at(-1)?.[1]
+
+    act(() => root.unmount())
+    rootMounted = false
+    expect(removeListenerSpy).toHaveBeenCalledWith(
+      'keydown',
+      lastKeydownHandler,
+    )
+    expect(removeListenerSpy).toHaveBeenCalledWith(
+      'pointerdown',
+      lastPointerHandler,
+    )
   })
 })

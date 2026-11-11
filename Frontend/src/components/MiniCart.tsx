@@ -4,11 +4,31 @@ import {
   useEffect,
   useId,
   useRef,
+  useState,
 } from 'react'
 import { Link, useLocation } from 'react-router'
 
 import { formatCartCurrency } from '../cart/cart-model'
 import { useCart } from '../cart/useCart'
+
+const focusableElementSelector = [
+  'a[href]',
+  'button:not([disabled])',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',')
+
+function getFocusableElements(container: HTMLElement) {
+  return Array.from(
+    container.querySelectorAll<HTMLElement>(focusableElementSelector),
+  ).filter(
+    (element) =>
+      !element.hasAttribute('hidden') &&
+      element.getAttribute('aria-hidden') !== 'true',
+  )
+}
 
 interface MiniCartProps {
   open: boolean
@@ -66,6 +86,33 @@ export default function MiniCart({
       if (event.key === 'Escape') {
         event.preventDefault()
         onClose()
+        return
+      }
+      if (event.key !== 'Tab' || !dialogRef.current) return
+
+      const focusableElements = getFocusableElements(dialogRef.current)
+      if (focusableElements.length === 0) {
+        event.preventDefault()
+        dialogRef.current.focus()
+        return
+      }
+
+      const firstElement = focusableElements[0]
+      const lastElement = focusableElements[focusableElements.length - 1]
+      const activeElement = document.activeElement
+      const focusIsOutsideDialog =
+        !(activeElement instanceof Node) ||
+        !dialogRef.current.contains(activeElement)
+
+      if (event.shiftKey && (activeElement === firstElement || focusIsOutsideDialog)) {
+        event.preventDefault()
+        lastElement.focus()
+      } else if (
+        !event.shiftKey &&
+        (activeElement === lastElement || focusIsOutsideDialog)
+      ) {
+        event.preventDefault()
+        firstElement.focus()
       }
     }
     const handlePointerDown = (event: PointerEvent) => {
@@ -99,8 +146,10 @@ export default function MiniCart({
       <section
         ref={dialogRef}
         role="dialog"
+        aria-modal="true"
         aria-labelledby={titleId}
         aria-describedby={descriptionId}
+        tabIndex={-1}
         className="fixed inset-x-3 bottom-3 z-[70] flex max-h-[calc(100dvh-1.5rem)] flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl sm:absolute sm:inset-x-auto sm:bottom-auto sm:right-0 sm:top-[calc(100%+0.5rem)] sm:w-[24rem] sm:max-w-[calc(100vw-2rem)] sm:max-h-[min(34rem,calc(100dvh-5rem))]"
       >
         <div className="flex flex-shrink-0 items-start justify-between gap-3 border-b border-gray-200 px-4 py-3">
@@ -154,17 +203,11 @@ export default function MiniCart({
                   key={`${item.productId}:${item.slug}`}
                   className="flex min-w-0 gap-3 rounded-xl border border-gray-200 p-3"
                 >
-                  <div className="flex h-16 w-14 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg bg-gray-50 p-1">
-                    {item.product.imageUrl ? (
-                      <img
-                        src={item.product.imageUrl}
-                        alt=""
-                        className="h-full w-full object-contain"
-                      />
-                    ) : (
-                      <ImageOff aria-hidden="true" className="text-gray-400" size={22} />
-                    )}
-                  </div>
+                  <MiniCartItemImage
+                    productId={item.productId}
+                    name={item.product.name}
+                    imageUrl={item.product.imageUrl}
+                  />
                   <div className="min-w-0 flex-1">
                     <p className="break-words text-sm font-semibold leading-snug text-gray-900">
                       {item.product.name}
@@ -178,7 +221,12 @@ export default function MiniCart({
                   </div>
                   <button
                     type="button"
-                    onClick={() => removeProduct(item.productId)}
+                    onClick={(event) => {
+                      if (document.activeElement === event.currentTarget) {
+                        closeButtonRef.current?.focus()
+                      }
+                      removeProduct(item.productId)
+                    }}
                     className="flex min-h-11 min-w-11 flex-shrink-0 items-center justify-center self-center rounded-full text-gray-500 transition-colors hover:bg-red-50 hover:text-red-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-700"
                     aria-label={`Remover ${item.product.name} do carrinho`}
                   >
@@ -261,5 +309,42 @@ export default function MiniCart({
         </div>
       </section>
     </>
+  )
+}
+
+function MiniCartItemImage({
+  productId,
+  name,
+  imageUrl,
+}: {
+  productId: number
+  name: string
+  imageUrl: string
+}) {
+  const [imageFailed, setImageFailed] = useState(!imageUrl)
+
+  useEffect(() => {
+    setImageFailed(!imageUrl)
+  }, [imageUrl, productId])
+
+  return (
+    <div className="flex h-16 w-14 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg bg-gray-50 p-1">
+      {imageFailed || !imageUrl ? (
+        <div
+          role="img"
+          aria-label={`Imagem indisponível para ${name}`}
+          className="flex h-full w-full items-center justify-center"
+        >
+          <ImageOff aria-hidden="true" className="text-gray-400" size={22} />
+        </div>
+      ) : (
+        <img
+          src={imageUrl}
+          alt=""
+          className="h-full w-full object-contain"
+          onError={() => setImageFailed(true)}
+        />
+      )}
+    </div>
   )
 }

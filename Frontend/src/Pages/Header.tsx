@@ -1,5 +1,11 @@
 import { Search, User, ShoppingCart } from 'lucide-react'
-import { type FormEvent, useEffect, useState } from 'react'
+import {
+  type FormEvent,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react'
 import {
   Link,
   useLocation,
@@ -8,6 +14,7 @@ import {
 } from 'react-router'
 
 import { useCart } from '../cart/useCart'
+import MiniCart from '../components/MiniCart'
 
 export default function Header() {
   const { phase, totalUnits } = useCart()
@@ -16,6 +23,15 @@ export default function Header() {
   const [searchParams] = useSearchParams()
   const queryFromUrl = searchParams.get('q') ?? ''
   const [searchValue, setSearchValue] = useState(queryFromUrl)
+  const [miniCartOpen, setMiniCartOpen] = useState(false)
+  const cartTriggerRef = useRef<HTMLButtonElement>(null)
+
+  const closeMiniCart = useCallback((restoreFocus = true) => {
+    setMiniCartOpen(false)
+    if (restoreFocus) {
+      window.requestAnimationFrame(() => cartTriggerRef.current?.focus())
+    }
+  }, [])
 
   useEffect(() => {
     setSearchValue(queryFromUrl)
@@ -123,39 +139,50 @@ export default function Header() {
             </button>
 
             {/* Cart */}
-            <Link
-              to="/carrinho"
-              className="group relative flex min-h-11 min-w-11 flex-col items-center justify-center rounded-sm text-gray-600 transition-colors hover:text-[#527A36] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#527A36] focus-visible:ring-offset-2"
-              aria-label={
-                phase === 'hydrating'
-                  ? 'Carrinho de compras — validando itens salvos'
-                  : `Carrinho de compras — ${totalUnits} ${
-                      totalUnits === 1 ? 'unidade confirmada' : 'unidades confirmadas'
-                    }`
-              }
-            >
-              <ShoppingCart size={22} strokeWidth={1.8} />
-              <span
-                aria-hidden="true"
-                className="absolute right-0 top-0 flex min-h-5 min-w-5 items-center justify-center rounded-full bg-[#527A36] px-1 text-[10px] font-bold leading-none text-white"
+            <div className="relative">
+              <button
+                ref={cartTriggerRef}
+                type="button"
+                onClick={() => setMiniCartOpen((value) => !value)}
+                className="group relative flex min-h-11 min-w-11 flex-col items-center justify-center rounded-sm text-gray-600 transition-colors hover:text-[#527A36] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#527A36] focus-visible:ring-offset-2"
+                aria-label={
+                  phase === 'hydrating'
+                    ? 'Abrir resumo do carrinho — validando itens salvos'
+                    : `Abrir resumo do carrinho — ${totalUnits} ${
+                        totalUnits === 1 ? 'unidade confirmada' : 'unidades confirmadas'
+                      }`
+                }
+                aria-haspopup="dialog"
+                aria-expanded={miniCartOpen}
               >
-                {phase === 'hydrating'
-                  ? '…'
-                  : totalUnits > 99
-                    ? '99+'
-                    : totalUnits}
-              </span>
-              <span className="mt-0.5 hidden text-[10px] font-medium group-hover:text-[#527A36] sm:block">
-                Carrinho
-              </span>
-              <span className="sr-only" aria-live="polite">
-                {phase === 'ready'
-                  ? `${totalUnits} ${
-                      totalUnits === 1 ? 'unidade confirmada' : 'unidades confirmadas'
-                    }`
-                  : 'Validando carrinho salvo'}
-              </span>
-            </Link>
+                <ShoppingCart size={22} strokeWidth={1.8} />
+                <span
+                  aria-hidden="true"
+                  className="absolute right-0 top-0 flex min-h-5 min-w-5 items-center justify-center rounded-full bg-[#527A36] px-1 text-[10px] font-bold leading-none text-white"
+                >
+                  {phase === 'hydrating'
+                    ? '…'
+                    : totalUnits > 99
+                      ? '99+'
+                      : totalUnits}
+                </span>
+                <span className="mt-0.5 hidden text-[10px] font-medium group-hover:text-[#527A36] sm:block">
+                  Carrinho
+                </span>
+                <span className="sr-only" aria-live="polite">
+                  {phase === 'ready'
+                    ? `${totalUnits} ${
+                        totalUnits === 1 ? 'unidade confirmada' : 'unidades confirmadas'
+                      }`
+                    : 'Validando carrinho salvo'}
+                </span>
+              </button>
+              <MiniCart
+                open={miniCartOpen}
+                triggerRef={cartTriggerRef}
+                onClose={closeMiniCart}
+              />
+            </div>
           </div>
         </div>
       </div>

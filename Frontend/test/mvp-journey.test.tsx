@@ -276,10 +276,15 @@ describe('M1 offline DOM integration journey', () => {
     })
     expect(
       container
-        .querySelector('a[href="/carrinho"]')
+        .querySelector('button[aria-haspopup="dialog"]')
         ?.getAttribute('aria-label'),
     ).toContain('1 unidade')
 
+    act(() =>
+      container
+        .querySelector<HTMLButtonElement>('button[aria-haspopup="dialog"]')!
+        .click(),
+    )
     act(() => container.querySelector<HTMLAnchorElement>('a[href="/carrinho"]')!.click())
     await waitForText(container, 'Carrinho demonstrativo')
     expect(container.textContent).toContain('Subtotal do item: R$ 48,90')

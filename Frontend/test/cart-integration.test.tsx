@@ -190,7 +190,7 @@ describe('shared cart integrations', () => {
       )
       expect(
         container
-          .querySelector('a[href="/carrinho"]')
+          .querySelector('button[aria-haspopup="dialog"]')
           ?.getAttribute('aria-label'),
       ).toContain(`${index + 1} ${index === 0 ? 'unidade' : 'unidades'}`)
     }

@@ -109,8 +109,8 @@ export default function ChatbotButton() {
           role="dialog"
           aria-labelledby={titleId}
           aria-describedby={descriptionId}
-          className={`fixed bottom-24 left-4 right-4 z-50 flex w-auto max-h-[calc(100dvh-7rem)] flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl transition-[height] duration-300 motion-reduce:transition-none sm:left-auto sm:right-6 sm:w-96 ${
-            minimized ? 'h-16' : 'h-[calc(100dvh-7rem)] sm:max-h-[30rem]'
+          className={`fixed bottom-24 left-3 right-3 z-50 flex w-auto max-h-[calc(100dvh-7rem)] flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl transition-[height] duration-300 motion-reduce:transition-none sm:left-auto sm:right-6 sm:w-[28rem] lg:w-[30rem] ${
+            minimized ? 'h-16' : 'h-[calc(100dvh-7rem)] sm:max-h-[34rem]'
           }`}
         >
           <p id={descriptionId} className="sr-only">
@@ -177,7 +177,7 @@ export default function ChatbotButton() {
                 aria-relevant="additions text"
                 aria-label="Mensagens do atendimento consultivo"
                 aria-busy={conversation.isPending}
-                className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-gray-50 px-4 py-3 overscroll-contain"
+                className="min-h-0 flex-1 space-y-3 overflow-x-hidden overflow-y-auto bg-gray-50 px-3 py-3 overscroll-contain sm:px-4"
               >
                 <AssistantMessage text={initialMessage} />
                 {conversation.turns.map((turn) => (

@@ -168,6 +168,18 @@ describe('ChatbotButton', () => {
     expect(document.activeElement).toBe(trigger())
   })
 
+  test('uses a wider responsive shell without horizontal message overflow', () => {
+    openChat()
+
+    const dialog = container.querySelector<HTMLElement>('[role="dialog"]')!
+    const log = container.querySelector<HTMLElement>('[role="log"]')!
+    expect(dialog.className).toContain('sm:w-[28rem]')
+    expect(dialog.className).toContain('lg:w-[30rem]')
+    expect(dialog.className).toContain('left-3')
+    expect(dialog.className).toContain('right-3')
+    expect(log.className).toContain('overflow-x-hidden')
+  })
+
   test('blocks concurrent submits and sends only completed turns as history', async () => {
     const first = deferred<Response>()
     const fetchMock = vi

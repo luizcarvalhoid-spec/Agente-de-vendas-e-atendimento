@@ -33,22 +33,38 @@
   {
     "id": "faq-no-real-delivery",
     "message": "A HidraSplash faz entrega real?",
-    "expected": { "type": "text", "sourceIds": ["faq-001"] }
+    "expected": {
+      "type": "text",
+      "sourceIds": ["faq-001"],
+      "messageIncludes": ["nenhuma mercadoria é separada, despachada ou entregue"]
+    }
   },
   {
     "id": "faq-free-shipping-boundary",
     "message": "Subtotal de R$ 100,00 recebe frete grátis?",
-    "expected": { "type": "text", "sourceIds": ["faq-002"] }
+    "expected": {
+      "type": "text",
+      "sourceIds": ["faq-002"],
+      "messageIncludes": ["R$ 100,00 exatos não recebe frete grátis"]
+    }
   },
   {
     "id": "faq-standard-shipping",
     "message": "Como funciona o frete padrão demonstrativo?",
-    "expected": { "type": "text", "sourceIds": ["faq-003"] }
+    "expected": {
+      "type": "text",
+      "sourceIds": ["faq-003"],
+      "messageIncludes": ["frete padrão de R$ 12,90"]
+    }
   },
   {
     "id": "faq-no-real-returns",
     "message": "Há troca ou devolução real?",
-    "expected": { "type": "text", "sourceIds": ["faq-009"] }
+    "expected": {
+      "type": "text",
+      "sourceIds": ["faq-009"],
+      "messageIncludes": ["Nenhum produto é recolhido, substituído ou devolvido"]
+    }
   },
   {
     "id": "faq-damaged-item",

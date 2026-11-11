@@ -18,6 +18,13 @@ function lastUserMessage(messages: readonly AgentMessage[]) {
     .find((message) => message.role === 'user')?.content ?? ''
 }
 
+function userConversation(messages: readonly AgentMessage[]) {
+  return messages
+    .filter((message) => message.role === 'user')
+    .map((message) => message.content)
+    .join(' ')
+}
+
 function toolCall(id: string, name: string, args: unknown): AgentToolCall {
   return {
     id,
@@ -63,6 +70,15 @@ export function createMvpDeterministicModel(): AgentModelPort {
 
       const rawMessage = lastUserMessage(input.messages)
       const message = normalize(rawMessage)
+      const conversation = normalize(userConversation(input.messages))
+      const productMessage =
+        /\banticaspa\b/.test(message) ||
+        (/\banticaspa\b/.test(conversation) &&
+          /oleos|seco|suave|hidrat|frescor|refresc|prefir|gastar|r\$/.test(
+            message,
+          ))
+          ? conversation
+          : message
 
       if (/compar/.test(message) && /\b9\b/.test(message) && /\b13\b/.test(message)) {
         return response(null, [
@@ -98,7 +114,10 @@ export function createMvpDeterministicModel(): AgentModelPort {
         return response(null, [faqToolCall(rawMessage)])
       }
 
-      if (/\banticaspa\b/.test(message) && /\b(?:r\$\s*)?1\b/.test(message)) {
+      if (
+        /\banticaspa\b/.test(productMessage) &&
+        /\b(?:r\$\s*)?1\b/.test(productMessage)
+      ) {
         return response(null, [
           productSearchToolCall({
             query: 'anticaspa',
@@ -108,7 +127,10 @@ export function createMvpDeterministicModel(): AgentModelPort {
           }),
         ])
       }
-      if (/\banticaspa\b/.test(message) && /seco|suave|hidrat/.test(message)) {
+      if (
+        /\banticaspa\b/.test(productMessage) &&
+        /seco|suave|hidrat/.test(productMessage)
+      ) {
         return response(null, [
           productSearchToolCall({
             query: 'anticaspa suave hidratante',
@@ -120,7 +142,7 @@ export function createMvpDeterministicModel(): AgentModelPort {
           }),
         ])
       }
-      if (/\banticaspa\b/.test(message) && /oleos/.test(message)) {
+      if (/\banticaspa\b/.test(productMessage) && /oleos/.test(productMessage)) {
         return response(null, [
           productSearchToolCall({
             query: 'anticaspa frescor',
@@ -132,7 +154,7 @@ export function createMvpDeterministicModel(): AgentModelPort {
           }),
         ])
       }
-      if (/\banticaspa\b/.test(message)) {
+      if (/\banticaspa\b/.test(productMessage)) {
         return response(null, [
           productSearchToolCall({
             query: 'anticaspa',

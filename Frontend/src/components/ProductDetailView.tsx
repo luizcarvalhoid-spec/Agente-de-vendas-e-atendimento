@@ -19,6 +19,7 @@ import {
   priceToCents,
 } from '../cart/cart-model'
 import { useCart } from '../cart/useCart'
+import type { ProductReturnTarget } from '../utils/catalog-navigation'
 import ProductGallery from './ProductGallery'
 
 const categoryLabels: Record<ProductCategory, string> = {
@@ -258,12 +259,12 @@ function formatNetContent(value: number, unit: 'ml' | 'g') {
 
 interface ProductDetailViewProps {
   response: ProductDetailResponse
-  returnTo: string
+  returnTarget: ProductReturnTarget
 }
 
 export default function ProductDetailView({
   response,
-  returnTo,
+  returnTarget,
 }: ProductDetailViewProps) {
   const { item: product, media } = response
   const { phase, addProduct, isProductPending } = useCart()
@@ -604,11 +605,11 @@ export default function ProductDetailView({
 
       <div className="mt-8">
         <Link
-          to={returnTo}
+          to={returnTarget.to}
           className="inline-flex min-h-11 items-center justify-center rounded-full border-2 border-[#527A36] px-5 py-2.5 text-sm font-semibold text-[#527A36] transition-colors hover:bg-[#527A36] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#527A36] focus-visible:ring-offset-2"
         >
           <ArrowLeft aria-hidden="true" className="mr-2" size={16} />
-          Voltar à vitrine
+          {returnTarget.label}
         </Link>
       </div>
     </>

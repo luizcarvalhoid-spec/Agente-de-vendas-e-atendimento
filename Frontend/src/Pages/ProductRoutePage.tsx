@@ -7,7 +7,7 @@ import {
   useProductDetail,
   type ProductDetailErrorReason,
 } from '../hooks/useProductDetail'
-import { getSafeCatalogReturnTo } from '../utils/catalog-navigation'
+import { getSafeProductReturnTarget } from '../utils/catalog-navigation'
 
 const actionClassName =
   'inline-flex min-h-11 items-center justify-center rounded-full px-5 py-2.5 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#527A36] focus-visible:ring-offset-2'
@@ -35,7 +35,9 @@ export default function ProductRoutePage() {
   const navigationState = location.state as
     | { catalogReturnTo?: unknown }
     | null
-  const returnTo = getSafeCatalogReturnTo(navigationState?.catalogReturnTo)
+  const returnTarget = getSafeProductReturnTarget(
+    navigationState?.catalogReturnTo,
+  )
 
   return (
     <StoreRouteFrame>
@@ -60,7 +62,7 @@ export default function ProductRoutePage() {
         <ProductDetailView
           key={state.data.item.slug}
           response={state.data}
-          returnTo={returnTo}
+          returnTarget={returnTarget}
         />
       )}
 
@@ -70,7 +72,7 @@ export default function ProductRoutePage() {
           eyebrow="Erro 404"
           title="Produto não encontrado"
           description="Não encontramos um produto com este endereço no catálogo HidraSplash."
-          returnTo={returnTo}
+          returnTarget={returnTarget}
         />
       )}
 
@@ -80,7 +82,7 @@ export default function ProductRoutePage() {
           eyebrow="Endereço inválido"
           title="Não foi possível consultar este produto"
           description="O endereço informado não corresponde ao formato de slug aceito pelo catálogo."
-          returnTo={returnTo}
+          returnTarget={returnTarget}
         />
       )}
 
@@ -91,7 +93,7 @@ export default function ProductRoutePage() {
           title="Não foi possível carregar este produto"
           description={errorMessages[state.reason]}
           retry={state.canRetry ? retry : undefined}
-          returnTo={returnTo}
+          returnTarget={returnTarget}
         />
       )}
     </StoreRouteFrame>
@@ -104,7 +106,7 @@ interface RouteMessageProps {
   title: string
   description: string
   retry?: () => void
-  returnTo: string
+  returnTarget: ReturnType<typeof getSafeProductReturnTarget>
 }
 
 function RouteMessage({
@@ -113,7 +115,7 @@ function RouteMessage({
   title,
   description,
   retry,
-  returnTo,
+  returnTarget,
 }: RouteMessageProps) {
   return (
     <section
@@ -157,11 +159,11 @@ function RouteMessage({
           </button>
         )}
         <Link
-          to={returnTo}
+          to={returnTarget.to}
           className={`${actionClassName} border-2 border-[#527A36] text-[#527A36] hover:bg-[#527A36] hover:text-white`}
         >
           <ArrowLeft aria-hidden="true" className="mr-2" size={16} />
-          Voltar à vitrine
+          {returnTarget.label}
         </Link>
       </div>
     </section>

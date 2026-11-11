@@ -5,6 +5,7 @@ import {
   createPaginationFocusIntent,
   formatProductCount,
   getSafeCatalogReturnTo,
+  getSafeProductReturnTarget,
   readCatalogUrlState,
   resolvePaginationFocusIntent,
   toCatalogSearchParams,
@@ -54,6 +55,40 @@ test('catalog return rejects external, non-canonical and unrelated URLs', () => 
 
   for (const value of invalidValues) {
     assert.equal(getSafeCatalogReturnTo(value), '/')
+  }
+})
+
+test('product return accepts only the exact cart route or a canonical storefront URL', () => {
+  assert.deepEqual(getSafeProductReturnTarget('/carrinho'), {
+    to: '/carrinho',
+    label: 'Voltar ao carrinho',
+  })
+  assert.deepEqual(
+    getSafeProductReturnTarget('/?category=shampoos&subcategory=anticaspa'),
+    {
+      to: '/?category=shampoos&subcategory=anticaspa',
+      label: 'Voltar à vitrine',
+    },
+  )
+})
+
+test('product return rejects cart variants, external URLs and unexpected routes', () => {
+  const invalidValues = [
+    '/carrinho/',
+    '/carrinho?cupom=1',
+    '/carrinho#resumo',
+    '/checkout-demo',
+    '/produtos/outro',
+    'https://example.com/carrinho',
+    '//example.com/carrinho',
+    '/%63arrinho',
+  ]
+
+  for (const value of invalidValues) {
+    assert.deepEqual(getSafeProductReturnTarget(value), {
+      to: '/',
+      label: 'Voltar à vitrine',
+    })
   }
 })
 

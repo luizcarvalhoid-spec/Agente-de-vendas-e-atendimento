@@ -19,14 +19,20 @@
 
 ## 6.2 — Cartão de recomendação no chat
 
-- [ ] Renderizar mensagens `recommendation` com justificativa curta, foto real do produto, nome, preço e disponibilidade.
-- [ ] Adicionar CTAs **Detalhes**, **Adicionar ao carrinho** e **Finalizar compra** (não tratar como ações textuais do LLM).
-- [ ] Associar os CTAs a `productId/slug` validado pelo backend; jamais usar preço retornado livremente pelo modelo.
-- [ ] Tratar imagem inválida, produto removido e indisponibilidade sem quebrar UI.
-- [ ] Garantir leitura em mobile e teclado.
+- [x] Renderizar mensagens `recommendation` e `comparison` com justificativa curta, foto real do produto, nome, preço e disponibilidade.
+- [x] Oferecer CTA funcional **Detalhes**, associado ao `productId/slug` validado pelo backend e sem inferir campos comerciais do texto do modelo.
+- [ ] Ativar **Adicionar ao carrinho** após a implementação do estado compartilhado na 6.3.
+- [ ] Ativar **Finalizar compra** após a implementação do checkout demonstrativo na 6.4.
+- [x] Tratar snapshot histórico, imagem inválida, produto removido, divergência de identidade e indisponibilidade sem quebrar a UI.
+- [x] Garantir leitura em mobile e teclado, com cartões de comparação empilhados.
 
-**Aceite:** uma recomendação real traz os três CTAs funcionais e dados consistentes com a página de produto.  
+**Aceite visual:** recomendações e comparações exibem dados validados, atualizam snapshots restaurados pelo catálogo canônico e navegam para a PDP existente.
+
+**Aceite comercial pendente:** os três CTAs somente estarão completos após a integração do carrinho na 6.3 e do checkout na 6.4; nenhum carrinho temporário ou confirmação falsa é oferecido nesta etapa.
+
 **Commit:** `feat(web): render actionable product recommendations`.
+
+**Registro de execução (2026-11-10, base `7a1324c9`):** respostas novas usam somente os cartões validados pelo contrato do chat. Cartões restaurados são identificados como snapshots históricos, reconsultados por slug e somente recebem dados atuais quando `id` e `slug` permanecem idênticos. Falhas temporárias preservam o snapshot rotulado; remoção ou divergência elimina ações inválidas. As consultas de catálogo são limitadas, canceláveis e não acionam o modelo.
 
 ## 6.3 — Carrinho real no frontend
 

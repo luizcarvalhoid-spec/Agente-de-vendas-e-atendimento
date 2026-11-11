@@ -1,11 +1,33 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
+import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
 import ChatbotButton from '../src/Pages/ChatbotButton'
+import type { ChatProductCard } from '../src/api/chat-contracts'
 import { CHAT_LOCAL_TIMEOUT_MS } from '../src/hooks/useChatConversation'
 
 const requestId = '00000000-0000-4000-8000-000000000001'
+
+const chatProduct: ChatProductCard = {
+  id: 13,
+  slug: 'shampoo-anticaspa-refrescante',
+  name: 'Shampoo Anticaspa Refrescante',
+  brand: 'HidraSplash',
+  isDemo: true,
+  category: 'shampoos',
+  subcategory: 'anticaspa',
+  shortDescription: 'Produto demonstrativo refrescante.',
+  price: 48.9,
+  stock: 14,
+  imageUrl: '/api/catalog/images/shampoo-anticaspa.jpg',
+  dataClassification: {
+    commercial: 'fictional-demo',
+    compatibility: 'commercial-positioning',
+    formulation: 'synthetic-test-data',
+    safety: 'not-evaluated',
+  },
+}
 
 function apiResponse(message: string, status = 200, headers?: HeadersInit) {
   return {
@@ -32,6 +54,15 @@ function apiResponse(message: string, status = 200, headers?: HeadersInit) {
             message: 'Falha sanitizada.',
             requestId,
           },
+  } as Response
+}
+
+function successfulResponse(body: unknown) {
+  return {
+    ok: true,
+    status: 200,
+    headers: new Headers(),
+    json: async () => body,
   } as Response
 }
 
@@ -81,7 +112,13 @@ describe('ChatbotButton', () => {
     container = document.createElement('div')
     document.body.append(container)
     root = createRoot(container)
-    act(() => root.render(<ChatbotButton />))
+    act(() =>
+      root.render(
+        <MemoryRouter>
+          <ChatbotButton />
+        </MemoryRouter>,
+      ),
+    )
   })
 
   afterEach(() => {
@@ -163,6 +200,65 @@ describe('ChatbotButton', () => {
       { role: 'assistant', content: 'Primeira resposta' },
     ])
     expect(JSON.stringify(secondBody)).not.toContain('Olá! Sou a assistente')
+  })
+
+  test('keeps text textual and renders structured cards without extra chat requests', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(apiResponse('Resposta somente textual'))
+      .mockResolvedValueOnce(
+        successfulResponse({
+          type: 'recommendation',
+          message: 'Uma recomendação validada.',
+          productIds: [13],
+          products: [chatProduct],
+          sourceIds: [],
+          requestId,
+        }),
+      )
+      .mockResolvedValueOnce(
+        successfulResponse({
+          type: 'comparison',
+          message: 'Uma comparação validada.',
+          productIds: [13, 9],
+          products: [
+            chatProduct,
+            {
+              ...chatProduct,
+              id: 9,
+              slug: 'shampoo-anticaspa-coco',
+              name: 'Shampoo Anticaspa Coco',
+              imageUrl: '/api/catalog/images/shampoo-anticaspa-coco.jpg',
+            },
+          ],
+          sourceIds: [],
+          requestId,
+        }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+    openChat()
+
+    setInputValue(input(), 'Pergunta textual')
+    act(() => sendButton().click())
+    await settle()
+    expect(container.textContent).toContain('Resposta somente textual')
+    expect(container.querySelectorAll('[data-testid="chat-product-cards"]')).toHaveLength(0)
+
+    setInputValue(input(), 'Recomende um produto')
+    act(() => sendButton().click())
+    await settle()
+    expect(container.querySelectorAll('[data-testid="chat-product-cards"]')).toHaveLength(1)
+    expect(container.querySelectorAll('article[data-product-id]')).toHaveLength(1)
+
+    setInputValue(input(), 'Compare duas opções')
+    act(() => sendButton().click())
+    await settle()
+    expect(container.querySelectorAll('[data-testid="chat-product-cards"]')).toHaveLength(2)
+    expect(container.querySelectorAll('article[data-product-id]')).toHaveLength(3)
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(
+      fetchMock.mock.calls.every(([, request]) => request?.method === 'POST'),
+    ).toBe(true)
   })
 
   test('manual retry reuses one user message without duplication', async () => {

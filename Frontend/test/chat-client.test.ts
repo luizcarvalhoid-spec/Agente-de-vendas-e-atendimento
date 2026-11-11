@@ -2,6 +2,7 @@ import { describe, expect, test, vi } from 'vitest'
 
 import {
   ApiRequestError,
+  resolveCatalogImageUrl,
   sendChat,
   type ApiTransport,
 } from '../src/api/client'
@@ -130,5 +131,35 @@ describe('sendChat', () => {
       }),
     ).rejects.toBeInstanceOf(ApiRequestError)
     expect(transport).not.toHaveBeenCalled()
+  })
+})
+
+describe('resolveCatalogImageUrl', () => {
+  test('resolves only catalog images against the configured API origin', () => {
+    expect(
+      resolveCatalogImageUrl(
+        '/api/catalog/images/shampoos/produto.jpg',
+        'https://api.test',
+      ),
+    ).toBe('https://api.test/api/catalog/images/shampoos/produto.jpg')
+    expect(
+      resolveCatalogImageUrl(
+        'https://api.test/api/catalog/images/produto.webp',
+        'https://api.test',
+      ),
+    ).toBe('https://api.test/api/catalog/images/produto.webp')
+  })
+
+  test.each([
+    'https://external.test/api/catalog/images/produto.jpg',
+    '/api/catalog/images/produto.jpg?token=secret',
+    '/api/catalog/images/produto.jpg#fragment',
+    '/api/catalog/images/../private/produto.jpg',
+    '/api/catalog/images/arquivo.txt',
+    '/other/produto.jpg',
+  ])('rejects unsafe catalog image reference %s', (path) => {
+    expect(() =>
+      resolveCatalogImageUrl(path, 'https://api.test'),
+    ).toThrowError(ApiRequestError)
   })
 })

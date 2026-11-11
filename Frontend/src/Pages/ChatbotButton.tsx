@@ -13,6 +13,7 @@ import {
   type ChatFailureReason,
   useChatConversation,
 } from '../hooks/useChatConversation'
+import ChatProductCards from '../components/ChatProductCards'
 
 const initialMessage =
   'Olá! Sou a assistente consultiva demonstrativa da HidraSplash. Posso consultar o catálogo e as políticas fictícias quando a API estiver disponível. Não informe dados pessoais.'
@@ -183,6 +184,12 @@ export default function ChatbotButton() {
                   <Fragment key={turn.id}>
                     <UserMessage text={turn.userMessage} />
                     <AssistantMessage text={turn.response.message} />
+                    {turn.response.type !== 'text' && (
+                      <ChatProductCards
+                        response={turn.response}
+                        restored={turn.restored}
+                      />
+                    )}
                   </Fragment>
                 ))}
 

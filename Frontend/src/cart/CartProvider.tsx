@@ -11,6 +11,7 @@ import { ApiRequestError, getProductBySlug } from '../api/client'
 import type { ProductDetailResponse } from '../api/contracts'
 import {
   CART_MAX_DISTINCT_PRODUCTS,
+  CART_VALIDATION_TIMEOUT_MS,
   type AddProductReference,
   type CanonicalCartProduct,
   type CartItem,
@@ -52,6 +53,50 @@ interface ActiveOperation {
   controller: AbortController
   token: number
   generation: number
+}
+
+class CartValidationTimeoutError extends Error {
+  constructor() {
+    super('Cart validation timed out')
+    this.name = 'CartValidationTimeoutError'
+  }
+}
+
+function loadProductWithinDeadline(
+  loadProduct: ProductLoader,
+  slug: string,
+  controller: AbortController,
+): Promise<ProductDetailResponse> {
+  return new Promise((resolve, reject) => {
+    let settled = false
+
+    const cleanup = () => {
+      window.clearTimeout(timeoutId)
+      controller.signal.removeEventListener('abort', handleAbort)
+    }
+    const settle = (callback: () => void) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      callback()
+    }
+    const handleAbort = () => {
+      settle(() => reject(new Error('Cart validation cancelled')))
+    }
+
+    controller.signal.addEventListener('abort', handleAbort, { once: true })
+    const timeoutId = window.setTimeout(() => {
+      settle(() => reject(new CartValidationTimeoutError()))
+      controller.abort()
+    }, CART_VALIDATION_TIMEOUT_MS)
+
+    void Promise.resolve()
+      .then(() => loadProduct(slug, controller.signal))
+      .then(
+        (response) => settle(() => resolve(response)),
+        (error: unknown) => settle(() => reject(error)),
+      )
+  })
 }
 
 function getBrowserStorage(): CartStorage | null {
@@ -102,10 +147,14 @@ function createProblemItem(
 async function validateStoredReference(
   reference: CartReference,
   loadProduct: ProductLoader,
-  signal: AbortSignal,
+  controller: AbortController,
 ): Promise<CartItem> {
   try {
-    const response = await loadProduct(reference.slug, signal)
+    const response = await loadProductWithinDeadline(
+      loadProduct,
+      reference.slug,
+      controller,
+    )
     if (
       response.item.id !== reference.productId ||
       response.item.slug !== reference.slug
@@ -212,7 +261,7 @@ export default function CartProvider({
     const validations = stored.references.map((reference) => {
       const controller = new AbortController()
       hydrationControllers.add(controller)
-      return validateStoredReference(reference, loadProduct, controller.signal)
+      return validateStoredReference(reference, loadProduct, controller)
         .finally(() => hydrationControllers.delete(controller))
     })
 
@@ -317,7 +366,11 @@ export default function CartProvider({
       }))
 
       try {
-        const response = await loadProduct(reference.slug, controller.signal)
+        const response = await loadProductWithinDeadline(
+          loadProduct,
+          reference.slug,
+          controller,
+        )
         const active = activeOperationsRef.current.get(reference.productId)
         if (
           !active ||
@@ -396,6 +449,9 @@ export default function CartProvider({
         )
         return { status: 'success', quantity: desiredQuantity, priceChanged }
       } catch (error) {
+        if (error instanceof CartValidationTimeoutError) {
+          return { status: 'rejected', reason: 'validation_failed' }
+        }
         if (controller.signal.aborted) {
           return { status: 'rejected', reason: 'cancelled' }
         }

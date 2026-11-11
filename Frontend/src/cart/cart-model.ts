@@ -8,6 +8,7 @@ export const CART_MAX_STORAGE_BYTES = 16 * 1024
 export const CART_MAX_SLUG_CHARACTERS = 256
 export const CART_FREE_SHIPPING_THRESHOLD_CENTS = 10_000
 export const CART_STANDARD_SHIPPING_CENTS = 1_290
+export const CART_VALIDATION_TIMEOUT_MS = 5_000
 
 const normalizedSlugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 

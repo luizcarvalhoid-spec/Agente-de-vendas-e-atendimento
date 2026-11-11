@@ -1,5 +1,5 @@
 import { ImageOff, ShoppingBag } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { Link, useLocation } from 'react-router'
 
 import {
@@ -153,6 +153,7 @@ function ChatProductCardItem({
 }) {
   const location = useLocation()
   const { phase, addProduct, isProductPending } = useCart()
+  const cartFeedbackId = `chat-cart-feedback-${useId()}`
   const snapshotProduct = fromSnapshot(snapshot)
   const [state, setState] = useState<ProductState>(() =>
     restored
@@ -339,7 +340,7 @@ function ChatProductCardItem({
             disabled={product.stock === 0 || phase === 'hydrating' || pending}
             onClick={() => void handleAddToCart()}
             className="mt-2 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-full border-2 border-[#527A36] px-4 py-2 text-sm font-semibold text-[#527A36] transition-colors hover:bg-[#527A36] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#527A36] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:border-gray-300 disabled:bg-gray-100 disabled:text-gray-600"
-            aria-describedby={`chat-cart-feedback-${product.id}`}
+            aria-describedby={cartFeedbackId}
           >
             <ShoppingBag aria-hidden="true" size={16} />
             {product.stock === 0
@@ -352,7 +353,7 @@ function ChatProductCardItem({
           </button>
         )}
         <p
-          id={`chat-cart-feedback-${product.id}`}
+          id={cartFeedbackId}
           role="status"
           aria-live="polite"
           className={`mt-2 min-h-5 text-[11px] font-medium ${

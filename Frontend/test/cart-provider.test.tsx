@@ -7,6 +7,7 @@ import type { ProductDetailResponse } from '../src/api/contracts'
 import CartProvider from '../src/cart/CartProvider'
 import {
   CART_STORAGE_KEY,
+  CART_VALIDATION_TIMEOUT_MS,
   type CartStorage,
 } from '../src/cart/cart-model'
 import { type CartContextValue, useCart } from '../src/cart/useCart'
@@ -145,6 +146,7 @@ describe('CartProvider', () => {
   afterEach(() => {
     act(() => root.unmount())
     container.remove()
+    vi.useRealTimers()
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
   })
@@ -422,6 +424,213 @@ describe('CartProvider', () => {
     })
     expect(cart.items).toHaveLength(0)
     expect(cart.totalUnits).toBe(0)
+  })
+
+  test('times out a non-cooperative inclusion, releases pending state and ignores its late result', async () => {
+    vi.useFakeTimers()
+    const pending = deferred<ProductDetailResponse>()
+    let signal: AbortSignal | undefined
+    renderProvider(
+      new MemoryStorage(),
+      vi.fn((_slug: string, currentSignal?: AbortSignal) => {
+        signal = currentSignal
+        return pending.promise
+      }),
+    )
+
+    let operation!: Promise<unknown>
+    act(() => {
+      operation = cart.addProduct({
+        productId: 13,
+        slug: detailResponse().item.slug,
+      })
+    })
+    await settle()
+    expect(cart.isProductPending(13)).toBe(true)
+
+    let result
+    await act(async () => {
+      vi.advanceTimersByTime(CART_VALIDATION_TIMEOUT_MS)
+      result = await operation
+    })
+    expect(result).toEqual({
+      status: 'rejected',
+      reason: 'validation_failed',
+    })
+    expect(signal?.aborted).toBe(true)
+    expect(cart.isProductPending(13)).toBe(false)
+    expect(cart.items).toHaveLength(0)
+    expect(vi.getTimerCount()).toBe(0)
+
+    pending.resolve(detailResponse())
+    await settle()
+    expect(cart.items).toHaveLength(0)
+    expect(cart.totalUnits).toBe(0)
+  })
+
+  test('times out a quantity change without losing the confirmed quantity', async () => {
+    vi.useFakeTimers()
+    const pending = deferred<ProductDetailResponse>()
+    const loader = vi
+      .fn()
+      .mockResolvedValueOnce(detailResponse())
+      .mockReturnValueOnce(pending.promise)
+    renderProvider(new MemoryStorage(), loader)
+    await act(async () => {
+      await cart.addProduct({ productId: 13, slug: detailResponse().item.slug })
+    })
+    expect(cart.totalUnits).toBe(1)
+    expect(vi.getTimerCount()).toBe(0)
+
+    let operation!: Promise<unknown>
+    act(() => {
+      operation = cart.setQuantity(13, 2)
+    })
+    await settle()
+    expect(cart.isProductPending(13)).toBe(true)
+    let result
+    await act(async () => {
+      vi.advanceTimersByTime(CART_VALIDATION_TIMEOUT_MS)
+      result = await operation
+    })
+
+    expect(result).toEqual({
+      status: 'rejected',
+      reason: 'validation_failed',
+    })
+    expect(cart.totalUnits).toBe(1)
+    expect(cart.items[0]?.quantity).toBe(1)
+    expect(cart.isProductPending(13)).toBe(false)
+    expect(vi.getTimerCount()).toBe(0)
+
+    pending.resolve(detailResponse({ price: 99.9, stock: 14 }))
+    await settle()
+    expect(cart.totalUnits).toBe(1)
+    expect(cart.subtotalCents).toBe(4_890)
+  })
+
+  test('finishes hydration with valid totals and a timed-out reference marked for review', async () => {
+    vi.useFakeTimers()
+    const storage = new MemoryStorage()
+    storage.setItem(
+      CART_STORAGE_KEY,
+      JSON.stringify({
+        version: 1,
+        items: [
+          { productId: 13, slug: detailResponse().item.slug, quantity: 2 },
+          { productId: 9, slug: 'shampoo-anticaspa-coco-nivel-2', quantity: 1 },
+        ],
+      }),
+    )
+    const pending = deferred<ProductDetailResponse>()
+    let pendingSignal: AbortSignal | undefined
+    renderProvider(
+      storage,
+      vi.fn((slug: string, signal?: AbortSignal) => {
+        if (slug === detailResponse().item.slug) {
+          return Promise.resolve(detailResponse())
+        }
+        pendingSignal = signal
+        return pending.promise
+      }),
+    )
+    await settle()
+    expect(cart.phase).toBe('hydrating')
+
+    await act(async () => {
+      vi.advanceTimersByTime(CART_VALIDATION_TIMEOUT_MS)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(cart.phase).toBe('ready')
+    expect(pendingSignal?.aborted).toBe(true)
+    expect(cart.totalUnits).toBe(2)
+    expect(cart.subtotalCents).toBe(9_780)
+    expect(cart.shippingCents).toBe(1_290)
+    expect(cart.issueCount).toBe(1)
+    expect(cart.isPartial).toBe(true)
+    expect(cart.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ productId: 13, status: 'ready' }),
+        expect.objectContaining({
+          productId: 9,
+          status: 'problem',
+          reason: 'validation_failed',
+        }),
+      ]),
+    )
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  test('clear cancels a timed operation immediately and removes its deadline', async () => {
+    vi.useFakeTimers()
+    const pending = deferred<ProductDetailResponse>()
+    let signal: AbortSignal | undefined
+    renderProvider(
+      new MemoryStorage(),
+      vi.fn((_slug: string, currentSignal?: AbortSignal) => {
+        signal = currentSignal
+        return pending.promise
+      }),
+    )
+    let operation!: Promise<unknown>
+    act(() => {
+      operation = cart.addProduct({
+        productId: 13,
+        slug: detailResponse().item.slug,
+      })
+    })
+    await settle()
+    expect(vi.getTimerCount()).toBe(1)
+
+    act(() => cart.clearCart())
+    let result
+    await act(async () => {
+      result = await operation
+    })
+    expect(result).toEqual({ status: 'rejected', reason: 'cancelled' })
+    expect(signal?.aborted).toBe(true)
+    expect(cart.isProductPending(13)).toBe(false)
+    expect(cart.items).toHaveLength(0)
+    expect(vi.getTimerCount()).toBe(0)
+
+    vi.advanceTimersByTime(CART_VALIDATION_TIMEOUT_MS)
+    pending.resolve(detailResponse())
+    await settle()
+    expect(cart.items).toHaveLength(0)
+  })
+
+  test('unmount aborts a validation and clears its deadline', async () => {
+    vi.useFakeTimers()
+    const pending = deferred<ProductDetailResponse>()
+    let signal: AbortSignal | undefined
+    renderProvider(
+      new MemoryStorage(),
+      vi.fn((_slug: string, currentSignal?: AbortSignal) => {
+        signal = currentSignal
+        return pending.promise
+      }),
+    )
+    let operation!: Promise<unknown>
+    act(() => {
+      operation = cart.addProduct({
+        productId: 13,
+        slug: detailResponse().item.slug,
+      })
+    })
+    await settle()
+    expect(vi.getTimerCount()).toBe(1)
+
+    act(() => root.unmount())
+    let result
+    await act(async () => {
+      result = await operation
+    })
+    expect(result).toEqual({ status: 'rejected', reason: 'cancelled' })
+    expect(signal?.aborted).toBe(true)
+    expect(vi.getTimerCount()).toBe(0)
+
+    root = createRoot(container)
   })
 
   test('reports a canonical price change without trusting the observed price', async () => {

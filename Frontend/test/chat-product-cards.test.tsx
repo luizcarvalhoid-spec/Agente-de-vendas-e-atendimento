@@ -217,6 +217,48 @@ describe('ChatProductCards', () => {
     expect(document.activeElement).toBe(firstDetails)
   })
 
+  test('uses stable unique feedback IDs for the same product in separate turns', async () => {
+    vi.stubGlobal('fetch', vi.fn())
+    const renderRepeatedTurns = () =>
+      root.render(
+        <MemoryRouter>
+          <CartProvider storage={null}>
+            <ChatProductCards response={recommendation} restored={false} />
+            <ChatProductCards response={recommendation} restored={false} />
+          </CartProvider>
+        </MemoryRouter>,
+      )
+
+    act(renderRepeatedTurns)
+    await settle()
+    const articles = Array.from(container.querySelectorAll('article'))
+    expect(articles).toHaveLength(2)
+    const feedbackIds = articles.map((article) => {
+      const button = Array.from(article.querySelectorAll('button')).find(
+        (candidate) => candidate.textContent?.includes('Adicionar ao carrinho'),
+      )
+      const feedbackId = button?.getAttribute('aria-describedby')
+      expect(feedbackId).toBeTruthy()
+      const feedback = document.getElementById(feedbackId!)
+      expect(feedback).not.toBeNull()
+      expect(article.contains(feedback)).toBe(true)
+      expect(feedback?.getAttribute('role')).toBe('status')
+      return feedbackId
+    })
+    expect(new Set(feedbackIds).size).toBe(2)
+
+    act(renderRepeatedTurns)
+    const rerenderedIds = Array.from(container.querySelectorAll('article')).map(
+      (article) =>
+        Array.from(article.querySelectorAll('button'))
+          .find((candidate) =>
+            candidate.textContent?.includes('Adicionar ao carrinho'),
+          )
+          ?.getAttribute('aria-describedby'),
+    )
+    expect(rerenderedIds).toEqual(feedbackIds)
+  })
+
   test('navigates Details to the validated PDP and preserves a canonical catalog return', () => {
     function Destination() {
       const location = useLocation()

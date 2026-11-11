@@ -4,7 +4,7 @@ import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
 import Header from '../src/Pages/Header'
-import CartDeferredPage from '../src/Pages/CartDeferredPage'
+import CartPage from '../src/Pages/CartPage'
 import ProductCard from '../src/Pages/ProductCard'
 import type { ChatRecommendationResponse } from '../src/api/chat-contracts'
 import type {
@@ -244,16 +244,17 @@ describe('shared cart integrations', () => {
       root.render(
         <MemoryRouter>
           <CartProvider storage={storage} loadProduct={() => pending}>
-            <CartDeferredPage />
+            <CartPage />
           </CartProvider>
         </MemoryRouter>,
       ),
     )
     expect(container.textContent).toContain('Validando os itens salvos')
-    expect(container.textContent).not.toContain('carrinho demonstrativo está vazio')
+    expect(container.textContent).not.toContain('Seu carrinho está vazio')
 
     resolve(detail)
     await settle()
-    expect(container.textContent).toContain('2 unidades confirmadas')
+    expect(container.textContent).toContain('Shampoo Anticaspa Controle de Oleosidade')
+    expect(container.textContent).toContain('Subtotal do item')
   })
 })

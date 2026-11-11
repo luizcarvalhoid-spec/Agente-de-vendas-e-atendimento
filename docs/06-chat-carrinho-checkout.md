@@ -22,13 +22,13 @@
 - [x] Renderizar mensagens `recommendation` e `comparison` com justificativa curta, foto real do produto, nome, preço e disponibilidade.
 - [x] Oferecer CTA funcional **Detalhes**, associado ao `productId/slug` validado pelo backend e sem inferir campos comerciais do texto do modelo.
 - [x] Ativar **Adicionar ao carrinho** após a implementação do estado compartilhado na 6.3.
-- [ ] Ativar **Finalizar compra** após a implementação do checkout demonstrativo na 6.4.
+- [x] Ativar **Finalizar compra** para produto `ready` já presente no carrinho integralmente válido, sem inclusão ou confirmação automática.
 - [x] Tratar snapshot histórico, imagem inválida, produto removido, divergência de identidade e indisponibilidade sem quebrar a UI.
 - [x] Garantir leitura em mobile e teclado, com cartões de comparação empilhados.
 
 **Aceite visual:** recomendações e comparações exibem dados validados, atualizam snapshots restaurados pelo catálogo canônico e navegam para a PDP existente.
 
-**Aceite comercial parcial:** **Detalhes** e **Adicionar ao carrinho** usam identidades validadas e o mesmo estado compartilhado. **Finalizar compra** continua pendente até o checkout fictício da 6.4; nenhum pedido ou confirmação falsa é oferecido nesta etapa.
+**Aceite comercial concluído na 6.4:** **Detalhes**, **Adicionar ao carrinho** e **Finalizar compra** usam identidades validadas e o mesmo estado compartilhado. O último CTA só aparece quando o cartão corresponde exatamente, por ID e slug, a um item confirmado e todo o carrinho está válido; ele apenas navega para a revisão demonstrativa.
 
 **Commit:** `feat(web): render actionable product recommendations`.
 
@@ -53,13 +53,17 @@ O CTA do chat revalida cartões `fresh` e `current`; snapshots `refreshing`, `re
 
 ## 6.4 — Checkout fictício
 
-- [ ] Implementar `/carrinho` com resumo e ações de quantidade/exclusão.
-- [ ] Implementar `/checkout-demo` com resumo final e **finalização simulada**, sem coleta de cartão, CPF ou pagamento real.
-- [ ] Criar confirmação explícita “Pedido demonstrativo gerado — nenhuma compra foi efetuada”.
-- [ ] Permitir recomeçar demonstração/carrinho; não integrar gateway de pagamentos.
+- [x] Implementar `/carrinho` com resumo e ações de quantidade/exclusão.
+- [x] Implementar `/checkout-demo` com resumo final e **finalização simulada**, sem coleta de cartão, CPF ou pagamento real.
+- [x] Criar confirmação explícita “Pedido demonstrativo gerado — nenhuma compra foi efetuada”.
+- [x] Permitir recomeçar demonstração/carrinho; não integrar gateway de pagamentos.
 
 **Aceite:** é possível ir da conversa à confirmação simulada em uma sessão sem erro e sem transação financeira.  
 **Commit:** `feat(web): add mock checkout flow`.
+
+**Registro de execução (2026-11-11, base `10a3b388`):** `/carrinho` apresenta dados canônicos, edição de quantidade, remoção, limpeza, persistência degradada e itens problemáticos separados dos valores confirmados. `/checkout-demo` não solicita dados pessoais ou financeiros. A confirmação adquire bloqueio global antes das consultas, revalida cada referência com timeout de cinco segundos e só gera o resumo a partir dos resultados canônicos finais. Mudança válida de preço ou estoque atualiza o provider e exige uma segunda confirmação explícita; falhas tornam os valores parciais e impedem sucesso.
+
+Durante a confirmação, outras confirmações e mutações são recusadas como ocupadas. `clearCart()` continua permitido, invalida a geração, aborta as consultas e impede resultados tardios de recriar itens. O sucesso existe apenas no estado local da página, limpa o carrinho e não representa pedido, pagamento, reserva ou entrega. O CTA do chat nunca adiciona ou confirma silenciosamente e direciona carrinhos parciais para revisão. Todos os testes desta etapa são offline e não acionam a OpenRouter.
 
 ## 6.5 — Teste de ponta a ponta do M1
 

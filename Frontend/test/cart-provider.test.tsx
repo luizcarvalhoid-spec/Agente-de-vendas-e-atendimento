@@ -683,4 +683,209 @@ describe('CartProvider', () => {
     expect(cart.items).toHaveLength(0)
     expect(cart.persistenceStatus).toBe('unavailable')
   })
+
+  test('revalidates canonical data, builds the final summary and clears the cart atomically', async () => {
+    const storage = new MemoryStorage()
+    const loader = vi.fn().mockResolvedValue(detailResponse())
+    renderProvider(storage, loader)
+    await act(async () => {
+      await cart.addProduct({ productId: 13, slug: detailResponse().item.slug }, 2)
+    })
+
+    let result
+    await act(async () => {
+      result = await cart.confirmDemoCheckout()
+    })
+
+    expect(result).toEqual({
+      status: 'confirmed',
+      summary: expect.objectContaining({
+        totalUnits: 2,
+        subtotalCents: 9_780,
+        shippingCents: 1_290,
+        totalCents: 11_070,
+        items: [
+          expect.objectContaining({
+            productId: 13,
+            quantity: 2,
+            unitPriceCents: 4_890,
+            lineSubtotalCents: 9_780,
+          }),
+        ],
+      }),
+    })
+    expect(loader).toHaveBeenCalledTimes(2)
+    expect(cart.items).toHaveLength(0)
+    expect(cart.checkoutValidationStatus).toBe('idle')
+    expect(storage.getItem(CART_STORAGE_KEY)).toBeNull()
+  })
+
+  test('requires review for canonical price or stock changes and revalidates again before confirming', async () => {
+    const loader = vi
+      .fn()
+      .mockResolvedValueOnce(detailResponse())
+      .mockResolvedValue(detailResponse({ price: 52.3, stock: 12 }))
+    renderProvider(new MemoryStorage(), loader)
+    await act(async () => {
+      await cart.addProduct({ productId: 13, slug: detailResponse().item.slug })
+    })
+
+    let reviewResult
+    await act(async () => {
+      reviewResult = await cart.confirmDemoCheckout()
+    })
+    expect(reviewResult).toEqual({
+      status: 'review_required',
+      changes: [
+        { productId: 13, kind: 'price' },
+        { productId: 13, kind: 'stock' },
+      ],
+    })
+    expect(cart.subtotalCents).toBe(5_230)
+    expect(cart.items[0]).toEqual(
+      expect.objectContaining({
+        status: 'ready',
+        product: expect.objectContaining({ stock: 12, unitPriceCents: 5_230 }),
+      }),
+    )
+
+    let confirmedResult
+    await act(async () => {
+      confirmedResult = await cart.confirmDemoCheckout()
+    })
+    expect(confirmedResult).toEqual({
+      status: 'confirmed',
+      summary: expect.objectContaining({
+        subtotalCents: 5_230,
+        items: [expect.objectContaining({ unitPriceCents: 5_230 })],
+      }),
+    })
+    expect(loader).toHaveBeenCalledTimes(3)
+  })
+
+  test('preserves valid lines and marks only a failed checkout validation as problematic', async () => {
+    const secondSlug = 'shampoo-anticaspa-coco-nivel-2'
+    const loader = vi.fn((slug: string) => {
+      if (slug === detailResponse().item.slug) return Promise.resolve(detailResponse())
+      return Promise.resolve(
+        detailResponse({ id: 9, slug: secondSlug, name: 'Shampoo Anticaspa Coco' }),
+      )
+    })
+    renderProvider(new MemoryStorage(), loader)
+    await act(async () => {
+      await cart.addProduct({ productId: 13, slug: detailResponse().item.slug })
+      await cart.addProduct({ productId: 9, slug: secondSlug })
+    })
+    loader.mockImplementation((slug: string) =>
+      slug === detailResponse().item.slug
+        ? Promise.resolve(detailResponse())
+        : Promise.reject(new Error('offline')),
+    )
+
+    let result
+    await act(async () => {
+      result = await cart.confirmDemoCheckout()
+    })
+    expect(result).toEqual({ status: 'blocked', reason: 'validation_failed' })
+    expect(cart.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ productId: 13, status: 'ready' }),
+        expect.objectContaining({
+          productId: 9,
+          status: 'problem',
+          reason: 'validation_failed',
+        }),
+      ]),
+    )
+    expect(cart.totalUnits).toBe(1)
+    expect(cart.issueCount).toBe(1)
+    expect(cart.isPartial).toBe(true)
+  })
+
+  test('holds a synchronous global lock and cancels confirmation when clear wins', async () => {
+    const pending = deferred<ProductDetailResponse>()
+    const loader = vi
+      .fn()
+      .mockResolvedValueOnce(detailResponse())
+      .mockReturnValueOnce(pending.promise)
+    renderProvider(new MemoryStorage(), loader)
+    await act(async () => {
+      await cart.addProduct({ productId: 13, slug: detailResponse().item.slug })
+    })
+
+    let confirmation!: Promise<unknown>
+    act(() => {
+      confirmation = cart.confirmDemoCheckout()
+    })
+    await settle()
+    expect(cart.checkoutValidationStatus).toBe('validating')
+    expect(await cart.confirmDemoCheckout()).toEqual({
+      status: 'blocked',
+      reason: 'busy',
+    })
+    expect(
+      await cart.addProduct({ productId: 9, slug: 'shampoo-anticaspa-coco-nivel-2' }),
+    ).toEqual({ status: 'rejected', reason: 'busy' })
+    expect(await cart.setQuantity(13, 2)).toEqual({
+      status: 'rejected',
+      reason: 'busy',
+    })
+    expect(await cart.retryValidation(13)).toEqual({
+      status: 'rejected',
+      reason: 'busy',
+    })
+    act(() => cart.removeProduct(13))
+    expect(cart.items).toHaveLength(1)
+
+    act(() => cart.clearCart())
+    let result
+    await act(async () => {
+      result = await confirmation
+    })
+    expect(result).toEqual({ status: 'blocked', reason: 'cancelled' })
+    expect(cart.items).toHaveLength(0)
+    expect(cart.checkoutValidationStatus).toBe('idle')
+
+    pending.resolve(detailResponse({ price: 99.9 }))
+    await settle()
+    expect(cart.items).toHaveLength(0)
+    expect(cart.subtotalCents).toBe(0)
+  })
+
+  test('bounds non-cooperative checkout validation and releases the global lock', async () => {
+    vi.useFakeTimers()
+    const pending = deferred<ProductDetailResponse>()
+    const loader = vi
+      .fn()
+      .mockResolvedValueOnce(detailResponse())
+      .mockReturnValueOnce(pending.promise)
+    renderProvider(new MemoryStorage(), loader)
+    await act(async () => {
+      await cart.addProduct({ productId: 13, slug: detailResponse().item.slug })
+    })
+
+    let confirmation!: Promise<unknown>
+    act(() => {
+      confirmation = cart.confirmDemoCheckout()
+    })
+    await settle()
+    let result
+    await act(async () => {
+      vi.advanceTimersByTime(CART_VALIDATION_TIMEOUT_MS)
+      result = await confirmation
+    })
+    expect(result).toEqual({ status: 'blocked', reason: 'validation_failed' })
+    expect(cart.checkoutValidationStatus).toBe('idle')
+    expect(cart.isProductPending(13)).toBe(false)
+    expect(cart.items[0]).toEqual(
+      expect.objectContaining({ status: 'problem', reason: 'validation_failed' }),
+    )
+    expect(vi.getTimerCount()).toBe(0)
+
+    pending.resolve(detailResponse())
+    await settle()
+    expect(cart.items[0]).toEqual(
+      expect.objectContaining({ status: 'problem', reason: 'validation_failed' }),
+    )
+  })
 })

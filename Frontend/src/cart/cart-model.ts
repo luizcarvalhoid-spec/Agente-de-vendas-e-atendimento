@@ -86,6 +86,45 @@ export interface CartTotals {
   isPartial: boolean
 }
 
+export interface DemoCheckoutSummaryItem {
+  productId: number
+  slug: string
+  name: string
+  imageUrl: string
+  quantity: number
+  unitPriceCents: number
+  lineSubtotalCents: number
+}
+
+export interface DemoCheckoutSummary {
+  items: DemoCheckoutSummaryItem[]
+  totalUnits: number
+  subtotalCents: number
+  shippingCents: number
+  totalCents: number
+}
+
+export type DemoCheckoutCommercialChange = {
+  productId: number
+  kind: 'price' | 'stock'
+}
+
+export type DemoCheckoutBlockedReason =
+  | 'hydrating'
+  | 'empty'
+  | 'busy'
+  | 'problem_items'
+  | 'validation_failed'
+  | 'cancelled'
+
+export type DemoCheckoutResult =
+  | { status: 'confirmed'; summary: DemoCheckoutSummary }
+  | {
+      status: 'review_required'
+      changes: DemoCheckoutCommercialChange[]
+    }
+  | { status: 'blocked'; reason: DemoCheckoutBlockedReason }
+
 export type CartPersistenceStatus = 'available' | 'unavailable'
 
 export interface CartStorage {
@@ -163,6 +202,33 @@ export function calculateCartTotals(items: readonly CartItem[]): CartTotals {
     totalCents: subtotalCents + shippingCents,
     isPartial: items.some((item) => item.status === 'problem'),
   }
+}
+
+export function calculateCartLineSubtotalCents(
+  unitPriceCents: number,
+  quantity: number,
+) {
+  return unitPriceCents * quantity
+}
+
+const brlFormatter = new Intl.NumberFormat('pt-BR', {
+  style: 'currency',
+  currency: 'BRL',
+})
+
+export function formatCartCurrency(cents: number) {
+  return brlFormatter.format(cents / 100)
+}
+
+export function formatCartProblemReason(reason: CartProblemReason) {
+  const messages: Record<CartProblemReason, string> = {
+    removed: 'O produto não está mais disponível no catálogo.',
+    out_of_stock: 'O produto está esgotado no catálogo atual.',
+    insufficient_stock: 'A quantidade salva supera o estoque atual.',
+    identity_mismatch: 'A identidade atual do produto não pôde ser confirmada.',
+    validation_failed: 'Não foi possível validar o produto no catálogo atual.',
+  }
+  return messages[reason]
 }
 
 function parseStoredReference(value: unknown): CartReference | undefined {

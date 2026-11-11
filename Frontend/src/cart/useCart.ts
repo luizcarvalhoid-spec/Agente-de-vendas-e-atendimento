@@ -5,6 +5,7 @@ import type {
   CartItem,
   CartOperationResult,
   CartPersistenceStatus,
+  DemoCheckoutResult,
 } from './cart-model'
 
 export interface CartContextValue {
@@ -17,6 +18,7 @@ export interface CartContextValue {
   isPartial: boolean
   issueCount: number
   persistenceStatus: CartPersistenceStatus
+  checkoutValidationStatus: 'idle' | 'validating'
   addProduct(
     reference: AddProductReference,
     quantity?: number,
@@ -25,6 +27,7 @@ export interface CartContextValue {
   removeProduct(productId: number): void
   clearCart(): void
   retryValidation(productId: number): Promise<CartOperationResult>
+  confirmDemoCheckout(): Promise<DemoCheckoutResult>
   isProductPending(productId: number): boolean
 }
 

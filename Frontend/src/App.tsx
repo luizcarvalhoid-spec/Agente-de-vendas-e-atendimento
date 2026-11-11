@@ -1,8 +1,8 @@
 import { BrowserRouter, Route, Routes } from 'react-router'
 
 import CategoryPage from './Pages/CategoryPage'
-import CartDeferredPage from './Pages/CartDeferredPage'
-import DeferredFeaturePage from './Pages/DeferredFeaturePage'
+import CartPage from './Pages/CartPage'
+import CheckoutDemoPage from './Pages/CheckoutDemoPage'
 import ProductRoutePage from './Pages/ProductRoutePage'
 import RouteNotFoundPage from './Pages/RouteNotFoundPage'
 import ApiHealthStatus from './components/ApiHealthStatus'
@@ -18,16 +18,8 @@ function App() {
           <Routes>
             <Route path="/" element={<CategoryPage />} />
             <Route path="/produtos/:slug" element={<ProductRoutePage />} />
-            <Route path="/carrinho" element={<CartDeferredPage />} />
-            <Route
-              path="/checkout-demo"
-              element={
-                <DeferredFeaturePage
-                  title="Checkout demonstrativo"
-                  description="Este checkout é apenas uma demonstração planejada. Nenhum pagamento ou pedido real é processado."
-                />
-              }
-            />
+            <Route path="/carrinho" element={<CartPage />} />
+            <Route path="/checkout-demo" element={<CheckoutDemoPage />} />
             <Route path="*" element={<RouteNotFoundPage />} />
           </Routes>
           {import.meta.env.DEV && <ApiHealthStatus />}

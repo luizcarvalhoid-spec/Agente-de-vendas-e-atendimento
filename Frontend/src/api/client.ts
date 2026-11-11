@@ -190,12 +190,14 @@ async function requestJson(
   return readJson(response)
 }
 
-function resolveApiResourceUrl(path: string) {
-  const apiOrigin = getApiBaseUrl()
+export function resolveCatalogImageUrl(path: string, apiUrl?: string) {
+  const apiOrigin = getApiBaseUrl(apiUrl)
+  const catalogImagePathPattern =
+    /^\/api\/catalog\/images\/(?:[a-zA-Z0-9][a-zA-Z0-9._-]*\/)*[a-zA-Z0-9][a-zA-Z0-9._-]*\.(?:jpe?g|png|webp)$/i
 
   try {
     const url = new URL(path, `${apiOrigin}/`)
-    const isCatalogImage = url.pathname.startsWith('/api/catalog/images/')
+    const isCatalogImage = catalogImagePathPattern.test(url.pathname)
 
     if (
       url.origin !== apiOrigin ||
@@ -275,8 +277,10 @@ export async function getProductBySlug(
   return {
     ...body,
     media: {
-      primaryUrl: resolveApiResourceUrl(body.media.primaryUrl),
-      galleryUrls: body.media.galleryUrls.map(resolveApiResourceUrl),
+      primaryUrl: resolveCatalogImageUrl(body.media.primaryUrl),
+      galleryUrls: body.media.galleryUrls.map((url) =>
+        resolveCatalogImageUrl(url),
+      ),
     },
   }
 }
@@ -295,7 +299,7 @@ export async function getProducts(
     ...body,
     items: body.items.map((product) => ({
       ...product,
-      imageUrl: resolveApiResourceUrl(product.imageUrl),
+      imageUrl: resolveCatalogImageUrl(product.imageUrl),
     })),
   }
 }

@@ -124,6 +124,21 @@ describe('canonical chat history', () => {
     })
   })
 
+  test('drops a recommendation after it leaves the recent history window', () => {
+    const turns = [
+      recommendationTurn(1, 13),
+      ...Array.from({ length: CHAT_MAX_COMPLETED_TURNS }, (_, index) =>
+        turn(index + 2, `Pergunta de acompanhamento ${index + 1}`),
+      ),
+    ]
+
+    expect(buildChatHistory(turns, 'Pergunta atual')[0]).toEqual({
+      role: 'user',
+      content: 'Pergunta de acompanhamento 1',
+    })
+    expect(buildRecommendationContext(turns, 'Pergunta atual')).toBeUndefined()
+  })
+
   test('invalidates an older product after an explicit change without a new recommendation', () => {
     const changed = {
       ...turn(2, 'Agora quero outro shampoo.'),
@@ -148,6 +163,23 @@ describe('session persistence', () => {
     expect(restored?.turns).toHaveLength(5)
     expect(restored?.turns.every((item) => item.restored)).toBe(true)
     expect(restored?.turns[0]?.userMessage).toBe('mensagem 3')
+  })
+
+  test('preserves a recent restored recommendation and clears it with the session', () => {
+    const storage = createStorage()
+    saveChatSession(storage, {
+      sessionId: 'demo_session',
+      turns: [recommendationTurn(1, 13), turn(2, 'Qual é o prazo?')],
+    })
+
+    const restored = loadChatSession(storage)
+    expect(buildRecommendationContext(restored?.turns ?? [])).toEqual({
+      productIds: [13],
+    })
+
+    clearChatSession(storage)
+    expect(loadChatSession(storage)).toBeUndefined()
+    expect(buildRecommendationContext([])).toBeUndefined()
   })
 
   test.each([

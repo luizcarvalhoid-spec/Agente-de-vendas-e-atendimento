@@ -870,11 +870,52 @@ test('contextual quote clarifies missing, ambiguous or explicitly changed refere
     message: 'Quanto ficaria o total com frete de outro shampoo?',
     recommendationContext: { productIds: [13] },
   })
-  for (const response of [missing, ambiguous, changed]) {
+  const multipleUnits = await execute(service, {
+    message: 'Quanto fica o total com frete de dois frascos desse shampoo?',
+    recommendationContext: { productIds: [13] },
+  })
+  const multipleProducts = await execute(service, {
+    message: 'Quanto fica o total do produto 9 e do produto 13 com frete?',
+    recommendationContext: { productIds: [13] },
+  })
+  for (const response of [
+    missing,
+    ambiguous,
+    changed,
+    multipleUnits,
+    multipleProducts,
+  ]) {
     assert.equal(response.type, 'text')
     assert.equal(response.type === 'text' ? response.reason : undefined, 'clarification')
     assert.deepEqual(response.sourceIds, [])
   }
+  assert.match(multipleUnits.message, /uma unidade por vez/i)
+  assert.match(multipleProducts.message, /um único ID/i)
+  assert.equal(modelCalls, 0)
+})
+
+test('contextual quote accepts one unit and ignores an explicitly rejected different product', async () => {
+  let modelCalls = 0
+  const service = await buildService(neverCalledModel(() => modelCalls += 1))
+
+  const oneUnit = await execute(service, {
+    message: 'Quanto custa uma unidade desse shampoo com frete?',
+    recommendationContext: { productIds: [13] },
+  })
+  const rejectedDifferentProduct = await execute(service, {
+    message:
+      'Não quero o produto 9; quero saber o total desse shampoo que você recomendou.',
+    recommendationContext: { productIds: [13] },
+  })
+
+  for (const response of [oneUnit, rejectedDifferentProduct]) {
+    assert.equal(response.type, 'text')
+    assert.match(response.message, /R\$ 48,90/)
+    assert.match(response.message, /R\$ 12,90/)
+    assert.match(response.message, /R\$ 61,80/)
+    assert.deepEqual(response.sourceIds, ['faq-002', 'faq-003'])
+  }
+  assert.doesNotMatch(rejectedDifferentProduct.message, /R\$ 46,90/)
   assert.equal(modelCalls, 0)
 })
 

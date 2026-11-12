@@ -70,6 +70,18 @@ export function buildChatHistory(
   turns: readonly CompletedTurn[],
   currentMessage: string,
 ): ChatHistoryMessage[] {
+  return selectRecentTurns(turns, currentMessage).flatMap<ChatHistoryMessage>(
+    (turn) => [
+      { role: 'user', content: turn.userMessage },
+      { role: 'assistant', content: turn.response.message },
+    ],
+  )
+}
+
+function selectRecentTurns(
+  turns: readonly CompletedTurn[],
+  currentMessage: string,
+) {
   const selected = turns.slice(-CHAT_MAX_COMPLETED_TURNS)
 
   while (selected.length > 0) {
@@ -81,7 +93,7 @@ export function buildChatHistory(
       utf8Bytes({ history, message: currentMessage }) <=
       CHAT_MAX_CONVERSATION_BYTES
     ) {
-      return history
+      return selected
     }
     selected.shift()
   }
@@ -101,9 +113,11 @@ function explicitlyInvalidatesProductReference(message: string) {
 
 export function buildRecommendationContext(
   turns: readonly CompletedTurn[],
+  currentMessage = '',
 ): ChatRecommendationContext | undefined {
-  for (let index = turns.length - 1; index >= 0; index -= 1) {
-    const turn = turns[index]
+  const recentTurns = selectRecentTurns(turns, currentMessage)
+  for (let index = recentTurns.length - 1; index >= 0; index -= 1) {
+    const turn = recentTurns[index]
     if (!turn) continue
     if (
       turn.response.type === 'recommendation' ||

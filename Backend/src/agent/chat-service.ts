@@ -639,21 +639,55 @@ function controlledConsultativeQuestion(
   })
 }
 
-function explicitInformationalProductId(message: string) {
-  const match = normalize(message).match(
-    /\bproduto\s+(?:id\s*)?(\d{1,6})\b/,
+function explicitRejectedProductIds(message: string) {
+  const matches = normalize(message).matchAll(
+    /\b(?:nao\s+(?:quero|considere|use)|sem)\s+(?:mais\s+)?(?:o\s+)?produto\s+(?:id\s*)?(\d{1,6})\b/g,
   )
-  return match?.[1] ? Number(match[1]) : undefined
+  return new Set(
+    Array.from(matches, (match) => Number(match[1])).filter(Number.isSafeInteger),
+  )
+}
+
+function explicitInformationalProductIds(message: string) {
+  const normalized = normalize(message)
+  const rejectedIds = explicitRejectedProductIds(normalized)
+  return Array.from(
+    new Set(
+      Array.from(
+        normalized.matchAll(/\bproduto\s+(?:id\s*)?(\d{1,6})\b/g),
+        (match) => Number(match[1]),
+      ).filter((productId) =>
+        Number.isSafeInteger(productId) && !rejectedIds.has(productId),
+      ),
+    ),
+  )
+}
+
+function explicitInformationalProductId(message: string) {
+  const productIds = explicitInformationalProductIds(message)
+  return productIds.length === 1 ? productIds[0] : undefined
+}
+
+function requestsMultipleQuoteUnits(message: string) {
+  return /\b(?:[2-9]|[1-9]\d{1,5}|dois|duas|tres|quatro|cinco|seis|sete|oito|nove|dez)\s*(?:unidades?|frascos?|itens?)\b/.test(
+    normalize(message),
+  )
 }
 
 function isDemonstrativeQuoteIntent(message: string) {
   const normalized = normalize(message)
+  const asksTotal = /\b(?:total|valor final)\b/.test(normalized)
+  const referencesRecommendation =
+    /\b(?:esse|essa|desse|dessa|deste|desta)\s+(?:produto|shampoo)\b.*\b(?:recomendou|recomendado)\b/.test(
+      normalized,
+    )
   return (
-    /\bfrete\b/.test(normalized) &&
-    (/\b(?:total|valor final)\b/.test(normalized) ||
+    (asksTotal && referencesRecommendation) ||
+    (/\bfrete\b/.test(normalized) &&
+      (asksTotal ||
       /\bquanto\s+(?:ficaria|fica|daria|da|custaria|custa)\b/.test(
         normalized,
-      ))
+      )))
   )
 }
 
@@ -691,8 +725,25 @@ function contextualQuoteResponse(
 ): ChatResponse | undefined {
   if (!isDemonstrativeQuoteIntent(request.message)) return undefined
 
-  const explicitId = explicitInformationalProductId(request.message)
-  const contextualIds = request.recommendationContext?.productIds ?? []
+  if (requestsMultipleQuoteUnits(request.message)) {
+    return controlledConsultativeQuestion(
+      'A cotação demonstrativa atual calcula uma unidade por vez. Informe um único produto para cotar uma unidade com frete.',
+      requestId,
+    )
+  }
+
+  const explicitIds = explicitInformationalProductIds(request.message)
+  if (explicitIds.length > 1) {
+    return controlledConsultativeQuestion(
+      'Qual dos produtos você quer usar nessa cotação demonstrativa? Informe um único ID de produto.',
+      requestId,
+    )
+  }
+  const explicitId = explicitIds[0]
+  const rejectedIds = explicitRejectedProductIds(request.message)
+  const contextualIds = (request.recommendationContext?.productIds ?? []).filter(
+    (productId) => !rejectedIds.has(productId),
+  )
   const rejectsPreviousReference =
     explicitId === undefined &&
     /\b(?:outro|outra|produto diferente|shampoo diferente)\b/.test(

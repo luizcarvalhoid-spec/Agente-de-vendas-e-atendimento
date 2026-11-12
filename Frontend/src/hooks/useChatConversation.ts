@@ -231,7 +231,10 @@ export function useChatConversation() {
     setFailure(undefined)
     setPending({ id, message: normalized })
 
-    const recommendationContext = buildRecommendationContext(turnsRef.current)
+    const recommendationContext = buildRecommendationContext(
+      turnsRef.current,
+      normalized,
+    )
     const request = {
       message: normalized,
       sessionId: sessionIdRef.current,

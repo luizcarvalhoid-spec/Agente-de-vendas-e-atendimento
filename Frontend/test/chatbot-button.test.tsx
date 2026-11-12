@@ -500,7 +500,16 @@ describe('ChatbotButton', () => {
     vi.setSystemTime(new Date('2026-11-10T12:00:00Z'))
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(apiResponse('Resposta antiga'))
+      .mockResolvedValueOnce(
+        successfulResponse({
+          type: 'recommendation',
+          message: 'Resposta antiga',
+          productIds: [13],
+          products: [chatProduct],
+          sourceIds: [],
+          requestId,
+        }),
+      )
       .mockResolvedValueOnce(apiResponse('rate', 429, { 'Retry-After': '3' }))
       .mockResolvedValueOnce(apiResponse('Resposta da nova sessão'))
     vi.stubGlobal('fetch', fetchMock)
@@ -552,9 +561,14 @@ describe('ChatbotButton', () => {
 
     const newBody = JSON.parse(
       String(fetchMock.mock.calls[2]?.[1]?.body),
-    ) as { sessionId: string; history: unknown[] }
+    ) as {
+      sessionId: string
+      history: unknown[]
+      recommendationContext?: unknown
+    }
     expect(newBody.sessionId).toBe(stored.sessionId)
     expect(newBody.history).toEqual([])
+    expect(newBody.recommendationContext).toBeUndefined()
     expect(container.textContent).not.toContain('Resposta antiga')
     expect(container.textContent).toContain('Resposta da nova sessão')
   })

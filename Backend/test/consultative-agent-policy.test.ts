@@ -120,6 +120,10 @@ test('define entrevista adaptativa e grounding comercial', () => {
     'não encontrar fonte',
     'Não invente produtos, preços, estoques',
     'Não prometa pagamentos, pedidos, entregas',
+    'relacionando apenas as preferências realmente úteis',
+    'sintetize todas as fontes necessárias em linguagem simples',
+    'não copie trechos documentais de forma mecânica',
+    'Evite repetir avisos, apresentações e perguntas comerciais',
   ]) {
     assert.ok(instruction.includes(expectedText), expectedText)
   }

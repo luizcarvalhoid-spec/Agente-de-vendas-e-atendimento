@@ -25,6 +25,11 @@ import type { FaqDocument } from '../knowledge/faq-document-schema.js'
 import type { FaqSearchIndex } from '../knowledge/faq-search.js'
 import type { AgentMessage, AgentModelPort } from './agent-model-port.js'
 import {
+  composeComparisonMessage,
+  composeFaqAnswer,
+  composeRecommendationMessage,
+} from './chat-response-composer.js'
+import {
   createBudgetedAgentModel,
   type UsageBudgetExecution,
 } from './usage-budget-controller.js'
@@ -99,6 +104,8 @@ export interface CreateChatServiceOptions {
 interface EffectiveCommercialContext {
   constraints: ProductEligibilityConstraints
   searchInput: SearchProductsInput
+  sensoryTerms: readonly string[]
+  rejectedProductIds: ReadonlySet<number>
   needsClarification: boolean
   cart: readonly { productId: number; quantity: number }[]
 }
@@ -374,6 +381,16 @@ function resolveCommercialContext(
     currentSensoryTerms ??
     (productGoalChanged ? undefined : historicalSensoryTerms) ??
     []
+  const rejectedProductIds = explicitRejectedProductIds(request.message)
+  if (
+    /\b(?:outra opcao|outro produto|produto diferente|algo diferente|nao gostei|prefiro outra)\b/.test(
+      normalize(request.message),
+    )
+  ) {
+    for (const productId of request.recommendationContext?.productIds ?? []) {
+      rejectedProductIds.add(productId)
+    }
+  }
 
   const constraints: ProductEligibilityConstraints = {
     ...(category !== undefined ? { category } : {}),
@@ -413,6 +430,8 @@ function resolveCommercialContext(
   return {
     constraints,
     searchInput,
+    sensoryTerms: effectiveSensoryTerms,
+    rejectedProductIds,
     needsClarification:
       currentBudget.ambiguous ||
       conflictingCurrentBudget ||
@@ -876,7 +895,8 @@ function resolveFaqSourceIds(
   return resolved
 }
 
-function mixedPolicySuffix(
+function mixedFaqAnswer(
+  question: string,
   plan: ChatGroundingPlan,
   result: ToolOrchestratorResult,
   sourceIds: readonly string[],
@@ -884,10 +904,9 @@ function mixedPolicySuffix(
 ) {
   if (plan.groundingRequirement !== 'both') return ''
   if (result.grounding.faq === 'not_found') {
-    return ' A política solicitada não está documentada nesta demonstração.'
+    return 'A política solicitada não está documentada nesta demonstração.'
   }
-  const source = faqDocuments.get(sourceIds[0] ?? '')
-  return source ? ` Política documentada: ${source.content}` : ''
+  return composeFaqAnswer({ question, sourceIds, faqDocuments })
 }
 
 function toProductCard(
@@ -968,6 +987,7 @@ function handleNonCompleted(result: ToolOrchestratorResult): never {
 }
 
 function controlledTextResponse(
+  question: string,
   requestId: string,
   result: ToolOrchestratorResult,
   plan: ChatGroundingPlan,
@@ -991,10 +1011,14 @@ function controlledTextResponse(
     result.grounding.product === 'not_found' &&
     result.grounding.faq === 'found'
   ) {
-    const source = faqDocuments.get(sourceIds[0] ?? '')
+    const faqAnswer = composeFaqAnswer({
+      question,
+      sourceIds,
+      faqDocuments,
+    })
     return chatResponseSchema.parse({
       type: 'text',
-      message: `Não encontrei um produto demonstrativo elegível para a solicitação. A política consultada está documentada: ${source?.content ?? 'fonte canônica indisponível para exibição.'}`,
+      message: `Não encontrei um produto demonstrativo elegível para a solicitação.${faqAnswer ? ` Sobre a outra dúvida: ${faqAnswer}` : ''}`,
       reason: 'not_found',
       sourceIds,
       requestId,
@@ -1035,11 +1059,15 @@ function controlledTextResponse(
     })
   }
   if (sourceIds.length > 0) {
-    const source = faqDocuments.get(sourceIds[0] ?? '')
-    if (source) {
+    const faqAnswer = composeFaqAnswer({
+      question,
+      sourceIds,
+      faqDocuments,
+    })
+    if (faqAnswer) {
       return chatResponseSchema.parse({
         type: 'text',
-        message: source.content,
+        message: faqAnswer,
         sourceIds,
         requestId,
       })
@@ -1203,7 +1231,11 @@ export function createChatService(
       const rankedIds = options.productIndex
         .search(commercial.searchInput, policy, selectionContext)
         .map((candidate) => candidate.id)
-        .filter((id) => authorizedIds.has(id))
+        .filter(
+          (id) =>
+            authorizedIds.has(id) &&
+            !commercial.rejectedProductIds.has(id),
+        )
       const explicitIds = explicitComparisonIds(
         request.message,
         options.catalog,
@@ -1236,7 +1268,7 @@ export function createChatService(
         commercial.constraints,
       )
       const finalContext = createAgentToolExecutionContext(execution.signal)
-      const products = selectedIds.flatMap((id) => {
+      const selectedProducts = selectedIds.flatMap((id) => {
         const product = options.catalog.findById(id)
         if (
           !product ||
@@ -1245,9 +1277,11 @@ export function createChatService(
           return []
         }
         const card = toProductCard(product, options.catalog)
-        return card ? [card] : []
+        return card ? [{ product, card }] : []
       })
-      const policySuffix = mixedPolicySuffix(
+      const products = selectedProducts.map(({ card }) => card)
+      const faqAnswer = mixedFaqAnswer(
+        request.message,
         plan,
         result,
         sourceIds,
@@ -1256,9 +1290,27 @@ export function createChatService(
 
       if (selectedIds.length === 1 && products.length === 1) {
         const product = products[0]
+        const canonicalProduct = selectedProducts[0]?.product
+        if (!canonicalProduct) {
+          return controlledTextResponse(
+            request.message,
+            execution.requestId,
+            result,
+            plan,
+            faqDocuments,
+            commercial.needsClarification,
+          )
+        }
         return chatResponseSchema.parse({
           type: 'recommendation',
-          message: `Com base nas preferências informadas e nos dados demonstrativos atuais, selecionei ${product?.name}. Confira o cartão com preço e estoque canônicos.${policySuffix}`,
+          message: composeRecommendationMessage(
+            canonicalProduct,
+            {
+              searchInput: commercial.searchInput,
+              sensoryTerms: commercial.sensoryTerms,
+            },
+            faqAnswer,
+          ),
           productIds: [product?.id],
           products: [product],
           sourceIds,
@@ -1270,9 +1322,23 @@ export function createChatService(
         products.length === 2 &&
         products[0]?.id !== products[1]?.id
       ) {
+        const canonicalProducts = selectedProducts.map(({ product }) => product)
+        if (canonicalProducts.length !== 2) {
+          return controlledTextResponse(
+            request.message,
+            execution.requestId,
+            result,
+            plan,
+            faqDocuments,
+            commercial.needsClarification,
+          )
+        }
         return chatResponseSchema.parse({
           type: 'comparison',
-          message: `Comparei ${products[0]?.name} e ${products[1]?.name} usando os dados demonstrativos atuais do catálogo.${policySuffix}`,
+          message: composeComparisonMessage(
+            canonicalProducts as [Product, Product],
+            faqAnswer,
+          ),
           productIds: [products[0]?.id, products[1]?.id],
           products: [products[0], products[1]],
           sourceIds,
@@ -1281,6 +1347,7 @@ export function createChatService(
       }
 
       return controlledTextResponse(
+        request.message,
         execution.requestId,
         result,
         plan,

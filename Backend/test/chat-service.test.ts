@@ -1139,8 +1139,8 @@ test('both succeeds only after product and FAQ domains are consulted', async () 
   })
   assert.equal(response.type, 'recommendation')
   assert.ok(response.sourceIds.length > 0)
-  assert.match(response.message, /Política documentada:/)
   assert.match(response.message, /dias úteis/i)
+  assert.doesNotMatch(response.message, /Política documentada:/)
 })
 
 test('both preserves a product while explicitly reporting FAQ not_found', async () => {
@@ -1217,7 +1217,7 @@ test('both reports product not_found while preserving a found FAQ policy', async
   })
   assert.equal(response.type, 'text')
   assert.match(response.message, /não encontrei um produto/i)
-  assert.match(response.message, /política consultada está documentada/i)
+  assert.match(response.message, /4 a 8 dias úteis/i)
   assert.ok(response.sourceIds.length > 0)
 })
 

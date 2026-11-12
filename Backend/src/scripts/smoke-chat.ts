@@ -18,9 +18,10 @@ import {
   assertSmokeCaseEvidence,
   createSmokeDiagnosticTracker,
   createSmokeCostGuard,
+  resolveSmokeExecutionPlan,
   SMOKE_MAX_EXECUTIONS,
-  SMOKE_MAX_MODEL_CALLS_PER_EXECUTION,
   SMOKE_MAX_OUTPUT_TOKENS,
+  smokeModelCallLimit,
   SmokeGuardError,
   SmokeSetupError,
   type SmokeCaseKind,
@@ -64,6 +65,9 @@ try {
   ) {
     throw new SmokeSetupError('BACKEND_CONFIGURATION')
   }
+  const executionPlan = resolveSmokeExecutionPlan(
+    process.env.HIDRASPLASH_SMOKE_SCENARIO,
+  )
 
   diagnostics.enter('budget_preflight')
   const inputPrice = requiredPositiveNumber(
@@ -79,11 +83,13 @@ try {
     inputPricePerMillion: inputPrice,
     outputPricePerMillion: outputPrice,
     monetaryCeilingUsd: monetaryCeiling,
+    maxProviderCalls: executionPlan.maxProviderCalls,
   })
   const activeCostGuard = createSmokeCostGuard({
     inputPricePerMillion: inputPrice,
     outputPricePerMillion: outputPrice,
     monetaryCeilingUsd: monetaryCeiling,
+    maxProviderCalls: executionPlan.maxProviderCalls,
   })
   costGuard = activeCostGuard
   const transport = activeCostGuard.wrapTransport(fetch)
@@ -101,32 +107,48 @@ try {
     maxOutputTokens: SMOKE_MAX_OUTPUT_TOKENS,
     transport,
   })
-  const chatService = createChatService({
-    catalog,
-    productIndex: createProductSearchIndex(catalog.listAll()),
-    faqIndex: createFaqSearchIndex(faqDocuments),
-    faqDocuments,
-    model: createOpenRouterAgentModel(client),
-    maxModelCalls: SMOKE_MAX_MODEL_CALLS_PER_EXECUTION,
-    maxOutputTokens: SMOKE_MAX_OUTPUT_TOKENS,
-  })
+  const productIndex = createProductSearchIndex(catalog.listAll())
+  const faqIndex = createFaqSearchIndex(faqDocuments)
+  const createScenarioService = (kind: SmokeCaseKind) =>
+    createChatService({
+      catalog,
+      productIndex,
+      faqIndex,
+      faqDocuments,
+      model: createOpenRouterAgentModel(client),
+      maxModelCalls: smokeModelCallLimit(kind),
+      maxOutputTokens: SMOKE_MAX_OUTPUT_TOKENS,
+    })
   const usageController = createUsageBudgetController()
-  const cases = [
+  const allCases = [
     {
+      ordinal: 1,
       kind: 'product' as const,
       message:
         'Quero um shampoo anticaspa para couro cabeludo oleoso, com sensação refrescante, até R$ 50.',
     },
     {
+      ordinal: 2,
       kind: 'faq' as const,
       message: 'Qual é a política demonstrativa de frete e entrega?',
     },
     {
+      ordinal: 3,
       kind: 'mixed' as const,
       message:
         'Quero um shampoo anticaspa para couro oleoso, com frescor, até R$ 50, e qual é o prazo de entrega?',
     },
-  ] satisfies readonly { kind: SmokeCaseKind; message: string }[]
+  ] satisfies readonly {
+    ordinal: number
+    kind: SmokeCaseKind
+    message: string
+  }[]
+  const selectedKinds = new Set(executionPlan.cases)
+  const cases = allCases.filter(({ kind }) => selectedKinds.has(kind))
+  const services = new Map(
+    cases.map(({ kind }) => [kind, createScenarioService(kind)]),
+  )
+  const localBudgetService = createScenarioService('product')
   const usageEvents: BudgetedModelUsageEvent[] = []
   const terminationEvents: SmokeGroundingEvidence[] = []
   const observer = {
@@ -147,18 +169,16 @@ try {
     },
   }
 
-  for (
-    let index = 0;
-    index < Math.min(cases.length, SMOKE_MAX_EXECUTIONS);
-    index += 1
-  ) {
-    const scenarioOrdinal = index + 1
+  for (const scenario of cases.slice(0, SMOKE_MAX_EXECUTIONS)) {
+    const scenarioOrdinal = scenario.ordinal
     const before = usageEvents.length
     const terminationsBefore = terminationEvents.length
     diagnostics.enter('scenario_execution', scenarioOrdinal)
+    const chatService = services.get(scenario.kind)
+    if (!chatService) throw new SmokeSetupError('SCENARIO_CONFIGURATION')
     const result = await chatService.execute(
       {
-        message: cases[index]?.message ?? '',
+        message: scenario.message,
         history: [],
         cart: [],
       },
@@ -180,7 +200,7 @@ try {
     }
     diagnostics.enter('grounding_validation', scenarioOrdinal)
     assertSmokeCaseEvidence({
-      kind: cases[index]?.kind ?? 'product',
+      kind: scenario.kind,
       response: result,
       termination: terminationEvents.slice(terminationsBefore).at(-1),
     })
@@ -188,7 +208,7 @@ try {
     diagnostics.completeScenario()
     console.log('Execução manual concluída.', {
       ordinal: scenarioOrdinal,
-      scenario: cases[index]?.kind,
+      scenario: scenario.kind,
       modelCalls: executionUsage.length,
       productGrounded: termination?.productGrounding === 'found',
       faqGrounded: termination?.faqGrounding === 'found',
@@ -201,7 +221,7 @@ try {
   const callsBeforeLocalDenial = activeCostGuard.snapshot().providerCalls
   let locallyDenied = false
   try {
-    await chatService.execute(
+    await localBudgetService.execute(
       {
         message:
           'Quero um shampoo anticaspa para couro oleoso, com frescor, até R$ 50.',
@@ -239,7 +259,8 @@ try {
   const costSnapshot = activeCostGuard.snapshot()
   diagnostics.enter('completed')
   console.log('Smoke manual concluído.', {
-    executions: SMOKE_MAX_EXECUTIONS,
+    executions: cases.length,
+    selection: executionPlan.selection,
     providerCalls: costSnapshot.providerCalls,
     usageComplete: true,
     reportedUsage,

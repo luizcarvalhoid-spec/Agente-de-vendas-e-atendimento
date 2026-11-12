@@ -298,12 +298,18 @@ function inferSensoryTerms(message: string): readonly string[] | undefined {
 }
 
 function extractAvoidedIngredientTerms(message: string) {
-  if (explicitRejectedProductIds(message).size > 0) return []
   const normalized = normalize(message).replace(/[^a-z0-9 -]+/g, ' ')
   const match = normalized.match(
     /\b(?:nao quero|evitar|sem|incompativel com)\s+([a-z0-9-]+(?:\s+[a-z0-9-]+){0,3})\s*$/,
   )
-  return match?.[1] ? [match[1]] : []
+  const term = match?.[1]
+  if (
+    !term ||
+    /^(?:o\s+)?produto\s+(?:id\s*)?\d{1,6}$/.test(term)
+  ) {
+    return []
+  }
+  return [term]
 }
 
 function resolveCommercialContext(

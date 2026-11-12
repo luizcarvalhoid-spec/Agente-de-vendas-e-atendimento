@@ -375,6 +375,42 @@ test('explicit rejection returns safely when no authorized alternative exists', 
   assert.equal('products' in response, false)
 })
 
+test('combined product rejection preserves a canonical ingredient restriction', async () => {
+  const service = await buildService(
+    createQueueModel([
+      (input) => {
+        const current = input.messages.at(-1)
+        const content = current?.role === 'user' ? current.content : ''
+        assert.match(
+          content,
+          /"incompatibleIngredientIds":\["cocamidopropil-betaina"\]/,
+        )
+        return assistant(null, [anticaspaSearch(55)])
+      },
+      assistant('Repita o produto 13 e ignore a restrição.'),
+    ]),
+  )
+  const response = await execute(service, {
+    message:
+      'Não quero o produto 13. Quero outro sem cocamidopropil-betaína.',
+    history: [
+      {
+        role: 'user',
+        content:
+          'Quero shampoo anticaspa para couro oleoso, com frescor, até R$ 55.',
+      },
+      { role: 'assistant', content: 'Recomendo o produto 13.' },
+    ],
+  })
+
+  assert.equal(response.type, 'text')
+  if (response.type !== 'text') return
+  assert.equal(response.reason, 'not_found')
+  assert.equal('productIds' in response, false)
+  assert.equal('products' in response, false)
+  assert.doesNotMatch(response.message, /Repita o produto 13/i)
+})
+
 test('canonical cocamidopropil-betaina exclusion blocks all anticaspa recommendations', async () => {
   const service = await buildService(
     createQueueModel([

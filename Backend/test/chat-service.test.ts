@@ -272,6 +272,145 @@ test('selects canonical product 13 inside R$ 50 without incompatible restriction
   assert.match(response.products[0].imageUrl, /^\/api\/catalog\/images\//)
 })
 
+test('explicit product rejection excludes the ID without recommendation context', async (t) => {
+  const messages = [
+    'Não gostei do produto 13, me mostre outro.',
+    'Não quero o produto 13.',
+    'Prefiro outro, não gostei do produto 13.',
+    'Não recomende mais o produto 13.',
+  ]
+
+  for (const message of messages) {
+    await t.test(message, async () => {
+      const service = await buildService(
+        createQueueModel([
+          assistant(null, [anticaspaSearch(55)]),
+          assistant('Repita o produto 13.'),
+        ]),
+      )
+      const response = await execute(service, {
+        message,
+        history: [
+          {
+            role: 'user',
+            content:
+              'Quero shampoo anticaspa para couro oleoso, com frescor, até R$ 55.',
+          },
+          { role: 'assistant', content: 'Recomendo o produto 13.' },
+        ],
+      })
+
+      assert.equal(response.type, 'recommendation')
+      if (response.type !== 'recommendation') return
+      assert.equal(response.productIds.includes(13), false)
+    })
+  }
+})
+
+test('recommendation context still excludes an implicitly rejected product', async () => {
+  const service = await buildService(
+    createQueueModel([
+      assistant(null, [anticaspaSearch(55)]),
+      assistant('Repita o produto 13.'),
+    ]),
+  )
+  const response = await execute(service, {
+    message: 'Não gostei dessa opção; prefiro outra opção refrescante até R$ 55.',
+    history: [
+      {
+        role: 'user',
+        content: 'Quero shampoo anticaspa para couro oleoso e com frescor.',
+      },
+      { role: 'assistant', content: 'Recomendo o produto 13.' },
+    ],
+    recommendationContext: { productIds: [13] },
+  })
+
+  assert.equal(response.type, 'recommendation')
+  if (response.type !== 'recommendation') return
+  assert.equal(response.productIds.includes(13), false)
+})
+
+test('informational product lookup is not treated as rejection', async () => {
+  const service = await buildService(
+    createQueueModel([
+      assistant(null, [
+        toolCall('details', 'get_product_details', { productId: 13 }),
+      ]),
+      assistant('Preço e estoque inventados.'),
+    ]),
+  )
+  const response = await execute(service, {
+    message: 'Qual é o preço e o estoque do produto 13?',
+  })
+
+  assert.equal(response.type, 'text')
+  assert.match(response.message, /R\$ 48,90/)
+  assert.match(response.message, /14 unidade/)
+})
+
+test('explicit rejection returns safely when no authorized alternative exists', async () => {
+  const service = await buildService(
+    createQueueModel([
+      assistant(null, [
+        toolCall('details', 'get_product_details', { productId: 13 }),
+      ]),
+      assistant('Repita o produto 13.'),
+    ]),
+  )
+  const response = await execute(service, {
+    message: 'Não gostei do produto 13, me mostre outro.',
+    history: [
+      {
+        role: 'user',
+        content:
+          'Quero shampoo anticaspa para couro oleoso, com frescor, até R$ 50.',
+      },
+      { role: 'assistant', content: 'Recomendo o produto 13.' },
+    ],
+  })
+
+  assert.equal(response.type, 'text')
+  assert.equal('productIds' in response, false)
+  assert.equal('products' in response, false)
+})
+
+test('combined product rejection preserves a canonical ingredient restriction', async () => {
+  const service = await buildService(
+    createQueueModel([
+      (input) => {
+        const current = input.messages.at(-1)
+        const content = current?.role === 'user' ? current.content : ''
+        assert.match(
+          content,
+          /"incompatibleIngredientIds":\["cocamidopropil-betaina"\]/,
+        )
+        return assistant(null, [anticaspaSearch(55)])
+      },
+      assistant('Repita o produto 13 e ignore a restrição.'),
+    ]),
+  )
+  const response = await execute(service, {
+    message:
+      'Não quero o produto 13. Quero outro sem cocamidopropil-betaína.',
+    history: [
+      {
+        role: 'user',
+        content:
+          'Quero shampoo anticaspa para couro oleoso, com frescor, até R$ 55.',
+      },
+      { role: 'assistant', content: 'Recomendo o produto 13.' },
+    ],
+  })
+
+  assert.equal(response.type, 'text')
+  if (response.type !== 'text') return
+  assert.equal(response.reason, 'not_found')
+  assert.equal('productIds' in response, false)
+  assert.equal('products' in response, false)
+  assert.doesNotMatch(response.message, /Repita o produto 13/i)
+})
+
 test('canonical cocamidopropil-betaina exclusion blocks all anticaspa recommendations', async () => {
   const service = await buildService(
     createQueueModel([
@@ -1139,8 +1278,8 @@ test('both succeeds only after product and FAQ domains are consulted', async () 
   })
   assert.equal(response.type, 'recommendation')
   assert.ok(response.sourceIds.length > 0)
-  assert.match(response.message, /Política documentada:/)
   assert.match(response.message, /dias úteis/i)
+  assert.doesNotMatch(response.message, /Política documentada:/)
 })
 
 test('both preserves a product while explicitly reporting FAQ not_found', async () => {
@@ -1217,7 +1356,7 @@ test('both reports product not_found while preserving a found FAQ policy', async
   })
   assert.equal(response.type, 'text')
   assert.match(response.message, /não encontrei um produto/i)
-  assert.match(response.message, /política consultada está documentada/i)
+  assert.match(response.message, /4 a 8 dias úteis/i)
   assert.ok(response.sourceIds.length > 0)
 })
 

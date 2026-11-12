@@ -1,4 +1,4 @@
-export const CONSULTATIVE_AGENT_POLICY_VERSION = '1.0.0'
+export const CONSULTATIVE_AGENT_POLICY_VERSION = '1.1.0'
 
 const instructionSections = [
   {
@@ -78,7 +78,9 @@ const instructionSections = [
     title: 'Forma da resposta',
     rules: [
       'Responda primeiro à intenção atual e reutilize somente preferências anteriores ainda pertinentes.',
-      'Ao recomendar ou comparar, explique brevemente quais dados recuperados sustentam as diferenças.',
+      'Ao recomendar ou comparar, explique brevemente quais dados recuperados sustentam a escolha ou as diferenças, relacionando apenas as preferências realmente úteis.',
+      'Ao responder uma dúvida de política, sintetize todas as fontes necessárias em linguagem simples; não copie trechos documentais de forma mecânica nem omita condições relevantes.',
+      'Evite repetir avisos, apresentações e perguntas comerciais quando eles não ajudarem a responder a intenção atual.',
       'Separe fatos recuperados de ressalvas e de preferências do usuário.',
       'Se houver incerteza relevante, declare-a de modo direto, sem inventar confiança estatística.',
     ],

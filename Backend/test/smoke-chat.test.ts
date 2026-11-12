@@ -7,7 +7,9 @@ import {
   assertSmokeWorstCaseBudget,
   assertSmokeCaseEvidence,
   classifySmokeFailure,
+  createSmokeDiagnosticTracker,
   createSmokeCostGuard,
+  SMOKE_DIAGNOSTIC_STAGES,
   SMOKE_MAX_EXECUTIONS,
   SMOKE_MAX_INPUT_UNITS_PER_CALL,
   SMOKE_MAX_MODEL_CALLS_PER_EXECUTION,
@@ -241,6 +243,95 @@ test('sanitized diagnostics classify setup, guard and provider failures without 
     assert.equal(category, expected)
     assert.doesNotMatch(category, /OPENROUTER|private|payload|must-not-leak/i)
   }
+})
+
+test('stage diagnostics locate offline failures without exposing their raw errors', async (t) => {
+  const secret =
+    'OPENROUTER_API_KEY=must-not-leak C:\\private\\catalog.json prompt completo'
+  const cases = [
+    ['configuration', 'BACKEND_CONFIGURATION'],
+    ['budget_preflight', 'GUARD_CONFIGURATION'],
+    ['catalog_loading', 'CATALOG_LOADING_FAILED'],
+    ['faq_loading', 'FAQ_LOADING_FAILED'],
+    ['service_initialization', 'SERVICE_INITIALIZATION_FAILED'],
+    ['scenario_execution', 'SCENARIO_EXECUTION_FAILED'],
+    ['usage_reconciliation', 'USAGE_REPORTING'],
+    ['grounding_validation', 'GROUNDING_EVIDENCE'],
+    ['local_budget_check', 'LOCAL_BUDGET_CHECK_FAILED'],
+  ] as const
+
+  assert.deepEqual(SMOKE_DIAGNOSTIC_STAGES, [
+    'configuration',
+    'budget_preflight',
+    'catalog_loading',
+    'faq_loading',
+    'service_initialization',
+    'scenario_execution',
+    'usage_reconciliation',
+    'grounding_validation',
+    'local_budget_check',
+    'completed',
+  ])
+
+  for (const [stage, expectedCategory] of cases) {
+    await t.test(stage, () => {
+      const tracker = createSmokeDiagnosticTracker()
+      const scenarioOrdinal =
+        stage === 'scenario_execution' ||
+        stage === 'usage_reconciliation' ||
+        stage === 'grounding_validation'
+          ? 1
+          : undefined
+      tracker.enter(stage, scenarioOrdinal)
+
+      const fakeAction = () => {
+        throw new Error(secret)
+      }
+      let failure: unknown
+      try {
+        fakeAction()
+      } catch (error) {
+        failure = error
+      }
+      const diagnostic = tracker.failure(failure, 0)
+      assert.equal(diagnostic.stage, stage)
+      assert.equal(diagnostic.category, expectedCategory)
+      assert.equal(diagnostic.transportsStarted, 0)
+      assert.equal(diagnostic.completedScenarios, 0)
+      assert.equal(diagnostic.scenarioOrdinal, scenarioOrdinal)
+      assert.doesNotMatch(
+        JSON.stringify(diagnostic),
+        /OPENROUTER_API_KEY|must-not-leak|private|catalog\.json|prompt completo/i,
+      )
+    })
+  }
+})
+
+test('diagnostics preserve safe progress and only allow known termination statuses', () => {
+  const tracker = createSmokeDiagnosticTracker()
+  tracker.enter('scenario_execution', 1)
+  tracker.recordTermination('ASSISTANT_RESPONSE')
+  tracker.completeScenario()
+  tracker.enter('scenario_execution', 2)
+  tracker.recordTermination('MODEL_RATE_LIMITED')
+  tracker.recordTermination('secret-provider-status')
+
+  const diagnostic = tracker.failure(
+    new Error('credential and response body must not leak'),
+    2,
+  )
+  assert.deepEqual(diagnostic, {
+    stage: 'scenario_execution',
+    category: 'MODEL_RATE_LIMITED',
+    transportsStarted: 2,
+    completedScenarios: 1,
+    scenarioOrdinal: 2,
+    lastTerminationStatus: 'MODEL_RATE_LIMITED',
+  })
+  assert.doesNotMatch(
+    JSON.stringify(diagnostic),
+    /credential|response body|secret-provider-status/i,
+  )
 })
 
 test('requires domain-specific evidence before declaring smoke scenarios successful', () => {

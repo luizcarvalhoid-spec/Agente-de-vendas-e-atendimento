@@ -17,6 +17,46 @@ export const SMOKE_MAX_INPUT_UNITS_PER_CALL =
 
 export type SmokeCaseKind = 'product' | 'faq' | 'mixed'
 
+export const SMOKE_DIAGNOSTIC_STAGES = [
+  'configuration',
+  'budget_preflight',
+  'catalog_loading',
+  'faq_loading',
+  'service_initialization',
+  'scenario_execution',
+  'usage_reconciliation',
+  'grounding_validation',
+  'local_budget_check',
+  'completed',
+] as const
+
+export type SmokeDiagnosticStage = (typeof SMOKE_DIAGNOSTIC_STAGES)[number]
+
+export const SMOKE_ALLOWED_TERMINATION_STATUSES = [
+  'ASSISTANT_RESPONSE',
+  'MODEL_LIMIT',
+  'TOOL_ROUND_LIMIT',
+  'TOOL_CALL_LIMIT',
+  'INVALID_TOOL_BATCH',
+  'CONTEXT_LIMIT',
+  'OPERATION_TIMEOUT',
+  'MODEL_FAILED',
+  'MODEL_CONFIGURATION_INVALID',
+  'MODEL_AUTHENTICATION_FAILED',
+  'MODEL_RATE_LIMITED',
+  'MODEL_UNAVAILABLE',
+  'MODEL_TIMEOUT',
+  'MODEL_CANCELLED',
+  'MODEL_TOOL_CALLING_INCOMPATIBLE',
+  'LOCAL_BUDGET_EXHAUSTED',
+  'INVALID_MODEL_RESPONSE',
+  'INSUFFICIENT_GROUNDING',
+  'CALLER_CANCELLED',
+] as const
+
+export type SmokeTerminationStatus =
+  (typeof SMOKE_ALLOWED_TERMINATION_STATUSES)[number]
+
 export interface SmokeGroundingEvidence {
   readonly status: string
   readonly groundingRequirement: string
@@ -344,11 +384,17 @@ export type SmokeFailureCategory =
   | 'MODEL_TIMEOUT'
   | 'MODEL_CANCELLED'
   | 'LOCAL_USAGE_BUDGET'
+  | 'CATALOG_LOADING_FAILED'
+  | 'FAQ_LOADING_FAILED'
+  | 'SERVICE_INITIALIZATION_FAILED'
+  | 'SCENARIO_EXECUTION_FAILED'
+  | 'LOCAL_BUDGET_CHECK_FAILED'
   | 'UNEXPECTED_FAILURE'
 
 export function classifySmokeFailure(
   error: unknown,
   terminationStatus?: string,
+  stage?: SmokeDiagnosticStage,
 ): SmokeFailureCategory {
   if (error instanceof SmokeSetupError || error instanceof SmokeGuardError) {
     return error.code
@@ -375,21 +421,109 @@ export function classifySmokeFailure(
     case 'LOCAL_BUDGET_EXHAUSTED':
       return 'LOCAL_USAGE_BUDGET'
   }
-  if (typeof error !== 'object' || error === null || !('code' in error)) {
-    return 'UNEXPECTED_FAILURE'
+  if (typeof error === 'object' && error !== null && 'code' in error) {
+    switch (error.code) {
+      case 'INVALID_REQUEST':
+        return 'CHAT_INVALID_REQUEST'
+      case 'AI_UNAVAILABLE':
+        return 'MODEL_UNAVAILABLE'
+      case 'AI_BAD_RESPONSE':
+        return 'MODEL_INVALID_RESPONSE'
+      case 'AI_TIMEOUT':
+        return 'MODEL_TIMEOUT'
+      case 'REQUEST_CANCELLED':
+        return 'MODEL_CANCELLED'
+    }
   }
-  switch (error.code) {
-    case 'INVALID_REQUEST':
-      return 'CHAT_INVALID_REQUEST'
-    case 'AI_UNAVAILABLE':
-      return 'MODEL_UNAVAILABLE'
-    case 'AI_BAD_RESPONSE':
-      return 'MODEL_INVALID_RESPONSE'
-    case 'AI_TIMEOUT':
-      return 'MODEL_TIMEOUT'
-    case 'REQUEST_CANCELLED':
-      return 'MODEL_CANCELLED'
+  switch (stage) {
+    case 'configuration':
+      return 'BACKEND_CONFIGURATION'
+    case 'budget_preflight':
+      return 'GUARD_CONFIGURATION'
+    case 'catalog_loading':
+      return 'CATALOG_LOADING_FAILED'
+    case 'faq_loading':
+      return 'FAQ_LOADING_FAILED'
+    case 'service_initialization':
+      return 'SERVICE_INITIALIZATION_FAILED'
+    case 'scenario_execution':
+      return 'SCENARIO_EXECUTION_FAILED'
+    case 'usage_reconciliation':
+      return 'USAGE_REPORTING'
+    case 'grounding_validation':
+      return 'GROUNDING_EVIDENCE'
+    case 'local_budget_check':
+      return 'LOCAL_BUDGET_CHECK_FAILED'
     default:
       return 'UNEXPECTED_FAILURE'
+  }
+}
+
+export interface SmokeFailureDiagnostic {
+  readonly stage: SmokeDiagnosticStage
+  readonly category: SmokeFailureCategory
+  readonly transportsStarted: number
+  readonly completedScenarios: number
+  readonly scenarioOrdinal?: number
+  readonly lastTerminationStatus?: SmokeTerminationStatus
+}
+
+export interface SmokeDiagnosticTracker {
+  enter(stage: SmokeDiagnosticStage, scenarioOrdinal?: number): void
+  recordTermination(status: string): void
+  completeScenario(): void
+  failure(error: unknown, transportsStarted: number): SmokeFailureDiagnostic
+}
+
+export function createSmokeDiagnosticTracker(): SmokeDiagnosticTracker {
+  let stage: SmokeDiagnosticStage = 'configuration'
+  let scenarioOrdinal: number | undefined
+  let completedScenarios = 0
+  let lastTerminationStatus: SmokeTerminationStatus | undefined
+  const allowedTerminationStatuses = new Set<string>(
+    SMOKE_ALLOWED_TERMINATION_STATUSES,
+  )
+
+  return {
+    enter(nextStage, nextScenarioOrdinal) {
+      stage = nextStage
+      scenarioOrdinal =
+        Number.isSafeInteger(nextScenarioOrdinal) &&
+        (nextScenarioOrdinal ?? 0) > 0
+          ? nextScenarioOrdinal
+          : undefined
+    },
+
+    recordTermination(status) {
+      if (allowedTerminationStatuses.has(status)) {
+        lastTerminationStatus = status as SmokeTerminationStatus
+      }
+    },
+
+    completeScenario() {
+      completedScenarios += 1
+      scenarioOrdinal = undefined
+    },
+
+    failure(error, transportsStarted) {
+      const safeTransportsStarted =
+        Number.isSafeInteger(transportsStarted) && transportsStarted >= 0
+          ? transportsStarted
+          : 0
+      return {
+        stage,
+        category: classifySmokeFailure(
+          error,
+          lastTerminationStatus,
+          stage,
+        ),
+        transportsStarted: safeTransportsStarted,
+        completedScenarios,
+        ...(scenarioOrdinal === undefined ? {} : { scenarioOrdinal }),
+        ...(lastTerminationStatus === undefined
+          ? {}
+          : { lastTerminationStatus }),
+      }
+    },
   }
 }

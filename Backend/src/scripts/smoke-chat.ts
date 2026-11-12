@@ -14,7 +14,7 @@ import type { ChatOperationalEvent } from '../observability/chat-operational-eve
 import {
   assertSmokeWorstCaseBudget,
   assertSmokeCaseEvidence,
-  classifySmokeFailure,
+  createSmokeDiagnosticTracker,
   createSmokeCostGuard,
   SMOKE_MAX_EXECUTIONS,
   SMOKE_MAX_MODEL_CALLS_PER_EXECUTION,
@@ -22,11 +22,13 @@ import {
   SmokeGuardError,
   SmokeSetupError,
   type SmokeCaseKind,
+  type SmokeCostGuard,
   type SmokeGroundingEvidence,
 } from './smoke-chat-guards.js'
 
 const CONFIRMATION = 'I_ACCEPT_COST'
-let lastTerminationStatus: string | undefined
+const diagnostics = createSmokeDiagnosticTracker()
+let costGuard: SmokeCostGuard | undefined
 
 function requiredPositiveNumber(name: string) {
   const value = Number(process.env[name])
@@ -37,6 +39,7 @@ function requiredPositiveNumber(name: string) {
 }
 
 try {
+  diagnostics.enter('configuration')
   try {
     loadLocalEnvFile()
   } catch {
@@ -60,6 +63,7 @@ try {
     throw new SmokeSetupError('BACKEND_CONFIGURATION')
   }
 
+  diagnostics.enter('budget_preflight')
   const inputPrice = requiredPositiveNumber(
     'HIDRASPLASH_SMOKE_INPUT_USD_PER_MILLION',
   )
@@ -74,20 +78,27 @@ try {
     outputPricePerMillion: outputPrice,
     monetaryCeilingUsd: monetaryCeiling,
   })
-  const costGuard = createSmokeCostGuard({
+  const activeCostGuard = createSmokeCostGuard({
     inputPricePerMillion: inputPrice,
     outputPricePerMillion: outputPrice,
     monetaryCeilingUsd: monetaryCeiling,
   })
-  const transport = costGuard.wrapTransport(fetch)
+  costGuard = activeCostGuard
+  const transport = activeCostGuard.wrapTransport(fetch)
+
+  diagnostics.enter('catalog_loading')
+  const catalog = await loadCatalogRepository()
+
+  diagnostics.enter('faq_loading')
+  const faqDocuments = await loadFaqDocuments()
+
+  diagnostics.enter('service_initialization')
   const client = createOpenRouterClient({
     apiKey: config.openRouterApiKey,
     model: config.openRouterModel,
     maxOutputTokens: SMOKE_MAX_OUTPUT_TOKENS,
     transport,
   })
-  const catalog = await loadCatalogRepository()
-  const faqDocuments = await loadFaqDocuments()
   const chatService = createChatService({
     catalog,
     productIndex: createProductSearchIndex(catalog.listAll()),
@@ -120,10 +131,10 @@ try {
     record(event: ChatOperationalEvent) {
       if (event.type === 'model_usage') {
         usageEvents.push(event)
-        costGuard.reconcileUsage(event.reportedUsage)
+        activeCostGuard.reconcileUsage(event.reportedUsage)
       }
       if (event.type === 'orchestrator_termination') {
-        lastTerminationStatus = event.status
+        diagnostics.recordTermination(event.status)
         terminationEvents.push({
           status: event.status,
           groundingRequirement: event.groundingRequirement,
@@ -139,8 +150,10 @@ try {
     index < Math.min(cases.length, SMOKE_MAX_EXECUTIONS);
     index += 1
   ) {
+    const scenarioOrdinal = index + 1
     const before = usageEvents.length
     const terminationsBefore = terminationEvents.length
+    diagnostics.enter('scenario_execution', scenarioOrdinal)
     const result = await chatService.execute(
       {
         message: cases[index]?.message ?? '',
@@ -148,28 +161,31 @@ try {
         cart: [],
       },
       {
-        requestId: `manual-smoke-${index + 1}`,
+        requestId: `manual-smoke-${scenarioOrdinal}`,
         signal: new AbortController().signal,
         usageBudget: usageController.createExecution(),
         observer,
       },
     )
     const executionUsage = usageEvents.slice(before)
-    costGuard.assertHealthy()
+    diagnostics.enter('usage_reconciliation', scenarioOrdinal)
+    activeCostGuard.assertHealthy()
     if (
       executionUsage.length === 0 ||
       executionUsage.some((event) => !event.usageComplete)
     ) {
       throw new SmokeGuardError('USAGE_REPORTING')
     }
+    diagnostics.enter('grounding_validation', scenarioOrdinal)
     assertSmokeCaseEvidence({
       kind: cases[index]?.kind ?? 'product',
       response: result,
       termination: terminationEvents.slice(terminationsBefore).at(-1),
     })
     const termination = terminationEvents.at(-1)
+    diagnostics.completeScenario()
     console.log('Execução manual concluída.', {
-      ordinal: index + 1,
+      ordinal: scenarioOrdinal,
       scenario: cases[index]?.kind,
       modelCalls: executionUsage.length,
       productGrounded: termination?.productGrounding === 'found',
@@ -179,7 +195,8 @@ try {
     })
   }
 
-  const callsBeforeLocalDenial = costGuard.snapshot().providerCalls
+  diagnostics.enter('local_budget_check')
+  const callsBeforeLocalDenial = activeCostGuard.snapshot().providerCalls
   let locallyDenied = false
   try {
     await chatService.execute(
@@ -203,7 +220,7 @@ try {
   }
   if (
     !locallyDenied ||
-    costGuard.snapshot().providerCalls !== callsBeforeLocalDenial
+    activeCostGuard.snapshot().providerCalls !== callsBeforeLocalDenial
   ) {
     throw new Error('A verificação local de orçamento falhou.')
   }
@@ -216,8 +233,9 @@ try {
     }),
     { inputTokens: 0, outputTokens: 0 },
   )
-  costGuard.assertHealthy()
-  const costSnapshot = costGuard.snapshot()
+  activeCostGuard.assertHealthy()
+  const costSnapshot = activeCostGuard.snapshot()
+  diagnostics.enter('completed')
   console.log('Smoke manual concluído.', {
     executions: SMOKE_MAX_EXECUTIONS,
     providerCalls: costSnapshot.providerCalls,
@@ -229,8 +247,9 @@ try {
     worstCaseReservedCostUsd,
   })
 } catch (error) {
-  console.error('Smoke manual interrompido.', {
-    category: classifySmokeFailure(error, lastTerminationStatus),
-  })
+  console.error(
+    'Smoke manual interrompido.',
+    diagnostics.failure(error, costGuard?.snapshot().providerCalls ?? 0),
+  )
   process.exitCode = 1
 }

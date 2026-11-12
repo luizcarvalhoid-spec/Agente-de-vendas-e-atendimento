@@ -298,6 +298,7 @@ function inferSensoryTerms(message: string): readonly string[] | undefined {
 }
 
 function extractAvoidedIngredientTerms(message: string) {
+  if (explicitRejectedProductIds(message).size > 0) return []
   const normalized = normalize(message).replace(/[^a-z0-9 -]+/g, ' ')
   const match = normalized.match(
     /\b(?:nao quero|evitar|sem|incompativel com)\s+([a-z0-9-]+(?:\s+[a-z0-9-]+){0,3})\s*$/,
@@ -659,11 +660,18 @@ function controlledConsultativeQuestion(
 }
 
 function explicitRejectedProductIds(message: string) {
-  const matches = normalize(message).matchAll(
+  const normalized = normalize(message)
+  const patterns = [
     /\b(?:nao\s+(?:quero|considere|use)|sem)\s+(?:mais\s+)?(?:o\s+)?produto\s+(?:id\s*)?(\d{1,6})\b/g,
-  )
+    /\bnao\s+gostei\s+(?:mais\s+)?do\s+produto\s+(?:id\s*)?(\d{1,6})\b/g,
+    /\bnao\s+recomende\s+(?:mais\s+)?(?:o\s+)?produto\s+(?:id\s*)?(\d{1,6})\b/g,
+  ]
   return new Set(
-    Array.from(matches, (match) => Number(match[1])).filter(Number.isSafeInteger),
+    patterns.flatMap((pattern) =>
+      Array.from(normalized.matchAll(pattern), (match) => Number(match[1])).filter(
+        Number.isSafeInteger,
+      ),
+    ),
   )
 }
 

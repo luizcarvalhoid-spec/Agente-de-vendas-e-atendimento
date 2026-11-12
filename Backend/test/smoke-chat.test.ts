@@ -1,8 +1,18 @@
 import assert from 'node:assert/strict'
 import { Buffer } from 'node:buffer'
+import { randomUUID } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
 import test from 'node:test'
+import { ZodError } from 'zod'
 
+import { createChatService } from '../src/agent/chat-service.js'
+import { createProductSearchIndex } from '../src/agent/tools/product-tools.js'
 import { CHAT_MODEL_INPUT_MARGIN_UNITS } from '../src/agent/usage-budget-controller.js'
+import { loadCatalogRepository } from '../src/catalog/catalog-repository.js'
+import { chatResponseSchema } from '../src/contracts/chat.js'
+import { loadFaqDocuments } from '../src/knowledge/faq-content-loader.js'
+import { createFaqSearchIndex } from '../src/knowledge/faq-search.js'
+import type { ChatOperationalEvent } from '../src/observability/chat-operational-events.js'
 import {
   assertSmokeWorstCaseBudget,
   assertSmokeCaseEvidence,
@@ -19,6 +29,7 @@ import {
   SmokeGuardError,
   SmokeSetupError,
 } from '../src/scripts/smoke-chat-guards.js'
+import { createMvpDeterministicModel } from './helpers/mvp-deterministic-model.js'
 
 function requestBody(content = 'consulta') {
   return JSON.stringify({
@@ -332,6 +343,91 @@ test('diagnostics preserve safe progress and only allow known termination status
     JSON.stringify(diagnostic),
     /credential|response body|secret-provider-status/i,
   )
+})
+
+test('smoke generates UUID request IDs for scenarios and the local budget check', async () => {
+  const source = await readFile(
+    new URL('../src/scripts/smoke-chat.ts', import.meta.url),
+    'utf8',
+  )
+  const requestIdInitializers = source.match(/requestId: randomUUID\(\)/g) ?? []
+
+  assert.equal(requestIdInitializers.length, 2)
+  assert.doesNotMatch(source, /requestId:\s*['`]manual-smoke/)
+
+  for (const requestId of [randomUUID(), randomUUID()]) {
+    assert.doesNotThrow(() =>
+      chatResponseSchema.parse({
+        type: 'text',
+        message: 'Resposta demonstrativa.',
+        sourceIds: [],
+        requestId,
+      }),
+    )
+  }
+})
+
+test('completed deterministic smoke response rejects the old ID and accepts a generated UUID', async () => {
+  const [catalog, faqDocuments] = await Promise.all([
+    loadCatalogRepository(),
+    loadFaqDocuments(),
+  ])
+  const service = createChatService({
+    catalog,
+    productIndex: createProductSearchIndex(catalog.listAll()),
+    faqIndex: createFaqSearchIndex(faqDocuments),
+    faqDocuments,
+    model: createMvpDeterministicModel(),
+    maxModelCalls: SMOKE_MAX_MODEL_CALLS_PER_EXECUTION,
+    maxOutputTokens: SMOKE_MAX_OUTPUT_TOKENS,
+  })
+  const input = {
+    message:
+      'Quero um shampoo anticaspa para couro cabeludo oleoso, com sensação refrescante, até R$ 50.',
+    history: [],
+    cart: [],
+  }
+
+  async function execute(requestId: string) {
+    const terminations: ChatOperationalEvent[] = []
+    const operation = service.execute(input, {
+      requestId,
+      signal: new AbortController().signal,
+      observer: {
+        record(event) {
+          if (event.type === 'orchestrator_termination') {
+            terminations.push(event)
+          }
+        },
+      },
+    })
+    return { operation, terminations }
+  }
+
+  const legacy = await execute('manual-smoke-1')
+  await assert.rejects(
+    legacy.operation,
+    (error: unknown) =>
+      error instanceof ZodError &&
+      error.issues.some((issue) => issue.path.join('.') === 'requestId'),
+  )
+  const legacyTermination = legacy.terminations.at(-1)
+  assert.equal(legacyTermination?.type, 'orchestrator_termination')
+  assert.ok(legacyTermination?.type === 'orchestrator_termination')
+  assert.equal(legacyTermination.status, 'ASSISTANT_RESPONSE')
+  assert.equal(legacyTermination.modelCalls, 2)
+
+  const requestId = randomUUID()
+  const current = await execute(requestId)
+  const response = chatResponseSchema.parse(await current.operation)
+  const currentTermination = current.terminations.at(-1)
+  assert.equal(currentTermination?.type, 'orchestrator_termination')
+  assert.ok(currentTermination?.type === 'orchestrator_termination')
+  assert.equal(currentTermination.status, 'ASSISTANT_RESPONSE')
+  assert.equal(currentTermination.modelCalls, 2)
+  assert.equal(response.requestId, requestId)
+  assert.equal(response.type, 'recommendation')
+  assert.deepEqual(response.productIds, [13])
 })
 
 test('requires domain-specific evidence before declaring smoke scenarios successful', () => {

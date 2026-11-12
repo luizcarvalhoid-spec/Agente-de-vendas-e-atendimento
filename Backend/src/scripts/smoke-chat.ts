@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto'
+
 import { createChatService } from '../agent/chat-service.js'
 import { createOpenRouterAgentModel } from '../agent/openrouter/openrouter-agent-model.js'
 import { createOpenRouterClient } from '../agent/openrouter/openrouter-client.js'
@@ -161,7 +163,7 @@ try {
         cart: [],
       },
       {
-        requestId: `manual-smoke-${scenarioOrdinal}`,
+        requestId: randomUUID(),
         signal: new AbortController().signal,
         usageBudget: usageController.createExecution(),
         observer,
@@ -207,7 +209,7 @@ try {
         cart: [],
       },
       {
-        requestId: 'manual-smoke-local-budget',
+        requestId: randomUUID(),
         signal: new AbortController().signal,
         usageBudget: createUsageBudgetController({
           executionBudgetUnits: 1_000,

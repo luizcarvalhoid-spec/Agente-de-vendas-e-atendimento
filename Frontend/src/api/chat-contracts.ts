@@ -10,6 +10,7 @@ export const CHAT_MAX_MESSAGE_CHARACTERS = 4_000
 export const CHAT_MAX_HISTORY_MESSAGES = 10
 export const CHAT_MAX_CONVERSATION_BYTES = 32_000
 export const CHAT_MAX_SOURCES = 5
+export const CHAT_MAX_RECOMMENDED_PRODUCT_REFERENCES = 2
 
 export interface ChatHistoryMessage {
   role: 'user' | 'assistant'
@@ -20,6 +21,11 @@ export interface ChatRequest {
   message: string
   sessionId: string
   history: ChatHistoryMessage[]
+  recommendationContext?: ChatRecommendationContext
+}
+
+export interface ChatRecommendationContext {
+  productIds: number[]
 }
 
 export interface ChatProductCard {
@@ -249,7 +255,11 @@ function isChatHistoryMessage(value: unknown): value is ChatHistoryMessage {
 export function parseChatRequest(value: unknown): ChatRequest | undefined {
   if (
     !isRecord(value) ||
-    !hasOnlyKeys(value, ['message', 'sessionId', 'history']) ||
+    !hasOnlyKeys(
+      value,
+      ['message', 'sessionId', 'history'],
+      ['recommendationContext'],
+    ) ||
     !isBoundedText(value.message) ||
     typeof value.sessionId !== 'string' ||
     value.sessionId.length < 1 ||
@@ -260,6 +270,26 @@ export function parseChatRequest(value: unknown): ChatRequest | undefined {
     !value.history.every(isChatHistoryMessage)
   ) {
     return undefined
+  }
+
+  let recommendationContext: ChatRecommendationContext | undefined
+  if (value.recommendationContext !== undefined) {
+    if (
+      !isRecord(value.recommendationContext) ||
+      !hasOnlyKeys(value.recommendationContext, ['productIds']) ||
+      !Array.isArray(value.recommendationContext.productIds) ||
+      value.recommendationContext.productIds.length < 1 ||
+      value.recommendationContext.productIds.length >
+        CHAT_MAX_RECOMMENDED_PRODUCT_REFERENCES ||
+      !value.recommendationContext.productIds.every(isPositiveInteger) ||
+      new Set(value.recommendationContext.productIds).size !==
+        value.recommendationContext.productIds.length
+    ) {
+      return undefined
+    }
+    recommendationContext = {
+      productIds: [...value.recommendationContext.productIds],
+    }
   }
 
   for (let index = 1; index < value.history.length; index += 1) {
@@ -278,6 +308,7 @@ export function parseChatRequest(value: unknown): ChatRequest | undefined {
     message: value.message,
     sessionId: value.sessionId,
     history: value.history,
+    ...(recommendationContext ? { recommendationContext } : {}),
   }
   if (
     new TextEncoder().encode(

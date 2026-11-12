@@ -4,6 +4,7 @@ import {
   CHAT_MAX_MESSAGE_CHARACTERS,
   isChatResponse,
   type ChatHistoryMessage,
+  type ChatRecommendationContext,
   type ChatResponse,
 } from '../api/chat-contracts'
 
@@ -86,6 +87,35 @@ export function buildChatHistory(
   }
 
   return []
+}
+
+function explicitlyInvalidatesProductReference(message: string) {
+  const normalized = message
+    .normalize('NFKD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLocaleLowerCase('pt-BR')
+  return /\b(?:agora quero|mudei para|troquei para|outro|outra|nao quero mais esse|nao quero mais esta)\b.*\b(?:produto|shampoo|condicionador|mascara|finalizador|sabonete|oleo|kit)\b/.test(
+    normalized,
+  )
+}
+
+export function buildRecommendationContext(
+  turns: readonly CompletedTurn[],
+): ChatRecommendationContext | undefined {
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    const turn = turns[index]
+    if (!turn) continue
+    if (
+      turn.response.type === 'recommendation' ||
+      turn.response.type === 'comparison'
+    ) {
+      return { productIds: [...turn.response.productIds] }
+    }
+    if (explicitlyInvalidatesProductReference(turn.userMessage)) {
+      return undefined
+    }
+  }
+  return undefined
 }
 
 export function loadChatSession(

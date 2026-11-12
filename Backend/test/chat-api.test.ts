@@ -63,7 +63,18 @@ test('POST /api/chat accepts the strict contract and preserves request lifecycle
 })
 
 test('POST /api/chat rejects malformed, excessive and client-authoritative input', async (t) => {
-  const app = await buildTestApp({ chatService: textService() })
+  let serviceCalls = 0
+  const app = await buildTestApp({
+    chatService: textService(async (_input, execution) => {
+      serviceCalls += 1
+      return {
+        type: 'text',
+        message: 'Não deveria executar.',
+        sourceIds: [],
+        requestId: execution.requestId,
+      }
+    }),
+  })
   t.after(() => app.close())
 
   const invalidPayloads = [
@@ -79,6 +90,14 @@ test('POST /api/chat rejects malformed, excessive and client-authoritative input
     { message: 'Oi', groundingRequirement: 'not_required' },
     { message: 'Oi', model: 'free-provider-model' },
     { message: 'Oi', toolResults: [{ productId: 13 }] },
+    {
+      message: 'Oi',
+      recommendationContext: { productIds: [13], price: 0.01 },
+    },
+    {
+      message: 'Oi',
+      recommendationContext: { productIds: [13, 13] },
+    },
   ]
 
   for (const payload of invalidPayloads) {
@@ -103,6 +122,7 @@ test('POST /api/chat rejects malformed, excessive and client-authoritative input
     code: 'HTTP_ERROR',
     message: 'Requisição inválida.',
   })
+  assert.equal(serviceCalls, 0)
 })
 
 test('missing AI configuration leaves health, catalog and images available', async (t) => {

@@ -137,6 +137,15 @@ describe('chat request contract', () => {
       ],
     }
     expect(parseChatRequest(request)).toEqual(request)
+    expect(
+      parseChatRequest({
+        ...request,
+        recommendationContext: { productIds: [13] },
+      }),
+    ).toEqual({
+      ...request,
+      recommendationContext: { productIds: [13] },
+    })
     expect(parseChatRequest({ ...request, cart: [] })).toBeUndefined()
   })
 
@@ -156,6 +165,24 @@ describe('chat request contract', () => {
         { role: 'assistant', content: 'a' },
         { role: 'assistant', content: 'b' },
       ],
+    },
+    {
+      message: 'ok',
+      sessionId: 'demo_1',
+      history: [],
+      recommendationContext: { productIds: [] },
+    },
+    {
+      message: 'ok',
+      sessionId: 'demo_1',
+      history: [],
+      recommendationContext: { productIds: [13, 13] },
+    },
+    {
+      message: 'ok',
+      sessionId: 'demo_1',
+      history: [],
+      recommendationContext: { productIds: [13], price: 0.01 },
     },
   ])('rejects invalid request %#', (value) => {
     expect(parseChatRequest(value)).toBeUndefined()

@@ -1,4 +1,10 @@
 import type { ProductDataClassification } from '../api/contracts'
+import {
+  calculateDemoCommercialTotals,
+  DEMO_FREE_SHIPPING_THRESHOLD_CENTS,
+  DEMO_STANDARD_SHIPPING_CENTS,
+  demoPriceToCents,
+} from '../../../Backend/src/commercial/demo-commercial-rules.ts'
 
 export const CART_STORAGE_KEY = 'hidrasplash:cart:v1'
 export const CART_STORAGE_VERSION = 1
@@ -6,8 +12,9 @@ export const CART_MAX_DISTINCT_PRODUCTS = 20
 export const CART_MAX_QUANTITY_PER_PRODUCT = 20
 export const CART_MAX_STORAGE_BYTES = 16 * 1024
 export const CART_MAX_SLUG_CHARACTERS = 256
-export const CART_FREE_SHIPPING_THRESHOLD_CENTS = 10_000
-export const CART_STANDARD_SHIPPING_CENTS = 1_290
+export const CART_FREE_SHIPPING_THRESHOLD_CENTS =
+  DEMO_FREE_SHIPPING_THRESHOLD_CENTS
+export const CART_STANDARD_SHIPPING_CENTS = DEMO_STANDARD_SHIPPING_CENTS
 export const CART_VALIDATION_TIMEOUT_MS = 5_000
 
 const normalizedSlugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
@@ -172,34 +179,20 @@ export function isValidCartQuantity(value: unknown): value is number {
 }
 
 export function priceToCents(price: number): number | undefined {
-  if (!Number.isFinite(price) || price < 0) return undefined
-
-  const cents = Math.round((price + Number.EPSILON) * 100)
-  return Number.isSafeInteger(cents) && cents >= 0 ? cents : undefined
+  return demoPriceToCents(price)
 }
 
 export function calculateCartTotals(items: readonly CartItem[]): CartTotals {
-  let totalUnits = 0
-  let subtotalCents = 0
-
-  for (const item of items) {
-    if (item.status !== 'ready') continue
-    totalUnits += item.quantity
-    subtotalCents += item.product.unitPriceCents * item.quantity
-  }
-
-  const shippingCents =
-    totalUnits === 0
-      ? 0
-      : subtotalCents > CART_FREE_SHIPPING_THRESHOLD_CENTS
-        ? 0
-        : CART_STANDARD_SHIPPING_CENTS
+  const totals = calculateDemoCommercialTotals(
+    items.flatMap((item) =>
+      item.status === 'ready'
+        ? [{ unitPriceCents: item.product.unitPriceCents, quantity: item.quantity }]
+        : [],
+    ),
+  )
 
   return {
-    totalUnits,
-    subtotalCents,
-    shippingCents,
-    totalCents: subtotalCents + shippingCents,
+    ...totals,
     isPartial: items.some((item) => item.status === 'problem'),
   }
 }

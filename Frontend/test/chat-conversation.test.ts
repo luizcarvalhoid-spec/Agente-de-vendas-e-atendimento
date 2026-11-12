@@ -5,6 +5,7 @@ import {
   CHAT_MAX_COMPLETED_TURNS,
   CHAT_SESSION_STORAGE_KEY,
   buildChatHistory,
+  buildRecommendationContext,
   clearChatSession,
   createChatSessionId,
   loadChatSession,
@@ -26,6 +27,40 @@ function turn(index: number, text = `mensagem ${index}`): CompletedTurn {
     userMessage: text,
     response: response(`resposta ${index}`),
     restored: false,
+  }
+}
+
+function recommendationTurn(index: number, productId: number): CompletedTurn {
+  return {
+    ...turn(index),
+    response: {
+      type: 'recommendation',
+      message: `Recomendação ${productId}`,
+      productIds: [productId],
+      products: [
+        {
+          id: productId,
+          slug: `produto-${productId}`,
+          name: `Produto ${productId}`,
+          brand: 'HidraSplash',
+          isDemo: true,
+          category: 'shampoos',
+          subcategory: 'anticaspa',
+          shortDescription: 'Produto demonstrativo.',
+          price: 48.9,
+          stock: 1,
+          imageUrl: '/api/catalog/images/produto.jpg',
+          dataClassification: {
+            commercial: 'fictional-demo',
+            compatibility: 'commercial-positioning',
+            formulation: 'synthetic-test-data',
+            safety: 'not-evaluated',
+          },
+        },
+      ],
+      sourceIds: [],
+      requestId: '00000000-0000-4000-8000-000000000001',
+    },
   }
 }
 
@@ -74,6 +109,29 @@ describe('canonical chat history', () => {
         JSON.stringify({ history, message: 'mensagem atual' }),
       ).byteLength,
     ).toBeLessThanOrEqual(32_000)
+  })
+
+  test('derives only product IDs from the latest structured recommendation', () => {
+    const first = recommendationTurn(1, 13)
+    const faq = turn(2, 'Qual é o prazo de entrega?')
+    const latest = recommendationTurn(3, 9)
+
+    expect(buildRecommendationContext([first, faq])).toEqual({
+      productIds: [13],
+    })
+    expect(buildRecommendationContext([first, faq, latest])).toEqual({
+      productIds: [9],
+    })
+  })
+
+  test('invalidates an older product after an explicit change without a new recommendation', () => {
+    const changed = {
+      ...turn(2, 'Agora quero outro shampoo.'),
+      response: response('Qual perfil você procura?'),
+    }
+    expect(
+      buildRecommendationContext([recommendationTurn(1, 13), changed]),
+    ).toBeUndefined()
   })
 })
 

@@ -8,6 +8,10 @@ import type {
   ScalpType,
 } from '../catalog/product-schema.js'
 import {
+  calculateDemoCommercialTotals,
+  demoPriceToCents,
+} from '../commercial/demo-commercial-rules.js'
+import {
   CHAT_MAX_SOURCES,
   chatProductCardSchema,
   chatRequestSchema,
@@ -642,6 +646,125 @@ function explicitInformationalProductId(message: string) {
   return match?.[1] ? Number(match[1]) : undefined
 }
 
+function isDemonstrativeQuoteIntent(message: string) {
+  const normalized = normalize(message)
+  return (
+    /\bfrete\b/.test(normalized) &&
+    (/\b(?:total|valor final)\b/.test(normalized) ||
+      /\bquanto\s+(?:ficaria|fica|daria|da|custaria|custa)\b/.test(
+        normalized,
+      ))
+  )
+}
+
+function formatDemoCurrency(cents: number) {
+  return `R$ ${(cents / 100).toFixed(2).replace('.', ',')}`
+}
+
+function hasCanonicalShippingPolicies(
+  faqDocuments: ReadonlyMap<string, FaqDocument>,
+  requiresStandardShipping: boolean,
+) {
+  const freeShipping = faqDocuments.get('faq-002')
+  if (
+    freeShipping?.classification !== 'fictional-demo' ||
+    !freeShipping.content.includes('maior que R$ 100,00') ||
+    !freeShipping.content.includes('R$ 100,00 exatos não recebe frete grátis')
+  ) {
+    return false
+  }
+  if (!requiresStandardShipping) return true
+
+  const standardShipping = faqDocuments.get('faq-003')
+  return Boolean(
+    standardShipping?.classification === 'fictional-demo' &&
+      standardShipping.content.includes('até R$ 100,00') &&
+      standardShipping.content.includes('R$ 12,90'),
+  )
+}
+
+function contextualQuoteResponse(
+  request: ChatRequest,
+  requestId: string,
+  catalog: CatalogRepository,
+  faqDocuments: ReadonlyMap<string, FaqDocument>,
+): ChatResponse | undefined {
+  if (!isDemonstrativeQuoteIntent(request.message)) return undefined
+
+  const explicitId = explicitInformationalProductId(request.message)
+  const contextualIds = request.recommendationContext?.productIds ?? []
+  const rejectsPreviousReference =
+    explicitId === undefined &&
+    /\b(?:outro|outra|produto diferente|shampoo diferente)\b/.test(
+      normalize(request.message),
+    )
+  if (
+    rejectsPreviousReference ||
+    (explicitId === undefined && contextualIds.length !== 1)
+  ) {
+    return controlledConsultativeQuestion(
+      'Qual produto você quer usar nessa cotação demonstrativa? Informe um único ID de produto.',
+      requestId,
+    )
+  }
+
+  const productId = explicitId ?? contextualIds[0]
+  const product =
+    productId === undefined ? undefined : catalog.findById(productId)
+  if (!product || product.stock <= 0) {
+    return chatResponseSchema.parse({
+      type: 'text',
+      message:
+        'Não consegui revalidar esse produto com estoque no catálogo demonstrativo atual. Informe outro ID para uma nova cotação.',
+      reason: 'not_found',
+      sourceIds: [],
+      requestId,
+    })
+  }
+
+  const unitPriceCents = demoPriceToCents(product.price)
+  if (unitPriceCents === undefined) {
+    return chatResponseSchema.parse({
+      type: 'text',
+      message:
+        'Não foi possível validar o preço atual desse produto para uma cotação demonstrativa.',
+      reason: 'unable_to_verify',
+      sourceIds: [],
+      requestId,
+    })
+  }
+  const totals = calculateDemoCommercialTotals([
+    { unitPriceCents, quantity: 1 },
+  ])
+  const requiredSourceIds =
+    totals.shippingCents === 0
+      ? ['faq-002']
+      : ['faq-002', 'faq-003']
+  if (
+    !hasCanonicalShippingPolicies(faqDocuments, totals.shippingCents !== 0)
+  ) {
+    return chatResponseSchema.parse({
+      type: 'text',
+      message:
+        'Consegui validar o produto, mas não a política de frete necessária para calcular o total demonstrativo.',
+      reason: 'unable_to_verify',
+      sourceIds: [],
+      requestId,
+    })
+  }
+
+  const shippingText =
+    totals.shippingCents === 0
+      ? 'o frete demonstrativo seria grátis'
+      : `o frete demonstrativo seria de ${formatDemoCurrency(totals.shippingCents)}`
+  return chatResponseSchema.parse({
+    type: 'text',
+    message: `Claro! ${product.name} custa ${formatDemoCurrency(unitPriceCents)} no catálogo atual. Para uma unidade, ${shippingText}, então o total demonstrativo ficaria em ${formatDemoCurrency(totals.totalCents)}. Esta é apenas uma simulação fictícia, sem compra, cobrança, reserva ou entrega real. O produto não foi adicionado ao carrinho.`,
+    sourceIds: requiredSourceIds,
+    requestId,
+  })
+}
+
 function controlledProductInformation(
   request: ChatRequest,
   result: ToolOrchestratorResult,
@@ -914,6 +1037,14 @@ export function createChatService(
         execution.requestId,
       )
       if (clinicalResponse) return clinicalResponse
+
+      const quoteResponse = contextualQuoteResponse(
+        request,
+        execution.requestId,
+        options.catalog,
+        faqDocuments,
+      )
+      if (quoteResponse) return quoteResponse
 
       const plan = preserveHistoricalRecommendationIntent(
         request,

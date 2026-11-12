@@ -99,6 +99,7 @@ async function buildService(
   overrides: {
     catalog?: CatalogRepository
     faqIndex?: FaqSearchIndex
+    faqDocuments?: Awaited<ReturnType<typeof loadFaqDocuments>>
     timeoutMs?: number
   } = {},
 ) {
@@ -108,7 +109,7 @@ async function buildService(
     catalog,
     productIndex: createProductSearchIndex(catalog.listAll()),
     faqIndex: overrides.faqIndex ?? base.faqIndex,
-    faqDocuments: base.faqDocuments,
+    faqDocuments: overrides.faqDocuments ?? base.faqDocuments,
     model,
     timeoutMs: overrides.timeoutMs,
   })
@@ -140,6 +141,34 @@ const anticaspaSearch = (maxPrice = 50) =>
     requireInStock: true,
     limit: 5,
   })
+
+async function catalogWithProduct13(
+  update: ((product: Product) => Product | undefined),
+): Promise<CatalogRepository> {
+  const base = (await canonical()).catalog
+  const products = base.listAll().flatMap((product) => {
+    if (product.id !== 13) return [product]
+    const updated = update(product)
+    return updated ? [updated] : []
+  })
+  return {
+    listAll: () => products,
+    list: (query) => base.list(query),
+    findById: (id) => products.find((product) => product.id === id),
+    findBySlug: (slug) => products.find((product) => product.slug === slug),
+    findImage: (publicPath) => base.findImage(publicPath),
+    getStats: () => base.getStats(),
+  }
+}
+
+function neverCalledModel(onCall: () => void): AgentModelPort {
+  return {
+    async complete() {
+      onCall()
+      throw new Error('Model should not be called')
+    },
+  }
+}
 
 test('planner keeps conversation narrow and grounds indirect commercial intents', () => {
   const cases = [
@@ -737,6 +766,195 @@ test('elliptical product preference plus policy question preserves both groundin
   })
   assert.equal(response.type, 'recommendation')
   assert.ok(response.sourceIds.length > 0)
+})
+
+test('three-turn journey quotes the last canonical recommendation without another model call', async () => {
+  const queued = createQueueModel([
+    assistant(null, [anticaspaSearch(50)]),
+    assistant('Recomendação fundamentada.'),
+    assistant(null, [
+      toolCall('faq', 'search_faq', { query: 'prazo de entrega' }),
+    ]),
+    assistant('Política fundamentada.'),
+  ])
+  let modelCalls = 0
+  const model: AgentModelPort = {
+    complete(input) {
+      modelCalls += 1
+      return queued.complete(input)
+    },
+  }
+  const service = await buildService(model)
+  const firstMessage =
+    'Quero shampoo anticaspa para couro oleoso, com frescor, até R$ 50.'
+  const first = await execute(service, { message: firstMessage })
+  assert.equal(first.type, 'recommendation')
+  assert.deepEqual(first.type === 'recommendation' ? first.productIds : [], [13])
+
+  const secondMessage = 'Qual é o prazo demonstrativo de entrega?'
+  const second = await execute(service, {
+    message: secondMessage,
+    history: [
+      { role: 'user', content: firstMessage },
+      { role: 'assistant', content: first.message },
+    ],
+  })
+  assert.equal(second.type, 'text')
+  assert.ok(second.sourceIds.length > 0)
+  assert.equal(modelCalls, 4)
+
+  const third = await execute(service, {
+    message:
+      'Se eu comprar apenas esse shampoo que você me recomendou, quanto ficaria o total com frete?',
+    history: [
+      { role: 'user', content: firstMessage },
+      { role: 'assistant', content: first.message },
+      { role: 'user', content: secondMessage },
+      { role: 'assistant', content: second.message },
+    ],
+    recommendationContext: { productIds: [13] },
+  })
+  assert.equal(third.type, 'text')
+  assert.deepEqual(third.sourceIds, ['faq-002', 'faq-003'])
+  assert.match(third.message, /R\$ 48,90/)
+  assert.match(third.message, /R\$ 12,90/)
+  assert.match(third.message, /R\$ 61,80/)
+  assert.match(third.message, /simulação fictícia/i)
+  assert.match(third.message, /não foi adicionado ao carrinho/i)
+  assert.equal(modelCalls, 4)
+})
+
+test('ordinary mixed grounding still rejects a model that consults only one domain', async (t) => {
+  const cases = [
+    [assistant(null, [anticaspaSearch(50)]), 'produto'],
+    [
+      assistant(null, [
+        toolCall('faq-only', 'search_faq', { query: 'prazo de entrega' }),
+      ]),
+      'FAQ',
+    ],
+  ] as const
+
+  for (const [firstStep, label] of cases) {
+    await t.test(label, async () => {
+      const service = await buildService(
+        createQueueModel([
+          firstStep,
+          assistant('Resposta final sem os dois domínios.'),
+        ]),
+      )
+      await assert.rejects(
+        () =>
+          execute(service, {
+            message:
+              'Quero shampoo anticaspa para couro oleoso até R$ 50 e saber o prazo de entrega.',
+          }),
+        (error: unknown) =>
+          error instanceof ChatServiceError && error.code === 'AI_BAD_RESPONSE',
+      )
+    })
+  }
+})
+
+test('contextual quote clarifies missing, ambiguous or explicitly changed references', async () => {
+  let modelCalls = 0
+  const service = await buildService(neverCalledModel(() => modelCalls += 1))
+  const message = 'Quanto ficaria o total com frete desse shampoo?'
+
+  const missing = await execute(service, { message })
+  const ambiguous = await execute(service, {
+    message,
+    recommendationContext: { productIds: [9, 13] },
+  })
+  const changed = await execute(service, {
+    message: 'Quanto ficaria o total com frete de outro shampoo?',
+    recommendationContext: { productIds: [13] },
+  })
+  for (const response of [missing, ambiguous, changed]) {
+    assert.equal(response.type, 'text')
+    assert.equal(response.type === 'text' ? response.reason : undefined, 'clarification')
+    assert.deepEqual(response.sourceIds, [])
+  }
+  assert.equal(modelCalls, 0)
+})
+
+test('an explicit current product replaces stale recommendation context in a quote', async () => {
+  let modelCalls = 0
+  const service = await buildService(neverCalledModel(() => modelCalls += 1))
+  const response = await execute(service, {
+    message: 'Quanto ficaria o total do produto 9 com frete?',
+    recommendationContext: { productIds: [13] },
+  })
+
+  assert.equal(response.type, 'text')
+  assert.match(response.message, /R\$ 46,90/)
+  assert.match(response.message, /R\$ 59,80/)
+  assert.equal(modelCalls, 0)
+})
+
+test('contextual quote revalidates removal, stock, price and required FAQ sources', async (t) => {
+  await t.test('removed product', async () => {
+    let modelCalls = 0
+    const catalog = await catalogWithProduct13(() => undefined)
+    const service = await buildService(neverCalledModel(() => modelCalls += 1), {
+      catalog,
+    })
+    const response = await execute(service, {
+      message: 'Quanto fica o total com frete desse shampoo?',
+      recommendationContext: { productIds: [13] },
+    })
+    assert.equal(response.type === 'text' ? response.reason : undefined, 'not_found')
+    assert.equal(modelCalls, 0)
+  })
+
+  await t.test('out of stock product', async () => {
+    const catalog = await catalogWithProduct13((product) => ({
+      ...product,
+      stock: 0,
+    }))
+    const service = await buildService(neverCalledModel(() => assert.fail()), {
+      catalog,
+    })
+    const response = await execute(service, {
+      message: 'Quanto fica o total com frete desse shampoo?',
+      recommendationContext: { productIds: [13] },
+    })
+    assert.equal(response.type === 'text' ? response.reason : undefined, 'not_found')
+  })
+
+  await t.test('current price', async () => {
+    const catalog = await catalogWithProduct13((product) => ({
+      ...product,
+      price: 52.3,
+    }))
+    const service = await buildService(neverCalledModel(() => assert.fail()), {
+      catalog,
+    })
+    const response = await execute(service, {
+      message: 'Quanto fica o total com frete desse shampoo?',
+      recommendationContext: { productIds: [13] },
+    })
+    assert.match(response.message, /R\$ 52,30/)
+    assert.match(response.message, /R\$ 65,20/)
+  })
+
+  await t.test('missing freight policy', async () => {
+    const base = await canonical()
+    const service = await buildService(neverCalledModel(() => assert.fail()), {
+      faqDocuments: base.faqDocuments.filter(
+        (document) => document.sourceId !== 'faq-003',
+      ),
+    })
+    const response = await execute(service, {
+      message: 'Quanto fica o total com frete desse shampoo?',
+      recommendationContext: { productIds: [13] },
+    })
+    assert.equal(
+      response.type === 'text' ? response.reason : undefined,
+      'unable_to_verify',
+    )
+    assert.deepEqual(response.sourceIds, [])
+  })
 })
 
 test('changing category does not inherit incompatible scalp or sensory preferences', async () => {

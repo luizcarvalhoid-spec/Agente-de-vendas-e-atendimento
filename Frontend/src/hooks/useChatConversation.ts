@@ -4,6 +4,7 @@ import { ApiRequestError, sendChat } from '../api/client'
 import { CHAT_MAX_MESSAGE_CHARACTERS } from '../api/chat-contracts'
 import {
   buildChatHistory,
+  buildRecommendationContext,
   clearChatSession,
   createChatSessionId,
   createCompletedTurnId,
@@ -230,10 +231,14 @@ export function useChatConversation() {
     setFailure(undefined)
     setPending({ id, message: normalized })
 
+    const recommendationContext = buildRecommendationContext(turnsRef.current)
     const request = {
       message: normalized,
       sessionId: sessionIdRef.current,
       history: buildChatHistory(turnsRef.current, normalized),
+      ...(recommendationContext
+        ? { recommendationContext }
+        : {}),
     }
     void sendChat(request, controller.signal)
       .then((response) => {

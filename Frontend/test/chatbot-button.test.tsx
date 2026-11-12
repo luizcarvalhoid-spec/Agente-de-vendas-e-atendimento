@@ -217,6 +217,43 @@ describe('ChatbotButton', () => {
     expect(JSON.stringify(secondBody)).not.toContain('Olá! Sou a assistente')
   })
 
+  test('sends only canonical product IDs from the latest recommendation on follow-ups', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        successfulResponse({
+          type: 'recommendation',
+          message: 'Recomendo o shampoo demonstrativo.',
+          productIds: [13],
+          products: [chatProduct],
+          sourceIds: [],
+          requestId,
+        }),
+      )
+      .mockResolvedValueOnce(apiResponse('Política demonstrativa de frete.'))
+      .mockResolvedValueOnce(apiResponse('Total demonstrativo: R$ 61,80.'))
+    vi.stubGlobal('fetch', fetchMock)
+    openChat()
+
+    for (const message of [
+      'Quero shampoo anticaspa.',
+      'Qual é o prazo de entrega?',
+      'Quanto ficaria o total com frete desse shampoo?',
+    ]) {
+      setInputValue(input(), message)
+      act(() => sendButton().click())
+      await settle()
+    }
+
+    const thirdBody = JSON.parse(
+      String(fetchMock.mock.calls[2]?.[1]?.body),
+    ) as Record<string, unknown>
+    expect(thirdBody.recommendationContext).toEqual({ productIds: [13] })
+    expect(JSON.stringify(thirdBody.recommendationContext)).not.toMatch(
+      /price|stock|48\.9/i,
+    )
+  })
+
   test('keeps text textual and renders structured cards without extra chat requests', async () => {
     const fetchMock = vi
       .fn()

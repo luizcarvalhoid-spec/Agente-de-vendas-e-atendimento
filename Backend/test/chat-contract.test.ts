@@ -26,6 +26,32 @@ test('accepts a strict bounded chat request and applies empty defaults', () => {
   const parsed = chatRequestSchema.parse({ message: '  Olá  ' })
   assert.deepEqual(parsed, { message: 'Olá', history: [], cart: [] })
   assert.equal(chatRequestSchema.safeParse(validRequest).success, true)
+  assert.deepEqual(
+    chatRequestSchema.parse({
+      message: 'Quanto fica com frete?',
+      recommendationContext: { productIds: [13] },
+    }).recommendationContext,
+    { productIds: [13] },
+  )
+})
+
+test('recommendation context accepts only one or two unique product IDs', () => {
+  for (const productIds of [[], [0], [13, 13], [9, 13, 14]]) {
+    assert.equal(
+      chatRequestSchema.safeParse({
+        message: 'Quanto fica com frete?',
+        recommendationContext: { productIds },
+      }).success,
+      false,
+    )
+  }
+  assert.equal(
+    chatRequestSchema.safeParse({
+      message: 'Quanto fica com frete?',
+      recommendationContext: { productIds: [9, 13], price: 0.01 },
+    }).success,
+    false,
+  )
 })
 
 test('rejects empty messages, unknown fields and excessive history', () => {

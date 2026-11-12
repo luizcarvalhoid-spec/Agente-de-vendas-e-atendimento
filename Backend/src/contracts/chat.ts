@@ -24,6 +24,7 @@ export const CHAT_MAX_CART_ITEMS = 20
 export const CHAT_MAX_ITEM_QUANTITY = 20
 export const CHAT_MAX_AVOIDED_INGREDIENTS = 10
 export const CHAT_MAX_SOURCES = 5
+export const CHAT_MAX_RECOMMENDED_PRODUCT_REFERENCES = 2
 
 const uniqueArray = <T extends z.ZodType>(schema: T, max: number) =>
   z
@@ -51,6 +52,18 @@ export const chatCartItemSchema = z
   .object({
     productId: z.number().int().positive(),
     quantity: z.number().int().min(1).max(CHAT_MAX_ITEM_QUANTITY),
+  })
+  .strict()
+
+export const chatRecommendationContextSchema = z
+  .object({
+    productIds: z
+      .array(z.number().int().positive())
+      .min(1)
+      .max(CHAT_MAX_RECOMMENDED_PRODUCT_REFERENCES)
+      .refine((values) => new Set(values).size === values.length, {
+        message: 'Os produtos recomendados não podem se repetir.',
+      }),
   })
   .strict()
 
@@ -116,6 +129,7 @@ export const chatRequestSchema = z
       .max(CHAT_MAX_HISTORY_MESSAGES)
       .default([]),
     cart: z.array(chatCartItemSchema).max(CHAT_MAX_CART_ITEMS).default([]),
+    recommendationContext: chatRecommendationContextSchema.optional(),
     preferences: chatPreferencesSchema.optional(),
   })
   .strict()

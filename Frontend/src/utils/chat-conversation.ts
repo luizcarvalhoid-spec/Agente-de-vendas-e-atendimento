@@ -4,6 +4,7 @@ import {
   CHAT_MAX_MESSAGE_CHARACTERS,
   isChatResponse,
   type ChatHistoryMessage,
+  type ChatRecommendationContext,
   type ChatResponse,
 } from '../api/chat-contracts'
 
@@ -69,6 +70,18 @@ export function buildChatHistory(
   turns: readonly CompletedTurn[],
   currentMessage: string,
 ): ChatHistoryMessage[] {
+  return selectRecentTurns(turns, currentMessage).flatMap<ChatHistoryMessage>(
+    (turn) => [
+      { role: 'user', content: turn.userMessage },
+      { role: 'assistant', content: turn.response.message },
+    ],
+  )
+}
+
+function selectRecentTurns(
+  turns: readonly CompletedTurn[],
+  currentMessage: string,
+) {
   const selected = turns.slice(-CHAT_MAX_COMPLETED_TURNS)
 
   while (selected.length > 0) {
@@ -80,12 +93,43 @@ export function buildChatHistory(
       utf8Bytes({ history, message: currentMessage }) <=
       CHAT_MAX_CONVERSATION_BYTES
     ) {
-      return history
+      return selected
     }
     selected.shift()
   }
 
   return []
+}
+
+function explicitlyInvalidatesProductReference(message: string) {
+  const normalized = message
+    .normalize('NFKD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLocaleLowerCase('pt-BR')
+  return /\b(?:agora quero|mudei para|troquei para|outro|outra|nao quero mais esse|nao quero mais esta)\b.*\b(?:produto|shampoo|condicionador|mascara|finalizador|sabonete|oleo|kit)\b/.test(
+    normalized,
+  )
+}
+
+export function buildRecommendationContext(
+  turns: readonly CompletedTurn[],
+  currentMessage = '',
+): ChatRecommendationContext | undefined {
+  const recentTurns = selectRecentTurns(turns, currentMessage)
+  for (let index = recentTurns.length - 1; index >= 0; index -= 1) {
+    const turn = recentTurns[index]
+    if (!turn) continue
+    if (
+      turn.response.type === 'recommendation' ||
+      turn.response.type === 'comparison'
+    ) {
+      return { productIds: [...turn.response.productIds] }
+    }
+    if (explicitlyInvalidatesProductReference(turn.userMessage)) {
+      return undefined
+    }
+  }
+  return undefined
 }
 
 export function loadChatSession(

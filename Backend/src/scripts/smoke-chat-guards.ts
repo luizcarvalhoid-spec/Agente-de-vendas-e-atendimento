@@ -7,15 +7,58 @@ import {
   type OpenRouterTransport,
 } from '../agent/openrouter/openrouter-client.js'
 
-export const SMOKE_MAX_PROVIDER_CALLS = 6
 export const SMOKE_MAX_EXECUTIONS = 3
-export const SMOKE_MAX_MODEL_CALLS_PER_EXECUTION = 2
+export const SMOKE_MAX_MODEL_CALLS_BY_CASE = {
+  product: 2,
+  faq: 2,
+  mixed: 3,
+} as const
+export const SMOKE_MAX_PROVIDER_CALLS = 7
 export const SMOKE_MAX_OUTPUT_TOKENS = 512
 export const SMOKE_MAX_MONETARY_CEILING_USD = 0.3
 export const SMOKE_MAX_INPUT_UNITS_PER_CALL =
   OPENROUTER_MAX_REQUEST_BYTES + CHAT_MODEL_INPUT_MARGIN_UNITS
 
 export type SmokeCaseKind = 'product' | 'faq' | 'mixed'
+
+export const SMOKE_SCENARIO_SELECTIONS = [
+  'all',
+  'product',
+  'faq',
+  'mixed',
+] as const
+
+export type SmokeScenarioSelection =
+  (typeof SMOKE_SCENARIO_SELECTIONS)[number]
+
+export interface SmokeExecutionPlan {
+  readonly selection: SmokeScenarioSelection
+  readonly cases: readonly SmokeCaseKind[]
+  readonly maxProviderCalls: number
+}
+
+export function smokeModelCallLimit(kind: SmokeCaseKind) {
+  return SMOKE_MAX_MODEL_CALLS_BY_CASE[kind]
+}
+
+export function resolveSmokeExecutionPlan(
+  rawSelection: string | undefined,
+): SmokeExecutionPlan {
+  const selection = (rawSelection?.trim() || 'all') as SmokeScenarioSelection
+  if (!(SMOKE_SCENARIO_SELECTIONS as readonly string[]).includes(selection)) {
+    throw new SmokeSetupError('SCENARIO_CONFIGURATION')
+  }
+  const cases: readonly SmokeCaseKind[] =
+    selection === 'all' ? ['product', 'faq', 'mixed'] : [selection]
+  return {
+    selection,
+    cases,
+    maxProviderCalls: cases.reduce(
+      (total, kind) => total + smokeModelCallLimit(kind),
+      0,
+    ),
+  }
+}
 
 export const SMOKE_DIAGNOSTIC_STAGES = [
   'configuration',
@@ -361,6 +404,7 @@ export type SmokeSetupErrorCode =
   | 'CONFIRMATION_REQUIRED'
   | 'BACKEND_CONFIGURATION'
   | 'PRICING_CONFIGURATION'
+  | 'SCENARIO_CONFIGURATION'
 
 export class SmokeSetupError extends Error {
   readonly code: SmokeSetupErrorCode

@@ -5,7 +5,16 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import { ZodError } from 'zod'
 
-import { createChatService } from '../src/agent/chat-service.js'
+import type {
+  AgentModelInput,
+  AgentModelPort,
+  AgentModelResult,
+  AgentToolCall,
+} from '../src/agent/agent-model-port.js'
+import {
+  ChatServiceError,
+  createChatService,
+} from '../src/agent/chat-service.js'
 import { createProductSearchIndex } from '../src/agent/tools/product-tools.js'
 import { CHAT_MODEL_INPUT_MARGIN_UNITS } from '../src/agent/usage-budget-controller.js'
 import { loadCatalogRepository } from '../src/catalog/catalog-repository.js'
@@ -19,13 +28,15 @@ import {
   classifySmokeFailure,
   createSmokeDiagnosticTracker,
   createSmokeCostGuard,
+  resolveSmokeExecutionPlan,
   SMOKE_DIAGNOSTIC_STAGES,
   SMOKE_MAX_EXECUTIONS,
   SMOKE_MAX_INPUT_UNITS_PER_CALL,
-  SMOKE_MAX_MODEL_CALLS_PER_EXECUTION,
+  SMOKE_MAX_MODEL_CALLS_BY_CASE,
   SMOKE_MAX_MONETARY_CEILING_USD,
   SMOKE_MAX_OUTPUT_TOKENS,
   SMOKE_MAX_PROVIDER_CALLS,
+  smokeModelCallLimit,
   SmokeGuardError,
   SmokeSetupError,
 } from '../src/scripts/smoke-chat-guards.js'
@@ -53,6 +64,66 @@ function createTransportCounter() {
       return new Response('{}', { status: 200 })
     },
   }
+}
+
+function smokeToolCall(
+  id: string,
+  name: string,
+  args: unknown,
+): AgentToolCall {
+  return {
+    id,
+    type: 'function',
+    function: { name, arguments: JSON.stringify(args) },
+  }
+}
+
+function smokeModelResponse(
+  content: string | null,
+  toolCalls?: readonly AgentToolCall[],
+): AgentModelResult {
+  return {
+    message: {
+      role: 'assistant',
+      content,
+      ...(toolCalls ? { toolCalls } : {}),
+    },
+    usage: { inputTokens: 100, outputTokens: 20, totalTokens: 120 },
+  }
+}
+
+function createSequentialMixedModel() {
+  const inputs: AgentModelInput[] = []
+  const steps = [
+    smokeModelResponse(null, [
+      smokeToolCall('mixed-product', 'search_products', {
+        query: 'anticaspa frescor',
+        category: 'shampoos',
+        subcategory: 'anticaspa',
+        scalpTypes: ['oleoso'],
+        hairConcerns: ['caspa', 'oleosidade'],
+        maxPrice: 50,
+        requireInStock: true,
+        limit: 5,
+      }),
+    ]),
+    smokeModelResponse(null, [
+      smokeToolCall('mixed-faq', 'search_faq', {
+        query: 'qual é o prazo de entrega?',
+        limit: 3,
+      }),
+    ]),
+    smokeModelResponse('Resposta final fundamentada nos dois domínios.'),
+  ]
+  const model: AgentModelPort = {
+    async complete(input) {
+      inputs.push(input)
+      const step = steps.shift()
+      if (!step) throw new Error('Unexpected model call')
+      return step
+    },
+  }
+  return { model, inputs }
 }
 
 test('rejects an oversized effective request before transport', async () => {
@@ -147,10 +218,15 @@ test('missing usage blocks the smoke and every later transport', async () => {
   assert.equal(fake.calls, 1)
 })
 
-test('enforces three executions, two calls each, six transports and 512 output tokens', async () => {
+test('enforces the 2/2/3 scenario limits, seven transports and 512 output tokens', async () => {
   assert.equal(SMOKE_MAX_EXECUTIONS, 3)
-  assert.equal(SMOKE_MAX_MODEL_CALLS_PER_EXECUTION, 2)
-  assert.equal(SMOKE_MAX_PROVIDER_CALLS, 6)
+  assert.deepEqual(SMOKE_MAX_MODEL_CALLS_BY_CASE, {
+    product: 2,
+    faq: 2,
+    mixed: 3,
+  })
+  assert.equal(Math.max(...Object.values(SMOKE_MAX_MODEL_CALLS_BY_CASE)), 3)
+  assert.equal(SMOKE_MAX_PROVIDER_CALLS, 7)
   assert.equal(SMOKE_MAX_OUTPUT_TOKENS, 512)
   const fake = createTransportCounter()
   const guard = createSmokeCostGuard({
@@ -159,7 +235,7 @@ test('enforces three executions, two calls each, six transports and 512 output t
     monetaryCeilingUsd: 1,
   })
   const transport = guard.wrapTransport(fake.transport)
-  for (let index = 0; index < 6; index += 1) {
+  for (let index = 0; index < 7; index += 1) {
     await transport('https://invalid.example', request())
     guard.reconcileUsage({ inputTokens: 0, outputTokens: 0, totalTokens: 0 })
   }
@@ -168,7 +244,7 @@ test('enforces three executions, two calls each, six transports and 512 output t
     (error: unknown) =>
       error instanceof SmokeGuardError && error.code === 'PROVIDER_CALL_LIMIT',
   )
-  assert.equal(fake.calls, 6)
+  assert.equal(fake.calls, 7)
 
   const wrongOutputFake = createTransportCounter()
   const wrongOutputGuard = createSmokeCostGuard({
@@ -192,7 +268,7 @@ test('enforces three executions, two calls each, six transports and 512 output t
   assert.equal(wrongOutputFake.calls, 0)
 })
 
-test('worst-case six-call reservation fits the 0.30 USD ceiling at the reviewed rates', () => {
+test('worst-case seven-call reservation fits the 0.30 USD ceiling at the reviewed rates', () => {
   const worstCaseReservedCostUsd = assertSmokeWorstCaseBudget({
     inputPricePerMillion: 0.4,
     outputPricePerMillion: 1.6,
@@ -200,8 +276,79 @@ test('worst-case six-call reservation fits the 0.30 USD ceiling at the reviewed 
   })
 
   assert.equal(SMOKE_MAX_INPUT_UNITS_PER_CALL, 102_048)
-  assert.equal(worstCaseReservedCostUsd, 0.2498304)
+  assert.equal(worstCaseReservedCostUsd, 0.2914688)
   assert.ok(worstCaseReservedCostUsd <= SMOKE_MAX_MONETARY_CEILING_USD)
+})
+
+test('scenario allowlist preserves the full plan and selects only mixed on demand', () => {
+  assert.deepEqual(resolveSmokeExecutionPlan(undefined), {
+    selection: 'all',
+    cases: ['product', 'faq', 'mixed'],
+    maxProviderCalls: 7,
+  })
+  assert.deepEqual(resolveSmokeExecutionPlan('mixed'), {
+    selection: 'mixed',
+    cases: ['mixed'],
+    maxProviderCalls: 3,
+  })
+  assert.equal(smokeModelCallLimit('product'), 2)
+  assert.equal(smokeModelCallLimit('faq'), 2)
+  assert.equal(smokeModelCallLimit('mixed'), 3)
+  assert.throws(
+    () => resolveSmokeExecutionPlan('mixed,product'),
+    (error: unknown) =>
+      error instanceof SmokeSetupError &&
+      error.code === 'SCENARIO_CONFIGURATION',
+  )
+})
+
+test('mixed-only plan reserves and permits exactly three transports', async () => {
+  const plan = resolveSmokeExecutionPlan('mixed')
+  const worstCaseReservedCostUsd = assertSmokeWorstCaseBudget({
+    inputPricePerMillion: 0.4,
+    outputPricePerMillion: 1.6,
+    monetaryCeilingUsd: SMOKE_MAX_MONETARY_CEILING_USD,
+    maxProviderCalls: plan.maxProviderCalls,
+  })
+  assert.equal(worstCaseReservedCostUsd, 0.1249152)
+
+  const fake = createTransportCounter()
+  const guard = createSmokeCostGuard({
+    inputPricePerMillion: 1,
+    outputPricePerMillion: 1,
+    monetaryCeilingUsd: 1,
+    maxProviderCalls: plan.maxProviderCalls,
+  })
+  const transport = guard.wrapTransport(fake.transport)
+  for (let index = 0; index < plan.maxProviderCalls; index += 1) {
+    await transport('https://invalid.example', request())
+    guard.reconcileUsage({ inputTokens: 0, outputTokens: 0, totalTokens: 0 })
+  }
+  await assert.rejects(
+    () => transport('https://invalid.example', request()),
+    (error: unknown) =>
+      error instanceof SmokeGuardError &&
+      error.code === 'PROVIDER_CALL_LIMIT',
+  )
+  assert.equal(fake.calls, 3)
+})
+
+test('unsafe selected plan is rejected before any transport starts', () => {
+  const fake = createTransportCounter()
+  const plan = resolveSmokeExecutionPlan('mixed')
+
+  assert.throws(
+    () =>
+      assertSmokeWorstCaseBudget({
+        inputPricePerMillion: 0.4,
+        outputPricePerMillion: 200,
+        monetaryCeilingUsd: SMOKE_MAX_MONETARY_CEILING_USD,
+        maxProviderCalls: plan.maxProviderCalls,
+      }),
+    (error: unknown) =>
+      error instanceof SmokeGuardError && error.code === 'MONETARY_BUDGET',
+  )
+  assert.equal(fake.calls, 0)
 })
 
 test('worst-case preflight rejects an unsafe price or a ceiling above 0.30 USD', () => {
@@ -354,6 +501,12 @@ test('smoke generates UUID request IDs for scenarios and the local budget check'
 
   assert.equal(requestIdInitializers.length, 2)
   assert.doesNotMatch(source, /requestId:\s*['`]manual-smoke/)
+  assert.match(source, /HIDRASPLASH_SMOKE_SCENARIO/)
+  assert.equal(
+    source.match(/maxProviderCalls: executionPlan\.maxProviderCalls/g)?.length,
+    2,
+  )
+  assert.match(source, /maxModelCalls: smokeModelCallLimit\(kind\)/)
 
   for (const requestId of [randomUUID(), randomUUID()]) {
     assert.doesNotThrow(() =>
@@ -378,7 +531,7 @@ test('completed deterministic smoke response rejects the old ID and accepts a ge
     faqIndex: createFaqSearchIndex(faqDocuments),
     faqDocuments,
     model: createMvpDeterministicModel(),
-    maxModelCalls: SMOKE_MAX_MODEL_CALLS_PER_EXECUTION,
+    maxModelCalls: smokeModelCallLimit('product'),
     maxOutputTokens: SMOKE_MAX_OUTPUT_TOKENS,
   })
   const input = {
@@ -428,6 +581,86 @@ test('completed deterministic smoke response rejects the old ID and accepts a ge
   assert.equal(response.requestId, requestId)
   assert.equal(response.type, 'recommendation')
   assert.deepEqual(response.productIds, [13])
+})
+
+test('sequential mixed grounding needs three model calls and returns both domains', async () => {
+  const [catalog, faqDocuments] = await Promise.all([
+    loadCatalogRepository(),
+    loadFaqDocuments(),
+  ])
+  const productIndex = createProductSearchIndex(catalog.listAll())
+  const faqIndex = createFaqSearchIndex(faqDocuments)
+  const input = {
+    message:
+      'Quero um shampoo anticaspa para couro oleoso, com frescor, até R$ 50, e qual é o prazo de entrega?',
+    history: [],
+    cart: [],
+  }
+
+  function execute(maxModelCalls: number) {
+    const { model, inputs } = createSequentialMixedModel()
+    const events: ChatOperationalEvent[] = []
+    const service = createChatService({
+      catalog,
+      productIndex,
+      faqIndex,
+      faqDocuments,
+      model,
+      maxModelCalls,
+      maxOutputTokens: SMOKE_MAX_OUTPUT_TOKENS,
+    })
+    const operation = service.execute(input, {
+      requestId: randomUUID(),
+      signal: new AbortController().signal,
+      observer: { record: (event) => events.push(event) },
+    })
+    return { events, inputs, operation }
+  }
+
+  const limited = execute(2)
+  await assert.rejects(
+    limited.operation,
+    (error: unknown) =>
+      error instanceof ChatServiceError && error.code === 'AI_BAD_RESPONSE',
+  )
+  const limitedTermination = [...limited.events].reverse().find(
+    (event) => event.type === 'orchestrator_termination',
+  )
+  assert.ok(limitedTermination?.type === 'orchestrator_termination')
+  assert.equal(limitedTermination.status, 'MODEL_LIMIT')
+  assert.equal(limitedTermination.modelCalls, 2)
+  assert.equal(limitedTermination.groundingRequirement, 'both')
+  assert.equal(limitedTermination.productGrounding, 'found')
+  assert.equal(limitedTermination.faqGrounding, 'found')
+  assert.equal(limited.inputs.length, 2)
+
+  const completed = execute(3)
+  const response = chatResponseSchema.parse(await completed.operation)
+  const completedTermination = [...completed.events].reverse().find(
+    (event) => event.type === 'orchestrator_termination',
+  )
+  assert.ok(completedTermination?.type === 'orchestrator_termination')
+  assert.equal(completedTermination.status, 'ASSISTANT_RESPONSE')
+  assert.equal(completedTermination.modelCalls, 3)
+  assert.equal(completedTermination.groundingRequirement, 'both')
+  assert.equal(completedTermination.productGrounding, 'found')
+  assert.equal(completedTermination.faqGrounding, 'found')
+  assert.equal(completed.inputs.length, 3)
+  assert.equal(response.type, 'recommendation')
+  assert.deepEqual(response.productIds, [13])
+  assert.ok(response.sourceIds.length > 0)
+  assert.doesNotThrow(() =>
+    assertSmokeCaseEvidence({
+      kind: 'mixed',
+      response,
+      termination: {
+        status: completedTermination.status,
+        groundingRequirement: completedTermination.groundingRequirement,
+        productGrounding: completedTermination.productGrounding,
+        faqGrounding: completedTermination.faqGrounding,
+      },
+    }),
+  )
 })
 
 test('requires domain-specific evidence before declaring smoke scenarios successful', () => {

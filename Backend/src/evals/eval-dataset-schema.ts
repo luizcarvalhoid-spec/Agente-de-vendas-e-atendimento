@@ -311,12 +311,6 @@ export const evalAssertionSchema = z.discriminatedUnion('type', [
   z
     .object({
       ...assertionBase,
-      type: z.literal('no_unsupported_claims'),
-    })
-    .strict(),
-  z
-    .object({
-      ...assertionBase,
       type: z.literal('products_satisfy_ingredient_restrictions'),
       terms: chatPreferencesSchema.shape.avoidIngredients.unwrap(),
     })
@@ -376,6 +370,7 @@ export const evalQualityCriterionSchema = z.union([
 
 const expectedBehaviorSchema = z
   .object({
+    turn: z.number().int().nonnegative(),
     action: z.enum([
       'ask_clarification',
       'recommend',
@@ -397,6 +392,33 @@ const expectedBehaviorSchema = z
   })
   .strict()
 
+function logicalAssertionSignature(
+  assertion: z.infer<typeof evalAssertionSchema>,
+) {
+  const { id: _id, ...logicalAssertion } = assertion
+
+  switch (logicalAssertion.type) {
+    case 'product_ids_include':
+    case 'product_ids_exclude':
+    case 'product_ids_allowed':
+      return JSON.stringify({
+        ...logicalAssertion,
+        productIds: [...logicalAssertion.productIds].sort(
+          (left, right) => left - right,
+        ),
+      })
+    case 'source_ids_include':
+    case 'source_ids_exclude':
+    case 'source_ids_allowed':
+      return JSON.stringify({
+        ...logicalAssertion,
+        sourceIds: [...logicalAssertion.sourceIds].sort(),
+      })
+    default:
+      return JSON.stringify(logicalAssertion)
+  }
+}
+
 const evalCaseSchema = z
   .object({
     id: identifierSchema,
@@ -410,12 +432,45 @@ const evalCaseSchema = z
         turns: z.array(evalTurnSchema).min(1).max(50),
       })
       .strict(),
-    expected_behavior: expectedBehaviorSchema,
+    expected_behaviors: z.array(expectedBehaviorSchema).min(1).max(50),
     assertions: z.array(evalAssertionSchema).min(1).max(200),
     quality_criteria: z.array(evalQualityCriterionSchema).min(1).max(50),
   })
   .strict()
   .superRefine((scenario, context) => {
+    const behaviorTurns = new Map<number, number>()
+    for (const [index, behavior] of scenario.expected_behaviors.entries()) {
+      const previousIndex = behaviorTurns.get(behavior.turn)
+      if (previousIndex !== undefined) {
+        context.addIssue({
+          code: 'custom',
+          path: ['expected_behaviors', index, 'turn'],
+          message:
+            `O turno ${behavior.turn} já possui expectativa em ` +
+            `expected_behaviors[${previousIndex}].`,
+        })
+      } else {
+        behaviorTurns.set(behavior.turn, index)
+      }
+
+      if (behavior.turn >= scenario.input.turns.length) {
+        context.addIssue({
+          code: 'custom',
+          path: ['expected_behaviors', index, 'turn'],
+          message: `O turno ${behavior.turn} não existe neste cenário.`,
+        })
+      }
+    }
+    for (let turn = 0; turn < scenario.input.turns.length; turn += 1) {
+      if (!behaviorTurns.has(turn)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['expected_behaviors'],
+          message: `O turno ${turn} não possui comportamento esperado.`,
+        })
+      }
+    }
+
     const assertionIds = new Map<string, number>()
     const assertionSignatures = new Map<string, number>()
     for (const [index, assertion] of scenario.assertions.entries()) {
@@ -430,8 +485,7 @@ const evalCaseSchema = z
         assertionIds.set(assertion.id, index)
       }
 
-      const { id: _id, ...logicalAssertion } = assertion
-      const signature = JSON.stringify(logicalAssertion)
+      const signature = logicalAssertionSignature(assertion)
       const previousSignatureIndex = assertionSignatures.get(signature)
       if (previousSignatureIndex !== undefined) {
         context.addIssue({

@@ -43,6 +43,10 @@ function criteriaOf(value: unknown) {
   return array(firstCaseOf(value).quality_criteria)
 }
 
+function expectedBehaviorsOf(value: unknown) {
+  return array(firstCaseOf(value).expected_behaviors)
+}
+
 function turnsOf(value: unknown) {
   return array(record(firstCaseOf(value).input).turns)
 }
@@ -93,10 +97,79 @@ test('aceita operações explícitas de substituição e limpeza entre turnos', 
     cart: { mode: 'clear' },
     recommendationContext: { mode: 'clear' },
   })
+  expectedBehaviorsOf(value).push({
+    turn: 1,
+    action: 'answer',
+    description: 'Confirmar que o estado anterior foi removido.',
+    requiredGrounding: [],
+  })
 
   const loaded = parseEvalDataset(value, 'multi-turn-memory')
   assert.equal(loaded.data.cases[0]?.input.turns.length, 2)
+  assert.deepEqual(
+    loaded.data.cases[0]?.expected_behaviors.map((behavior) => behavior.turn),
+    [0, 1],
+  )
 })
+
+test('exige exatamente um comportamento esperado para cada turno', async () => {
+  const value = await fixtureValue()
+  turnsOf(value).push({
+    message: 'Agora quero saber sobre frete.',
+    preferences: { mode: 'preserve' },
+    cart: { mode: 'preserve' },
+    recommendationContext: { mode: 'auto' },
+  })
+
+  const missingError = captureLoadError(() => parseEvalDataset(value))
+  assert.ok(
+    missingError.issues.some(
+      (issue) =>
+        issue.path === 'cases[0].expected_behaviors' &&
+        /turno 1 não possui/.test(issue.message),
+    ),
+  )
+
+  const behaviors = expectedBehaviorsOf(value)
+  behaviors.push({
+    turn: 1,
+    action: 'answer',
+    description: 'Responder usando a fonte de frete.',
+    requiredGrounding: ['faq'],
+  })
+  behaviors.push({
+    turn: 1,
+    action: 'safe_fallback',
+    description: 'Comportamento contraditório para o mesmo turno.',
+    requiredGrounding: [],
+  })
+
+  const duplicateError = captureLoadError(() => parseEvalDataset(value))
+  assert.ok(
+    duplicateError.issues.some(
+      (issue) =>
+        issue.path === 'cases[0].expected_behaviors[2].turn' &&
+        /já possui expectativa/.test(issue.message),
+    ),
+  )
+})
+
+test(
+  'rejeita comportamento esperado que referencia turno inexistente',
+  async () => {
+    const value = await fixtureValue()
+    record(expectedBehaviorsOf(value)[0]).turn = 1
+
+    const error = captureLoadError(() => parseEvalDataset(value))
+    assert.ok(
+      error.issues.some(
+        (issue) =>
+          issue.path === 'cases[0].expected_behaviors[0].turn' &&
+          /não existe/.test(issue.message),
+      ),
+    )
+  },
+)
 
 test('rejeita versão de schema incompatível antes da validação estrutural', async () => {
   const value = record(await fixtureValue())
@@ -133,6 +206,92 @@ test('rejeita assertions fora da union discriminada', async () => {
   assert.ok(
     error.issues.some((issue) => issue.path === 'cases[0].assertions[0].type'),
   )
+})
+
+test(
+  'não aceita no_unsupported_claims como assertion objetiva genérica',
+  async () => {
+    const value = await fixtureValue()
+    record(assertionsOf(value)[0]).type = 'no_unsupported_claims'
+
+    const error = captureLoadError(() => parseEvalDataset(value))
+    assert.ok(
+      error.issues.some((issue) => issue.path === 'cases[0].assertions[0].type'),
+    )
+  },
+)
+
+test(
+  'detecta conjuntos de IDs duplicados independentemente da ordem',
+  async () => {
+    const value = await fixtureValue()
+    const assertions = assertionsOf(value)
+    assertions.splice(
+      0,
+      1,
+      {
+        id: 'exclude-products-a',
+        criterionId: 'objective-compliance',
+        turn: 0,
+        severity: 'critical',
+        type: 'product_ids_exclude',
+        productIds: [13, 9],
+      },
+      {
+        id: 'exclude-products-b',
+        criterionId: 'objective-compliance',
+        turn: 0,
+        severity: 'critical',
+        type: 'product_ids_exclude',
+        productIds: [9, 13],
+      },
+    )
+    record(criteriaOf(value)[0]).assertionIds = [
+      'exclude-products-a',
+      'exclude-products-b',
+    ]
+
+    const error = captureLoadError(() => parseEvalDataset(value))
+    assert.ok(
+      error.issues.some(
+        (issue) =>
+          issue.path === 'cases[0].assertions[1]' &&
+          /duplicada logicamente/.test(issue.message),
+      ),
+    )
+  },
+)
+
+test('preserva a ordem em assertions exact', async () => {
+  const value = await fixtureValue()
+  const assertions = assertionsOf(value)
+  assertions.splice(
+    0,
+    1,
+    {
+      id: 'exact-products-a',
+      criterionId: 'objective-compliance',
+      turn: 0,
+      severity: 'high',
+      type: 'product_ids_exact',
+      productIds: [13, 9],
+    },
+    {
+      id: 'exact-products-b',
+      criterionId: 'objective-compliance',
+      turn: 0,
+      severity: 'high',
+      type: 'product_ids_exact',
+      productIds: [9, 13],
+    },
+  )
+  record(criteriaOf(value)[0]).assertionIds = [
+    'exact-products-a',
+    'exact-products-b',
+  ]
+
+  const loaded = parseEvalDataset(value)
+  assert.equal(loaded.data.cases[0]?.assertions.length, 2)
 })
 
 test('rejeita referências a turnos inexistentes', async () => {

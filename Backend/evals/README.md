@@ -26,11 +26,24 @@ O contexto de recomendação usa:
 
 Ausência de uma operação não possui significado implícito e é rejeitada.
 
+## Comportamento esperado por turno
+
+`expected_behaviors` fica separado das entradas do usuário e exige exatamente
+uma expectativa para cada índice de `input.turns`. Cada item declara a ação e os
+domínios de grounding daquele turno. Turnos inexistentes, repetidos ou sem
+expectativa são rejeitados, evitando uma expectativa global ambígua em jornadas
+com mudança de intenção.
+
 ## Assertions e critérios
 
 Assertions são unions discriminadas por `type`. Elas descrevem expectativas
 estruturadas, mas não são executadas nesta etapa. Cada assertion referencia um
 critério objetivo que, por sua vez, deve referenciar a assertion.
+
+Assertions de IDs `include`, `exclude` e `allowed` têm semântica de conjunto na
+detecção de duplicatas. Assertions `exact` preservam a ordem declarada. Alegações
+sem evidência não possuem uma assertion objetiva genérica: avaliações semânticas
+dependem de uma rubricagem futura explicitamente configurada.
 
 Critérios aplicáveis começam obrigatoriamente como `not_evaluated`. Critérios
 objetivos usam avaliação `deterministic`; critérios subjetivos usam `human` ou

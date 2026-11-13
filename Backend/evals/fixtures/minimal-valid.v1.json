@@ -28,11 +28,14 @@
           }
         ]
       },
-      "expected_behavior": {
-        "action": "ask_clarification",
-        "description": "Solicitar apenas a informação necessária para refinar a recomendação.",
-        "requiredGrounding": []
-      },
+      "expected_behaviors": [
+        {
+          "turn": 0,
+          "action": "ask_clarification",
+          "description": "Solicitar apenas a informação necessária para refinar a recomendação.",
+          "requiredGrounding": []
+        }
+      ],
       "assertions": [
         {
           "id": "response-is-text",

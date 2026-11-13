@@ -25,6 +25,10 @@ import {
 } from './eval-loader.js'
 import { createOfflineEvalModel } from './offline-eval-model.js'
 import {
+  sanitizeEvalEvidence,
+  sanitizeEvalText,
+} from './offline-eval-sanitization.js'
+import {
   createTracedFaqSearchIndex,
   createTracedProductSearchIndex,
   OfflineEvalTraceCollector,
@@ -135,14 +139,6 @@ function deterministicRequestId(datasetId: string, scenarioId: string, turn: num
   return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`
 }
 
-function sanitizeText(value: string) {
-  return value
-    .replace(/\b(?:sk-or-|sk-)[A-Za-z0-9_-]{4,}\b/gi, '[CREDENTIAL_REDACTED]')
-    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '[EMAIL_REDACTED]')
-    .replace(/\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b/g, '[IDENTIFIER_REDACTED]')
-    .replace(/\b(?:\d[ -]?){13,19}\b/g, '[PAYMENT_DATA_REDACTED]')
-}
-
 function sanitizedError(error: unknown): EvalSanitizedError {
   if (error instanceof ChatServiceError) {
     return {
@@ -165,8 +161,10 @@ function sanitizedError(error: unknown): EvalSanitizedError {
 function emptyTrace(): EvalRuntimeTrace {
   return {
     modelCalls: 0,
-    toolsCalled: [],
+    toolsRequested: [],
+    toolsExecuted: [],
     toolCalls: [],
+    toolExecutions: [],
     grounding: {
       requirement: 'not_required',
       product: 'not_consulted',
@@ -179,7 +177,7 @@ function emptyTrace(): EvalRuntimeTrace {
 }
 
 function appliedState(request: ChatRequest): EvalAppliedState {
-  return {
+  return sanitizeEvalEvidence({
     historyLength: request.history.length,
     ...(request.preferences === undefined
       ? {}
@@ -192,20 +190,20 @@ function appliedState(request: ChatRequest): EvalAppliedState {
             request.recommendationContext,
           ),
         }),
-  }
+  })
 }
 
 function responseEvidence(response: ChatResponse) {
-  return {
+  return sanitizeEvalEvidence({
     type: response.type,
     ...('reason' in response && response.reason !== undefined
       ? { reason: response.reason }
       : {}),
-    message: sanitizeText(response.message),
+    message: response.message,
     productIds:
       response.type === 'text' ? [] : [...response.productIds],
     sourceIds: [...response.sourceIds],
-  }
+  })
 }
 
 function applyPreferences(
@@ -226,17 +224,34 @@ function applyCart(
   return structuredClone(operation.value)
 }
 
-function recommendationContextFor(
+function applyRecommendationContext(
   automatic: ChatRequest['recommendationContext'] | undefined,
   operation: EvalCase['input']['turns'][number]['recommendationContext'],
 ) {
-  if (operation.mode === 'auto') return automatic
-  if (operation.mode === 'clear') return undefined
-  return structuredClone(operation.value)
+  if (operation.mode === 'auto') {
+    return {
+      requestContext: automatic,
+      retainedContext: automatic,
+    }
+  }
+  if (operation.mode === 'clear') {
+    return {
+      requestContext: undefined,
+      retainedContext: undefined,
+    }
+  }
+  const replacement = structuredClone(operation.value)
+  return {
+    requestContext: replacement,
+    retainedContext: replacement,
+  }
 }
 
-function automaticContextFrom(response: ChatResponse) {
-  if (response.type === 'text') return undefined
+function automaticContextFrom(
+  retained: ChatRequest['recommendationContext'] | undefined,
+  response: ChatResponse,
+) {
+  if (response.type === 'text') return retained
   return { productIds: [...response.productIds] }
 }
 
@@ -298,10 +313,12 @@ async function executeScenario(
     runtime.trace.beginTurn()
     preferences = applyPreferences(preferences, turn.preferences)
     cart = applyCart(cart, turn.cart)
-    const recommendationContext = recommendationContextFor(
+    const recommendationTransition = applyRecommendationContext(
       automaticRecommendationContext,
       turn.recommendationContext,
     )
+    const recommendationContext = recommendationTransition.requestContext
+    automaticRecommendationContext = recommendationTransition.retainedContext
     const candidate = {
       message: turn.message,
       history,
@@ -317,8 +334,8 @@ async function executeScenario(
         datasetId,
         scenarioId: scenario.id,
         turn: turnIndex,
-        message: sanitizeText(turn.message),
-        appliedState: {
+        message: sanitizeEvalText(turn.message),
+        appliedState: sanitizeEvalEvidence({
           historyLength: history.length,
           ...(preferences === undefined
             ? {}
@@ -331,7 +348,7 @@ async function executeScenario(
                   recommendationContext,
                 ),
               }),
-        },
+        }),
         technicalStatus: 'technical_failure',
         trace: emptyTrace(),
         error: {
@@ -356,7 +373,7 @@ async function executeScenario(
         datasetId,
         scenarioId: scenario.id,
         turn: turnIndex,
-        message: sanitizeText(turn.message),
+        message: sanitizeEvalText(turn.message),
         appliedState: appliedState(request),
         technicalStatus: 'completed',
         response: responseEvidence(response),
@@ -367,13 +384,16 @@ async function executeScenario(
         { role: 'user', content: request.message },
         { role: 'assistant', content: response.message },
       ]
-      automaticRecommendationContext = automaticContextFrom(response)
+      automaticRecommendationContext = automaticContextFrom(
+        automaticRecommendationContext,
+        response,
+      )
     } catch (error) {
       turns.push({
         datasetId,
         scenarioId: scenario.id,
         turn: turnIndex,
-        message: sanitizeText(turn.message),
+        message: sanitizeEvalText(turn.message),
         appliedState: appliedState(request),
         technicalStatus: 'technical_failure',
         trace: runtime.trace.snapshot(),

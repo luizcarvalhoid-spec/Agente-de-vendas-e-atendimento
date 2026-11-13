@@ -1183,7 +1183,26 @@ export function createChatService(
         maxModelCalls: options.maxModelCalls,
         maxOutputTokens: options.maxOutputTokens,
         log: (event) => {
-          if (event.type !== 'termination') return
+          if (event.type === 'tool') {
+            if (
+              event.toolName === undefined ||
+              event.ordinal === undefined ||
+              event.executed === undefined ||
+              event.outcome === undefined
+            ) {
+              return
+            }
+            observeChatOperation(execution.observer, {
+              type: 'orchestrator_tool',
+              requestId: execution.requestId,
+              ordinal: event.ordinal,
+              toolName: registry.get(event.toolName)?.name ?? 'unknown_tool',
+              status: event.status,
+              executed: event.executed,
+              outcome: event.outcome,
+            })
+            return
+          }
           observeChatOperation(execution.observer, {
             type: 'orchestrator_termination',
             requestId: execution.requestId,

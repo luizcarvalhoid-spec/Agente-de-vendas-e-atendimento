@@ -10,6 +10,7 @@ import type {
   FaqSearchIndex,
   FaqSearchResult,
 } from '../knowledge/faq-search.js'
+import { sanitizeEvalEvidence } from './offline-eval-sanitization.js'
 
 export type EvalGroundingDomainStatus =
   | 'not_consulted'
@@ -18,8 +19,22 @@ export type EvalGroundingDomainStatus =
   | 'failed'
 
 export interface EvalToolCallEvidence {
+  readonly ordinal: number
   readonly name: string
   readonly arguments: Readonly<Record<string, unknown>>
+}
+
+export interface EvalToolExecutionEvidence {
+  readonly ordinal: number
+  readonly name: string
+  readonly executed: boolean
+  readonly status: string
+  readonly outcome:
+    | 'found'
+    | 'not_found'
+    | 'rejected'
+    | 'failed'
+    | 'unknown'
 }
 
 export interface EvalIngredientResolutionEvidence {
@@ -39,8 +54,15 @@ export interface EvalFaqSearchEvidence {
 
 export interface EvalRuntimeTrace {
   readonly modelCalls: number
-  readonly toolsCalled: readonly string[]
+  readonly toolsRequested: readonly string[]
+  readonly toolsExecuted: readonly string[]
   readonly toolCalls: readonly EvalToolCallEvidence[]
+  readonly toolExecutions: readonly EvalToolExecutionEvidence[]
+  readonly termination?: {
+    readonly status: string
+    readonly toolCalls: number
+    readonly toolErrors: number
+  }
   readonly grounding: {
     readonly requirement:
       | 'not_required'
@@ -75,24 +97,6 @@ function safeArguments(toolCall: AgentToolCall) {
 
   const input = value as Record<string, unknown>
   const output: Record<string, unknown> = {}
-  const redact = (text: string) =>
-    text
-      .replace(
-        /\b(?:sk-or-|sk-)[A-Za-z0-9_-]{4,}\b/gi,
-        '[CREDENTIAL_REDACTED]',
-      )
-      .replace(
-        /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi,
-        '[EMAIL_REDACTED]',
-      )
-      .replace(
-        /\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b/g,
-        '[IDENTIFIER_REDACTED]',
-      )
-      .replace(
-        /\b(?:\d[ -]?){13,19}\b/g,
-        '[PAYMENT_DATA_REDACTED]',
-      )
   for (const key of [
     'query',
     'limit',
@@ -105,7 +109,7 @@ function safeArguments(toolCall: AgentToolCall) {
   ]) {
     const field = input[key]
     if (typeof field === 'string') {
-      output[key] = redact(field)
+      output[key] = field
     } else if (typeof field === 'number' || typeof field === 'boolean') {
       output[key] = field
     } else if (
@@ -114,17 +118,17 @@ function safeArguments(toolCall: AgentToolCall) {
         (item) => typeof item === 'string' || typeof item === 'number',
       )
     ) {
-      output[key] = field.map((item) =>
-        typeof item === 'string' ? redact(item) : item,
-      )
+      output[key] = field
     }
   }
-  return output
+  return sanitizeEvalEvidence(output)
 }
 
 export class OfflineEvalTraceCollector {
   private modelCallCount = 0
   private requestedToolCalls: EvalToolCallEvidence[] = []
+  private toolExecutions: EvalToolExecutionEvidence[] = []
+  private termination: EvalRuntimeTrace['termination']
   private grounding = emptyGrounding
   private ingredientResolutions: EvalIngredientResolutionEvidence[] = []
   private productSearches: EvalProductSearchEvidence[] = []
@@ -133,6 +137,8 @@ export class OfflineEvalTraceCollector {
   beginTurn() {
     this.modelCallCount = 0
     this.requestedToolCalls = []
+    this.toolExecutions = []
+    this.termination = undefined
     this.grounding = emptyGrounding
     this.ingredientResolutions = []
     this.productSearches = []
@@ -141,15 +147,29 @@ export class OfflineEvalTraceCollector {
 
   recordModelCall(toolCalls: readonly AgentToolCall[]) {
     this.modelCallCount += 1
+    const firstOrdinal = this.requestedToolCalls.length + 1
     this.requestedToolCalls.push(
-      ...toolCalls.map((toolCall) => ({
-        name: toolCall.function.name,
+      ...toolCalls.map((toolCall, index) => ({
+        ordinal: firstOrdinal + index,
+        name: sanitizeEvalEvidence(toolCall.function.name),
         arguments: safeArguments(toolCall),
       })),
     )
   }
 
   recordOperationalEvent(event: ChatOperationalEvent) {
+    if (event.type === 'orchestrator_tool') {
+      this.toolExecutions.push(
+        sanitizeEvalEvidence({
+          ordinal: event.ordinal,
+          name: event.toolName,
+          executed: event.executed,
+          status: event.status,
+          outcome: event.outcome,
+        }),
+      )
+      return
+    }
     if (event.type !== 'orchestrator_termination') return
     this.grounding = {
       requirement: event.groundingRequirement,
@@ -157,6 +177,11 @@ export class OfflineEvalTraceCollector {
       faq: event.faqGrounding,
     }
     this.modelCallCount = event.modelCalls
+    this.termination = sanitizeEvalEvidence({
+      status: event.status,
+      toolCalls: event.toolCalls,
+      toolErrors: event.toolErrors,
+    })
   }
 
   recordIngredientResolution(
@@ -167,37 +192,53 @@ export class OfflineEvalTraceCollector {
     },
   ) {
     if (terms.length === 0) return
-    this.ingredientResolutions.push({
-      terms: [...terms],
-      resolvedIds: [...result.resolvedIds],
-      unresolvedTerms: [...result.unresolvedTerms],
-    })
+    this.ingredientResolutions.push(
+      sanitizeEvalEvidence({
+        terms: [...terms],
+        resolvedIds: [...result.resolvedIds],
+        unresolvedTerms: [...result.unresolvedTerms],
+      }),
+    )
   }
 
   recordProductSearch(
     input: SearchProductsInput,
     resultProductIds: readonly number[],
   ) {
-    this.productSearches.push({
-      incompatibleIngredientIds: [...(input.incompatibleIngredientIds ?? [])],
-      resultProductIds: [...resultProductIds],
-    })
+    this.productSearches.push(
+      sanitizeEvalEvidence({
+        incompatibleIngredientIds: [...(input.incompatibleIngredientIds ?? [])],
+        resultProductIds: [...resultProductIds],
+      }),
+    )
   }
 
   recordFaqSearch(results: readonly FaqSearchResult[]) {
-    this.faqSearches.push({
-      sourceIds: results.map((result) => result.sourceId),
-    })
+    this.faqSearches.push(
+      sanitizeEvalEvidence({
+        sourceIds: results.map((result) => result.sourceId),
+      }),
+    )
   }
 
   snapshot(): EvalRuntimeTrace {
     return {
       modelCalls: this.modelCallCount,
-      toolsCalled: this.requestedToolCalls.map((call) => call.name),
+      toolsRequested: this.requestedToolCalls.map((call) => call.name),
+      toolsExecuted: this.toolExecutions
+        .filter((execution) => execution.executed)
+        .map((execution) => execution.name),
       toolCalls: this.requestedToolCalls.map((call) => ({
+        ordinal: call.ordinal,
         name: call.name,
         arguments: { ...call.arguments },
       })),
+      toolExecutions: this.toolExecutions.map((execution) => ({
+        ...execution,
+      })),
+      ...(this.termination === undefined
+        ? {}
+        : { termination: { ...this.termination } }),
       grounding: { ...this.grounding },
       ingredientResolutions: this.ingredientResolutions.map((item) => ({
         terms: [...item.terms],

@@ -74,13 +74,24 @@ opcional porque este é o modo padrão e único desta etapa.
 
 Cada cenário recebe uma instância isolada do modelo, do serviço e dos coletores.
 O histórico usa as respostas reais, e `recommendationContext: auto` deriva apenas
-de respostas `recommendation` ou `comparison`. Violações dos limites do contrato
-geram `technical_failure`; o runner nunca trunca estado silenciosamente.
+de respostas `recommendation` ou `comparison`. Respostas textuais intermediárias
+preservam a última referência; `replace` a substitui e `clear` a remove para os
+turnos seguintes até que uma nova recomendação ou comparação seja realmente
+produzida. Violações dos limites do contrato geram `technical_failure`; o runner
+nunca trunca estado silenciosamente.
 
 As evidências em memória registram estado aplicado, resposta, ferramentas,
 grounding e resolução canônica de ingredientes. Textos passam por redação de
 credenciais e identificadores comuns, e prompts internos ou resultados brutos de
 ferramentas não são armazenados.
+
+Ferramentas solicitadas pelo modelo e ferramentas efetivamente executadas são
+registradas separadamente. Quando o orquestrador processa uma chamada individual,
+o trace diferencia `found`, `not_found`, `rejected` e `failed`. Se um lote inteiro
+for rejeitado antes desse processamento, ficam registradas somente as solicitações
+e a terminação do orquestrador; o runner não inventa uma execução ou um resultado
+por ferramenta. Ferramentas futuras sem um estado de resultado padronizado usam
+`unknown`, em vez de serem classificadas falsamente como sucesso ou falha.
 
 `completed` significa somente que a infraestrutura executou o caso. Assertions,
 pontuação e critérios subjetivos não são avaliados: todos permanecem

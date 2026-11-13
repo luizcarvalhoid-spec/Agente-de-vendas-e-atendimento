@@ -201,10 +201,11 @@ test('limpa contexto de recomendação e carrinho sem manter estado oculto', asy
   assert.equal(captured?.recommendationContext, undefined)
 })
 
-test('substitui explicitamente carrinho e contexto de recomendação', async () => {
+test('replace persiste, nova recomendação substitui e clear limpa turnos futuros', async () => {
   const scenario = await baseScenario()
   const firstTurn = scenario.input.turns[0]
-  assert(firstTurn)
+  const secondTurn = scenario.input.turns[1]
+  assert(firstTurn && secondTurn)
   const custom = {
     ...scenario,
     input: {
@@ -226,35 +227,97 @@ test('substitui explicitamente carrinho e contexto de recomendação', async () 
             value: { productIds: [9] },
           },
         },
+        {
+          ...secondTurn,
+          preferences: { mode: 'preserve' as const },
+          cart: { mode: 'preserve' as const },
+          recommendationContext: { mode: 'auto' as const },
+        },
+        {
+          ...secondTurn,
+          message: 'Ainda estou avaliando essa opção.',
+          preferences: { mode: 'preserve' as const },
+          cart: { mode: 'preserve' as const },
+          recommendationContext: { mode: 'auto' as const },
+        },
+        {
+          ...secondTurn,
+          message: 'Vamos limpar essa referência.',
+          preferences: { mode: 'preserve' as const },
+          cart: { mode: 'preserve' as const },
+          recommendationContext: { mode: 'clear' as const },
+        },
+        {
+          ...secondTurn,
+          message: 'Agora continue sem referência anterior.',
+          preferences: { mode: 'preserve' as const },
+          cart: { mode: 'preserve' as const },
+          recommendationContext: { mode: 'auto' as const },
+        },
       ],
     },
   } as EvalCase
-  let captured: ChatRequest | undefined
+  const requests: ChatRequest[] = []
   await runOfflineEvalDataset(loadedWithCases([custom]), {
     createScenarioRuntime: runtimeFactory(async (request) => {
-      captured = structuredClone(request)
-      return textResponse('ok')
+      requests.push(structuredClone(request))
+      return requests.length === 2
+        ? recommendationResponse(7, 'nova recomendação real')
+        : textResponse('resposta textual')
     }),
   })
 
-  assert.deepEqual(captured?.cart, [{ productId: 9, quantity: 2 }])
-  assert.deepEqual(captured?.recommendationContext, { productIds: [9] })
+  assert.deepEqual(requests.map((request) => request.recommendationContext), [
+    { productIds: [9] },
+    { productIds: [9] },
+    { productIds: [7] },
+    undefined,
+    undefined,
+  ])
+  assert.deepEqual(requests[4]?.cart, [{ productId: 9, quantity: 2 }])
 })
 
-test('deriva auto somente da recomendação realmente retornada', async () => {
+test('auto preserva a última recomendação através de resposta textual', async () => {
   const scenario = await baseScenario()
+  const firstTurn = scenario.input.turns[0]
+  const secondTurn = scenario.input.turns[1]
+  assert(firstTurn && secondTurn)
+  const custom = {
+    ...scenario,
+    input: {
+      ...scenario.input,
+      turns: [
+        firstTurn,
+        {
+          ...secondTurn,
+          message: 'E como funciona o frete?',
+          recommendationContext: { mode: 'auto' as const },
+        },
+        {
+          ...secondTurn,
+          message: 'Quero outra opção no lugar da anterior.',
+          recommendationContext: { mode: 'auto' as const },
+        },
+      ],
+    },
+  } as EvalCase
   const requests: ChatRequest[] = []
-  await runOfflineEvalDataset(loadedWithCases([scenario]), {
+  await runOfflineEvalDataset(loadedWithCases([custom]), {
     createScenarioRuntime: runtimeFactory(async (request) => {
       requests.push(structuredClone(request))
       return requests.length === 1
-        ? recommendationResponse(77, 'produto real do turno')
-        : textResponse('continuação')
+        ? recommendationResponse(13, 'produto real do turno')
+        : textResponse('resposta textual intermediária')
     }),
   })
 
-  assert.deepEqual(requests[1]?.recommendationContext, { productIds: [77] })
+  assert.deepEqual(requests[1]?.recommendationContext, { productIds: [13] })
+  assert.deepEqual(requests[2]?.recommendationContext, { productIds: [13] })
   assert.equal(requests[1]?.history[1]?.content, 'produto real do turno')
+  assert.equal(
+    requests[2]?.history[3]?.content,
+    'resposta textual intermediária',
+  )
 })
 
 test('isola a instância de runtime entre cenários', async () => {
@@ -359,6 +422,7 @@ test('redige credenciais e identificadores das evidências', async () => {
   assert(template)
   const secretMessage =
     'Minha chave sk-or-segredo123, email pessoa@example.com, CPF 123.456.789-00 e cartão 4111 1111 1111 1111.'
+  const sensitiveIngredient = 'sk-or-ingrediente123 pessoa@example.com'
   const custom = {
     ...scenario,
     input: {
@@ -367,20 +431,30 @@ test('redige credenciais e identificadores das evidências', async () => {
         {
           ...template,
           message: secretMessage,
-          preferences: { mode: 'preserve' as const },
+          preferences: {
+            mode: 'replace' as const,
+            value: { avoidIngredients: [sensitiveIngredient] },
+          },
         },
       ],
     },
   } as EvalCase
+  let originalRequest: ChatRequest | undefined
   const result = await runOfflineEvalDataset(loadedWithCases([custom]), {
-    createScenarioRuntime: runtimeFactory(async () =>
-      textResponse(`eco ${secretMessage}`),
-    ),
+    createScenarioRuntime: runtimeFactory(async (request) => {
+      originalRequest = structuredClone(request)
+      return textResponse(`eco ${secretMessage} ${sensitiveIngredient}`)
+    }),
   })
-  const serialized = JSON.stringify(result)
+  assert.deepEqual(originalRequest?.preferences?.avoidIngredients, [
+    sensitiveIngredient,
+  ])
 
-  assert.doesNotMatch(serialized, /segredo123|pessoa@example|123\.456|4111 1111/)
-  assert.match(serialized, /CREDENTIAL_REDACTED/)
+  const appliedIngredients = result.scenarios[0]?.turns[0]?.appliedState
+    .preferences?.avoidIngredients
+  assert.deepEqual(appliedIngredients, [
+    '[CREDENTIAL_REDACTED] [EMAIL_REDACTED]',
+  ])
 
   const trace = new OfflineEvalTraceCollector()
   trace.recordModelCall([
@@ -393,10 +467,83 @@ test('redige credenciais e identificadores das evidências', async () => {
       },
     },
   ])
-  assert.doesNotMatch(
-    JSON.stringify(trace.snapshot()),
-    /segredo123|pessoa@example|123\.456|4111 1111/,
+  trace.recordIngredientResolution(
+    [sensitiveIngredient],
+    { resolvedIds: [], unresolvedTerms: [sensitiveIngredient] },
   )
+  trace.recordProductSearch(
+    {
+      query: sensitiveIngredient,
+      requireInStock: true,
+      incompatibleIngredientIds: [sensitiveIngredient],
+      limit: 1,
+    },
+    [],
+  )
+  const serialized = JSON.stringify({ result, trace: trace.snapshot() })
+
+  assert.doesNotMatch(
+    serialized,
+    /segredo123|ingrediente123|pessoa@example|123\.456|4111 1111/,
+  )
+  assert.match(serialized, /CREDENTIAL_REDACTED/)
+  assert.match(serialized, /EMAIL_REDACTED/)
+})
+
+test('distingue ferramenta solicitada de solicitação não executada', () => {
+  const trace = new OfflineEvalTraceCollector()
+  trace.recordModelCall([
+    {
+      id: 'rejected-tool-call',
+      type: 'function',
+      function: {
+        name: 'search_faq',
+        arguments: JSON.stringify({ query: 'consulta', limit: 1 }),
+      },
+    },
+  ])
+  trace.recordOperationalEvent({
+    type: 'orchestrator_tool',
+    requestId: '00000000-0000-4000-a000-000000000001',
+    ordinal: 1,
+    toolName: 'search_faq',
+    status: 'invalid_arguments',
+    executed: false,
+    outcome: 'rejected',
+  })
+  trace.recordOperationalEvent({
+    type: 'orchestrator_termination',
+    requestId: '00000000-0000-4000-a000-000000000001',
+    status: 'ASSISTANT_RESPONSE',
+    modelCalls: 2,
+    toolCalls: 1,
+    toolErrors: 1,
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    usageComplete: true,
+    groundingRequirement: 'faq',
+    productGrounding: 'not_consulted',
+    faqGrounding: 'failed',
+  })
+
+  const evidence = trace.snapshot()
+  assert.deepEqual(evidence.toolsRequested, ['search_faq'])
+  assert.deepEqual(evidence.toolsExecuted, [])
+  assert.deepEqual(evidence.toolExecutions, [
+    {
+      ordinal: 1,
+      name: 'search_faq',
+      status: 'invalid_arguments',
+      executed: false,
+      outcome: 'rejected',
+    },
+  ])
+  assert.deepEqual(evidence.termination, {
+    status: 'ASSISTANT_RESPONSE',
+    toolCalls: 1,
+    toolErrors: 1,
+  })
 })
 
 test('modelo offline rejeita resultado de ferramenta inesperado', async () => {
@@ -473,6 +620,16 @@ test('percorre tecnicamente os oito cenários e captura restrição combinada', 
   assert(
     evidence?.trace.productSearches.some((search) =>
       search.incompatibleIngredientIds.includes('cocamidopropil-betaina'),
+    ),
+  )
+  assert(evidence?.trace.toolsRequested.includes('search_products'))
+  assert(evidence?.trace.toolsExecuted.includes('search_products'))
+  assert(
+    evidence?.trace.toolExecutions.some(
+      (execution) =>
+        execution.name === 'search_products' &&
+        execution.executed &&
+        execution.outcome === 'not_found',
     ),
   )
 })

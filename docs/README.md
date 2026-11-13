@@ -51,27 +51,31 @@ Marque a fase apenas quando **todos os critérios de aceite** de seus backlogs f
 **Marco M2 (portfólio diferenciado):** fases 07–08.  
 **Marco M3 (publicação):** fases 09–10.
 
-## Acompanhamento da fase atual
+## Acompanhamento da execução
 
-**Atualizado em:** 10/11/2026.
+**Atualizado em:** 12/11/2026.  
+**Referência auditada:** `main` após o merge do [PR #35](https://github.com/luizcarvalhoid-spec/Agente-de-vendas-e-atendimento/pull/35), commit `9af5c7ae790446e27584894388251b75be6b8933`. O diagnóstico inicial de 06/11/2026 é histórico.
 
-**Referência atual:** branch `main`, commit
-`cb3a19cd51b79bf4c873ffa13e9eaaeedc4d17c8`. A referência histórica do
-diagnóstico inicial permanece registrada no início deste documento.
+**Critério de marcação:** a caixa de uma fase na visão geral só muda para `[x]` quando **todos os seus critérios de aceite** estiverem comprovados. Entrega de código, teste offline, smoke real e validação visual são evidências diferentes.
 
-- **Fase atual:** 05 — Agente com OpenRouter e ferramentas.
-- [x] **5.1** — Implementada e mesclada no PR #17.
-- [x] **5.2** — Implementada e mesclada no PR #18.
-- [x] **5.3** — Implementada e mesclada no PR #19.
-- [x] **5.4** — Implementada e mesclada no PR #21.
-- [x] **5.5** — Implementada, revisada e mesclada no PR #22.
-- [ ] **Smoke real com OpenRouter** — pendente.
-- [ ] **Tool calling real com o modelo configurado** — pendente.
+| Fase | Implementação confirmada | Aceite ainda necessário | Estado do checklist |
+| --- | --- | --- | --- |
+| **05 — Agente** | **5.1–5.5 implementadas e mescladas** ([#17](https://github.com/luizcarvalhoid-spec/Agente-de-vendas-e-atendimento/pull/17), [#18](https://github.com/luizcarvalhoid-spec/Agente-de-vendas-e-atendimento/pull/18), [#19](https://github.com/luizcarvalhoid-spec/Agente-de-vendas-e-atendimento/pull/19), [#21](https://github.com/luizcarvalhoid-spec/Agente-de-vendas-e-atendimento/pull/21), [#22](https://github.com/luizcarvalhoid-spec/Agente-de-vendas-e-atendimento/pull/22)). Smoke preparado e corrigido em PRs posteriores. | Smoke com OpenRouter real e compatibilidade de tool calling do modelo configurado; registro do resultado. | **Aberta — validação operacional pendente** |
+| **06 — Jornada comercial** | **6.1–6.4 implementadas** ([#24](https://github.com/luizcarvalhoid-spec/Agente-de-vendas-e-atendimento/pull/24)–[#27](https://github.com/luizcarvalhoid-spec/Agente-de-vendas-e-atendimento/pull/27)); **6.5 aprovada offline** ([#28](https://github.com/luizcarvalhoid-spec/Agente-de-vendas-e-atendimento/pull/28)); polimento visual técnico [#29](https://github.com/luizcarvalhoid-spec/Agente-de-vendas-e-atendimento/pull/29). | Inspeção desktop/mobile em navegador real e vídeo local verificado; OpenRouter real continua pendente pela fase 05. | **Aberta — aceite manual pendente** |
+| **07 — Vendas consultivas** | Há entregas **parciais** de filtro/ranking, comparações e humanização segura; cotação contextual [#34](https://github.com/luizcarvalhoid-spec/Agente-de-vendas-e-atendimento/pull/34) e respostas humanizadas [#35](https://github.com/luizcarvalhoid-spec/Agente-de-vendas-e-atendimento/pull/35). | Completar critérios 7.1–7.4; especialmente comparação estruturada prevista, uso do contexto do carrinho no backend e testes adversariais. | **Aberta — execução parcial** |
+| **08 — Observabilidade/evals** | Testes determinísticos e cenários offline já existem, incluindo 12 casos de MVP [#28](https://github.com/luizcarvalhoid-spec/Agente-de-vendas-e-atendimento/pull/28) e 15 jornadas de humanização [#35](https://github.com/luizcarvalhoid-spec/Agente-de-vendas-e-atendimento/pull/35). Os conjuntos têm objetivos diferentes e **não equivalem** a 27 evals independentes com LLM. | Consolidar dataset de aproximadamente 30 cenários, executor e rubrica; executar e registrar avaliações reais opt-in; ampliar telemetria, painel e evidências. | **Aberta — base offline parcial** |
 
-A fase 05 permanece aberta: 5.1 a 5.5 foram implementadas, revisadas e
-mescladas. A validação manual com OpenRouter
-real e a compatibilidade operacional de tool calling ainda não foram
-comprovadas.
+**Marcos:** M1 (01–06) tem a **jornada implementada e validada offline**, mas **não está integralmente aceito**; M2 (07–08) está em execução parcial; M3 (09–10) permanece futuro.
+
+### Próximas tarefas objetivas
+
+- [ ] **05 — Aceite real:** executar somente com autorização explícita de custo o smoke controlado e confirmar tool calling do modelo escolhido; registrar modelo, data, resultado e limites, sem segredos.
+- [ ] **06 — Aceite manual:** inspecionar a jornada desktop e mobile em navegador real, inclusive teclado/responsividade, e registrar o vídeo previsto em [6.5](./06.5-mvp-validation.md).
+- [ ] **07 — Completar diferenciais:** fechar itens ainda abertos no [backlog 07](./07-diferenciais-vendas.md), sem presumir que humanização equivale à fase inteira.
+- [ ] **08.4 — Próxima frente de avaliação:** versionar cenários com `id`, `input`, condições iniciais e critérios objetivos de comportamento; projetar um executor semiautomatizado (por exemplo, `eval.py` com notas de 1 a 10) **ainda não implementado**, com rubrica explícita, medidas reproduzíveis e distinção entre teste offline e teste real pago.
+- [ ] **08 — Observabilidade:** concluir telemetria e painel de demonstração sem exposição de dados pessoais ou credenciais.
+
+Os PRs são evidência de **implementação mesclada**, não de inspeção visual nem de conformidade de um LLM real. Mais detalhes estão nos documentos das fases 05–08.
 
 ## Dependências (caminho crítico)
 

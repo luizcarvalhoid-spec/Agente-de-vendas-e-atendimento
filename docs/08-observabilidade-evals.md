@@ -25,10 +25,10 @@
 
 ## 8.3 — Testes determinísticos com mocks
 
-- [ ] Testar schema de produtos, restrições, ranking, FAQ, carrinho, erros do chat e validação do backend.
-- [ ] Mockar OpenRouter: CI não depende de chave nem gasta tokens.
-- [ ] Criar casos de ferramenta inexistente, ciclo acima do limite, resposta inválida, produto indisponível e preço não confiável vindo do LLM.
-- [ ] Garantir que cada teste tenha expectativa objetiva, evitando comparar textos livres palavra por palavra.
+- [x] Testar schema de produtos, restrições, ranking, FAQ, carrinho, erros do chat e validação do backend.
+- [x] Mockar OpenRouter: CI não depende de chave nem gasta tokens.
+- [x] Criar casos de ferramenta inexistente, ciclo acima do limite, resposta inválida, produto indisponível e preço não confiável vindo do LLM.
+- [x] Garantir que cada teste tenha expectativa objetiva, evitando comparar textos livres palavra por palavra.
 
 **Aceite:** suíte automatizada passa offline e sinaliza regressões funcionais.  
 **Commit:** `test: cover deterministic agent flows`.
@@ -52,3 +52,13 @@
 
 **Aceite:** há demonstração técnica do funcionamento e não apenas afirmação de que a IA “é inteligente”.  
 **Commit:** `docs: publish agent evaluation approach`.
+
+## Auditoria de progresso (12/11/2026)
+
+- **8.1 parcial:** o [PR #22](https://github.com/luizcarvalhoid-spec/Agente-de-vendas-e-atendimento/pull/22) incluiu eventos operacionais sanitizados, limites e reconciliação de uso. Não equivale à telemetria consultável exigida por 8.1; os itens permanecem pendentes para aceite.
+- **8.2 não entregue:** painel técnico ainda não implementado.
+- **8.3 coberta offline:** as suítes para contratos, catálogo, FAQ, falhas, ferramentas, carrinho e jornada usam modelos/transportes falsos. O [PR #28](https://github.com/luizcarvalhoid-spec/Agente-de-vendas-e-atendimento/pull/28) registrou 378 testes backend e 129 frontend aprovados; o [PR #35](https://github.com/luizcarvalhoid-spec/Agente-de-vendas-e-atendimento/pull/35) registrou 439 testes backend aprovados. São resultados de momentos diferentes, não somáveis.
+- **8.4 em preparação:** há [12 cenários de MVP](../Backend/test/fixtures/mvp-journey-cases.json) e [15 jornadas de humanização](./agent-humanization-evaluation.md), ambos offline e com objetivos diferentes. Não declarar 27 casos únicos nem avaliação real de LLM. Falta dataset consolidado de cerca de 30 casos com `id`, `input`, estado inicial e verificações objetivas; uma rubrica (incluindo eventual nota de 1 a 10), executor controlado, modelo/data, custos e relatório de acertos/falhas reais.
+- **8.5 pendente:** evidências de uso real, capturas e vídeo não foram registradas como concluídas.
+
+**Próxima tarefa sugerida:** construir a especificação do dataset e a rubrica de notas **antes** de automatizar a execução, para que um `eval.py` futuro não transforme similaridade textual ou impressões subjetivas em nota sem critério. Executar modelos reais somente com autorização de custo e sem credenciais em artefatos versionados.

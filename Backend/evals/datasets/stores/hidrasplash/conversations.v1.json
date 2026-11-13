@@ -1,0 +1,278 @@
+{
+  "schemaVersion": 1,
+  "dataset": {
+    "id": "hidrasplash-conversations",
+    "version": "1.0.0",
+    "scope": "store",
+    "locale": "pt-BR",
+    "storeProfile": "hidrasplash"
+  },
+  "cases": [
+    {
+      "id": "hidrasplash.conversation.budget-change.001",
+      "category": "multi-turn-preference-change",
+      "difficulty": "hard",
+      "severity": "high",
+      "tags": ["multi-turn", "budget-change", "preference-replacement"],
+      "input": {
+        "initialState": {
+          "history": [],
+          "cart": []
+        },
+        "turns": [
+          {
+            "message": "Quero shampoo anticaspa para couro oleoso, cítrico e refrescante, até R$ 50,00.",
+            "preferences": {
+              "mode": "replace",
+              "value": {
+                "maxPrice": 50,
+                "category": "shampoos",
+                "subcategory": "anticaspa",
+                "scalpTypes": ["oleoso"],
+                "hairConcerns": ["caspa", "oleosidade"]
+              }
+            },
+            "cart": { "mode": "preserve" },
+            "recommendationContext": { "mode": "auto" }
+          },
+          {
+            "message": "Mudei: agora meu limite é R$ 47,00 e prefiro uma limpeza mais intensa.",
+            "preferences": {
+              "mode": "replace",
+              "value": {
+                "maxPrice": 47,
+                "category": "shampoos",
+                "subcategory": "anticaspa",
+                "scalpTypes": ["oleoso"],
+                "hairConcerns": ["caspa", "oleosidade"]
+              }
+            },
+            "cart": { "mode": "preserve" },
+            "recommendationContext": { "mode": "auto" }
+          }
+        ]
+      },
+      "expected_behaviors": [
+        {
+          "turn": 0,
+          "action": "recommend",
+          "description": "Recomendar o produto canônico elegível para o perfil e o primeiro teto.",
+          "requiredGrounding": ["product"]
+        },
+        {
+          "turn": 1,
+          "action": "recommend",
+          "description": "Substituir o teto anterior e selecionar a alternativa canônica de limpeza intensa dentro do novo limite.",
+          "requiredGrounding": ["product"]
+        }
+      ],
+      "assertions": [
+        {
+          "id": "turn-0-recommendation",
+          "criterionId": "objective-context-change",
+          "turn": 0,
+          "severity": "high",
+          "type": "response_type_allowed",
+          "responseTypes": ["recommendation"]
+        },
+        {
+          "id": "turn-0-product-13",
+          "criterionId": "objective-context-change",
+          "turn": 0,
+          "severity": "critical",
+          "type": "product_ids_exact",
+          "productIds": [13]
+        },
+        {
+          "id": "turn-0-canonical-card",
+          "criterionId": "objective-context-change",
+          "turn": 0,
+          "severity": "critical",
+          "type": "canonical_product_cards"
+        },
+        {
+          "id": "turn-0-grounding",
+          "criterionId": "objective-context-change",
+          "turn": 0,
+          "severity": "critical",
+          "type": "grounding_domains",
+          "domains": ["product"],
+          "match": "exact"
+        },
+        {
+          "id": "turn-1-recommendation",
+          "criterionId": "objective-context-change",
+          "turn": 1,
+          "severity": "high",
+          "type": "response_type_allowed",
+          "responseTypes": ["recommendation"]
+        },
+        {
+          "id": "turn-1-product-9",
+          "criterionId": "objective-context-change",
+          "turn": 1,
+          "severity": "critical",
+          "type": "product_ids_exact",
+          "productIds": [9]
+        },
+        {
+          "id": "turn-1-canonical-card",
+          "criterionId": "objective-context-change",
+          "turn": 1,
+          "severity": "critical",
+          "type": "canonical_product_cards"
+        },
+        {
+          "id": "turn-1-grounding",
+          "criterionId": "objective-context-change",
+          "turn": 1,
+          "severity": "critical",
+          "type": "grounding_domains",
+          "domains": ["product"],
+          "match": "exact"
+        }
+      ],
+      "quality_criteria": [
+        {
+          "id": "objective-context-change",
+          "criterion": "context_continuity",
+          "kind": "objective",
+          "applicability": "required",
+          "evaluation": "deterministic",
+          "status": "not_evaluated",
+          "weight": 3,
+          "assertionIds": ["turn-0-recommendation", "turn-0-product-13", "turn-0-canonical-card", "turn-0-grounding", "turn-1-recommendation", "turn-1-product-9", "turn-1-canonical-card", "turn-1-grounding"]
+        },
+        {
+          "id": "naturalness-review",
+          "criterion": "naturalness",
+          "kind": "subjective",
+          "applicability": "required",
+          "evaluation": "human",
+          "status": "not_evaluated",
+          "weight": 1
+        },
+        {
+          "id": "continuity-review",
+          "criterion": "context_continuity",
+          "kind": "subjective",
+          "applicability": "optional",
+          "evaluation": "human",
+          "status": "not_evaluated",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "id": "hidrasplash.conversation.shipping-boundary.001",
+      "category": "grounded-commercial-policy",
+      "difficulty": "medium",
+      "severity": "high",
+      "tags": ["shipping", "boundary-value", "fictional-operation", "faq-grounding"],
+      "input": {
+        "initialState": {
+          "history": [],
+          "cart": []
+        },
+        "turns": [
+          {
+            "message": "Um subtotal de R$ 100,00 exatos recebe frete grátis? Essa entrega é real?",
+            "preferences": { "mode": "preserve" },
+            "cart": { "mode": "preserve" },
+            "recommendationContext": { "mode": "auto" }
+          }
+        ]
+      },
+      "expected_behaviors": [
+        {
+          "turn": 0,
+          "action": "answer",
+          "description": "Explicar que R$ 100,00 exatos não recebem frete grátis e deixar claro que não existe entrega real.",
+          "requiredGrounding": ["faq"]
+        }
+      ],
+      "assertions": [
+        {
+          "id": "shipping-text-response",
+          "criterionId": "objective-shipping-policy",
+          "turn": 0,
+          "severity": "high",
+          "type": "response_type_allowed",
+          "responseTypes": ["text"]
+        },
+        {
+          "id": "shipping-boundary-source",
+          "criterionId": "objective-shipping-policy",
+          "turn": 0,
+          "severity": "critical",
+          "type": "source_ids_include",
+          "sourceIds": ["faq-002"]
+        },
+        {
+          "id": "allowed-shipping-sources",
+          "criterionId": "objective-shipping-policy",
+          "turn": 0,
+          "severity": "high",
+          "type": "source_ids_allowed",
+          "sourceIds": ["faq-001", "faq-002", "faq-003"]
+        },
+        {
+          "id": "faq-grounding",
+          "criterionId": "objective-shipping-policy",
+          "turn": 0,
+          "severity": "critical",
+          "type": "grounding_domains",
+          "domains": ["faq"],
+          "match": "exact"
+        },
+        {
+          "id": "no-product-card",
+          "criterionId": "objective-shipping-policy",
+          "turn": 0,
+          "severity": "medium",
+          "type": "product_ids_exact",
+          "productIds": []
+        }
+      ],
+      "quality_criteria": [
+        {
+          "id": "objective-shipping-policy",
+          "criterion": "factual_accuracy",
+          "kind": "objective",
+          "applicability": "required",
+          "evaluation": "deterministic",
+          "status": "not_evaluated",
+          "weight": 3,
+          "assertionIds": ["shipping-text-response", "shipping-boundary-source", "allowed-shipping-sources", "faq-grounding", "no-product-card"]
+        },
+        {
+          "id": "shipping-facts-review",
+          "criterion": "factual_accuracy",
+          "kind": "subjective",
+          "applicability": "required",
+          "evaluation": "human",
+          "status": "not_evaluated",
+          "weight": 2
+        },
+        {
+          "id": "naturalness-review",
+          "criterion": "naturalness",
+          "kind": "subjective",
+          "applicability": "required",
+          "evaluation": "human",
+          "status": "not_evaluated",
+          "weight": 1
+        },
+        {
+          "id": "clarity-review",
+          "criterion": "clarity_utility",
+          "kind": "subjective",
+          "applicability": "optional",
+          "evaluation": "human",
+          "status": "not_evaluated",
+          "weight": 1
+        }
+      ]
+    }
+  ]
+}

@@ -52,4 +52,4 @@ assertions offline não transforma naturalidade ou outra qualidade subjetiva em
 uma avaliação concluída.
 
 O arquivo `fixtures/minimal-valid.v1.json` é apenas um exemplo estrutural. Os
-casos definitivos pertencem à EVAL-02.
+oito casos iniciais da EVAL-02 estão documentados em `datasets/README.md`.

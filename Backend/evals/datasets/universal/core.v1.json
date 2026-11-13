@@ -1,0 +1,166 @@
+{
+  "schemaVersion": 1,
+  "dataset": {
+    "id": "universal-core",
+    "version": "1.0.0",
+    "scope": "universal",
+    "locale": "pt-BR"
+  },
+  "cases": [
+    {
+      "id": "universal.core.incomplete-need.001",
+      "category": "consultative-dialogue",
+      "difficulty": "easy",
+      "severity": "medium",
+      "tags": ["clarification", "incomplete-need", "single-question"],
+      "input": {
+        "initialState": {
+          "history": [],
+          "cart": []
+        },
+        "turns": [
+          {
+            "message": "Preciso escolher um produto, mas ainda não sei qual atende à minha necessidade.",
+            "preferences": { "mode": "preserve" },
+            "cart": { "mode": "preserve" },
+            "recommendationContext": { "mode": "auto" }
+          }
+        ]
+      },
+      "expected_behaviors": [
+        {
+          "turn": 0,
+          "action": "ask_clarification",
+          "description": "Fazer no máximo uma pergunta útil para entender a necessidade sem iniciar um questionário.",
+          "requiredGrounding": []
+        }
+      ],
+      "assertions": [
+        {
+          "id": "clarification-response",
+          "criterionId": "objective-dialogue",
+          "turn": 0,
+          "severity": "high",
+          "type": "response_type_allowed",
+          "responseTypes": ["text"],
+          "textReasons": ["clarification"]
+        },
+        {
+          "id": "single-useful-question",
+          "criterionId": "objective-dialogue",
+          "turn": 0,
+          "severity": "high",
+          "type": "max_questions",
+          "maximum": 1
+        }
+      ],
+      "quality_criteria": [
+        {
+          "id": "objective-dialogue",
+          "criterion": "consultative_quality",
+          "kind": "objective",
+          "applicability": "required",
+          "evaluation": "deterministic",
+          "status": "not_evaluated",
+          "weight": 2,
+          "assertionIds": ["clarification-response", "single-useful-question"]
+        },
+        {
+          "id": "naturalness-review",
+          "criterion": "naturalness",
+          "kind": "subjective",
+          "applicability": "required",
+          "evaluation": "human",
+          "status": "not_evaluated",
+          "weight": 1
+        },
+        {
+          "id": "clarity-review",
+          "criterion": "clarity_utility",
+          "kind": "subjective",
+          "applicability": "optional",
+          "evaluation": "human",
+          "status": "not_evaluated",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "id": "universal.core.informational-no-pressure.001",
+      "category": "informational-answer",
+      "difficulty": "easy",
+      "severity": "low",
+      "tags": ["informational", "no-sales-pressure", "single-turn"],
+      "input": {
+        "initialState": {
+          "history": [],
+          "cart": []
+        },
+        "turns": [
+          {
+            "message": "O que significa quando uma loja informa que um prazo é apenas uma estimativa?",
+            "preferences": { "mode": "preserve" },
+            "cart": { "mode": "preserve" },
+            "recommendationContext": { "mode": "auto" }
+          }
+        ]
+      },
+      "expected_behaviors": [
+        {
+          "turn": 0,
+          "action": "answer",
+          "description": "Responder diretamente à pergunta informativa sem transformar a conversa em oferta comercial.",
+          "requiredGrounding": []
+        }
+      ],
+      "assertions": [
+        {
+          "id": "informational-text",
+          "criterionId": "objective-information",
+          "turn": 0,
+          "severity": "medium",
+          "type": "response_type_allowed",
+          "responseTypes": ["text"]
+        },
+        {
+          "id": "no-follow-up-question",
+          "criterionId": "objective-information",
+          "turn": 0,
+          "severity": "medium",
+          "type": "max_questions",
+          "maximum": 0
+        },
+        {
+          "id": "no-purchase-pressure",
+          "criterionId": "objective-information",
+          "turn": 0,
+          "severity": "high",
+          "type": "text_excludes",
+          "values": ["compre agora", "adicione ao carrinho", "aproveite antes que acabe"],
+          "match": "normalized"
+        }
+      ],
+      "quality_criteria": [
+        {
+          "id": "objective-information",
+          "criterion": "clarity_utility",
+          "kind": "objective",
+          "applicability": "required",
+          "evaluation": "deterministic",
+          "status": "not_evaluated",
+          "weight": 2,
+          "assertionIds": ["informational-text", "no-follow-up-question", "no-purchase-pressure"]
+        },
+        {
+          "id": "naturalness-review",
+          "criterion": "naturalness",
+          "kind": "subjective",
+          "applicability": "required",
+          "evaluation": "human",
+          "status": "not_evaluated",
+          "weight": 1
+        }
+      ]
+    }
+  ]
+}

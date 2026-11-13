@@ -150,7 +150,7 @@ reservados à 5.4; controles por sessão e custo operacional permanecem na 5.5.
 **Aceite:** contrato documentado por exemplos e validado; produtos exibidos sempre vêm do catálogo.  
 **Commit:** `feat(api): expose structured chat endpoint`.
 
-**Status de entrega:** implementada na branch da tarefa 5.4, com contrato
+**Status de entrega:** implementada e mesclada no [PR #21](https://github.com/luizcarvalhoid-spec/Agente-de-vendas-e-atendimento/pull/21), com contrato
 estrito, planejador determinístico, `ChatService`, rota Fastify, composição no
 servidor e projeção canônica de cartões validados por testes offline. A seleção
 de cartões cruza o ranking recalculado com IDs autorizados e intenção comercial;
@@ -183,6 +183,16 @@ O aceite operacional da fase 05 permanece pendente: o smoke real não foi
 executado, e não há comprovação de compatibilidade, comportamento, uso ou custo
 do modelo configurado no OpenRouter. Os testes automáticos são exclusivamente
 offline e não usam credenciais nem chamadas pagas.
+
+## Entregas posteriores relacionadas ao agente (12/11/2026)
+
+As cinco tarefas de implementação 5.1–5.5 estão mescladas, sem que isso conclua o aceite operacional da fase. A evolução posterior inclui:
+
+- [PR #33](https://github.com/luizcarvalhoid-spec/Agente-de-vendas-e-atendimento/pull/33): ajuste do orçamento de chamadas do smoke de cenário misto, **validado offline**, sem execução paga.
+- [PR #34](https://github.com/luizcarvalhoid-spec/Agente-de-vendas-e-atendimento/pull/34): cotação contextual determinística, preços/frete canônicos e tratamento de referências ambíguas e produtos rejeitados.
+- [PR #35](https://github.com/luizcarvalhoid-spec/Agente-de-vendas-e-atendimento/pull/35): composição de respostas mais natural e fundamentada, sem nova chamada de modelo; 15 jornadas automatizadas offline documentadas em [avaliação de humanização](./agent-humanization-evaluation.md).
+
+**Pendência bloqueadora do checkbox da fase 05:** escolher/configurar o modelo, executar smoke real com consentimento para eventuais custos, confirmar o comportamento de tools e registrar resultados. Os testes offline não substituem essa evidência.
 
 ## Fora de escopo
 

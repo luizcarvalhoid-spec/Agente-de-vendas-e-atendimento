@@ -1,0 +1,243 @@
+{
+  "schemaVersion": 1,
+  "dataset": {
+    "id": "hidrasplash-recommendations",
+    "version": "1.0.0",
+    "scope": "store",
+    "locale": "pt-BR",
+    "storeProfile": "hidrasplash"
+  },
+  "cases": [
+    {
+      "id": "hidrasplash.recommendation.oily-refreshing-budget.001",
+      "category": "grounded-recommendation",
+      "difficulty": "medium",
+      "severity": "high",
+      "tags": ["budget", "oily-scalp", "sensory-preference", "canonical-product"],
+      "input": {
+        "initialState": {
+          "history": [],
+          "cart": []
+        },
+        "turns": [
+          {
+            "message": "Quero shampoo anticaspa para couro cabeludo oleoso, com perfil cítrico e refrescante, até R$ 50,00.",
+            "preferences": {
+              "mode": "replace",
+              "value": {
+                "maxPrice": 50,
+                "category": "shampoos",
+                "subcategory": "anticaspa",
+                "scalpTypes": ["oleoso"],
+                "hairConcerns": ["caspa", "oleosidade"]
+              }
+            },
+            "cart": { "mode": "preserve" },
+            "recommendationContext": { "mode": "auto" }
+          }
+        ]
+      },
+      "expected_behaviors": [
+        {
+          "turn": 0,
+          "action": "recommend",
+          "description": "Recomendar o candidato canônico elegível que atende perfil, preferência sensorial e teto informado.",
+          "requiredGrounding": ["product"]
+        }
+      ],
+      "assertions": [
+        {
+          "id": "recommendation-response",
+          "criterionId": "objective-recommendation",
+          "turn": 0,
+          "severity": "high",
+          "type": "response_type_allowed",
+          "responseTypes": ["recommendation"]
+        },
+        {
+          "id": "canonical-product-13",
+          "criterionId": "objective-recommendation",
+          "turn": 0,
+          "severity": "critical",
+          "type": "product_ids_exact",
+          "productIds": [13]
+        },
+        {
+          "id": "canonical-card",
+          "criterionId": "objective-recommendation",
+          "turn": 0,
+          "severity": "critical",
+          "type": "canonical_product_cards"
+        },
+        {
+          "id": "product-grounding",
+          "criterionId": "objective-recommendation",
+          "turn": 0,
+          "severity": "critical",
+          "type": "grounding_domains",
+          "domains": ["product"],
+          "match": "exact"
+        },
+        {
+          "id": "no-faq-source",
+          "criterionId": "objective-recommendation",
+          "turn": 0,
+          "severity": "medium",
+          "type": "source_ids_exact",
+          "sourceIds": []
+        }
+      ],
+      "quality_criteria": [
+        {
+          "id": "objective-recommendation",
+          "criterion": "factual_accuracy",
+          "kind": "objective",
+          "applicability": "required",
+          "evaluation": "deterministic",
+          "status": "not_evaluated",
+          "weight": 3,
+          "assertionIds": ["recommendation-response", "canonical-product-13", "canonical-card", "product-grounding", "no-faq-source"]
+        },
+        {
+          "id": "naturalness-review",
+          "criterion": "naturalness",
+          "kind": "subjective",
+          "applicability": "required",
+          "evaluation": "human",
+          "status": "not_evaluated",
+          "weight": 1
+        },
+        {
+          "id": "consultative-review",
+          "criterion": "consultative_quality",
+          "kind": "subjective",
+          "applicability": "optional",
+          "evaluation": "human",
+          "status": "not_evaluated",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "id": "hidrasplash.recommendation.rejection-ingredient.001",
+      "category": "combined-constraints",
+      "difficulty": "hard",
+      "severity": "critical",
+      "tags": ["product-rejection", "ingredient-restriction", "safe-fallback"],
+      "input": {
+        "initialState": {
+          "history": [],
+          "cart": [],
+          "preferences": {
+            "category": "shampoos",
+            "subcategory": "anticaspa",
+            "scalpTypes": ["oleoso"],
+            "hairConcerns": ["caspa", "oleosidade"]
+          },
+          "recommendationContext": {
+            "productIds": [13]
+          }
+        },
+        "turns": [
+          {
+            "message": "Não quero o produto 13. Quero outro sem cocamidopropil-betaína.",
+            "preferences": {
+              "mode": "replace",
+              "value": {
+                "category": "shampoos",
+                "subcategory": "anticaspa",
+                "scalpTypes": ["oleoso"],
+                "hairConcerns": ["caspa", "oleosidade"],
+                "avoidIngredients": ["cocamidopropil-betaína"]
+              }
+            },
+            "cart": { "mode": "preserve" },
+            "recommendationContext": { "mode": "auto" }
+          }
+        ]
+      },
+      "expected_behaviors": [
+        {
+          "turn": 0,
+          "action": "alternative_or_safe_fallback",
+          "description": "Excluir simultaneamente o produto rejeitado e todos os candidatos incompatíveis com a restrição, retornando fallback seguro quando não houver alternativa.",
+          "requiredGrounding": ["product"]
+        }
+      ],
+      "assertions": [
+        {
+          "id": "safe-not-found-response",
+          "criterionId": "objective-combined-constraints",
+          "turn": 0,
+          "severity": "critical",
+          "type": "response_type_allowed",
+          "responseTypes": ["text"],
+          "textReasons": ["not_found"]
+        },
+        {
+          "id": "rejected-product-excluded",
+          "criterionId": "objective-combined-constraints",
+          "turn": 0,
+          "severity": "critical",
+          "type": "product_ids_exclude",
+          "productIds": [13]
+        },
+        {
+          "id": "no-product-selected",
+          "criterionId": "objective-combined-constraints",
+          "turn": 0,
+          "severity": "critical",
+          "type": "product_ids_exact",
+          "productIds": []
+        },
+        {
+          "id": "ingredient-restriction-preserved",
+          "criterionId": "objective-combined-constraints",
+          "turn": 0,
+          "severity": "critical",
+          "type": "products_satisfy_ingredient_restrictions",
+          "terms": ["cocamidopropil-betaína"]
+        },
+        {
+          "id": "canonical-product-grounding",
+          "criterionId": "objective-combined-constraints",
+          "turn": 0,
+          "severity": "critical",
+          "type": "grounding_domains",
+          "domains": ["product"],
+          "match": "exact"
+        }
+      ],
+      "quality_criteria": [
+        {
+          "id": "objective-combined-constraints",
+          "criterion": "safety",
+          "kind": "objective",
+          "applicability": "required",
+          "evaluation": "deterministic",
+          "status": "not_evaluated",
+          "weight": 3,
+          "assertionIds": ["safe-not-found-response", "rejected-product-excluded", "no-product-selected", "ingredient-restriction-preserved", "canonical-product-grounding"]
+        },
+        {
+          "id": "naturalness-review",
+          "criterion": "naturalness",
+          "kind": "subjective",
+          "applicability": "required",
+          "evaluation": "human",
+          "status": "not_evaluated",
+          "weight": 1
+        },
+        {
+          "id": "fallback-review",
+          "criterion": "clarity_utility",
+          "kind": "subjective",
+          "applicability": "optional",
+          "evaluation": "human",
+          "status": "not_evaluated",
+          "weight": 1
+        }
+      ]
+    }
+  ]
+}

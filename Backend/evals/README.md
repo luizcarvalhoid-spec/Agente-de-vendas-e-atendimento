@@ -53,3 +53,55 @@ uma avaliação concluída.
 
 O arquivo `fixtures/minimal-valid.v1.json` é apenas um exemplo estrutural. Os
 oito casos iniciais da EVAL-02 estão documentados em `datasets/README.md`.
+
+## Executor offline (EVAL-03)
+
+O runner executa o `ChatService` real, com catálogo, FAQ, ferramentas e
+revalidação canônica. O único substituto é um `AgentModelPort` determinístico
+local que seleciona portas a consultar; ele não escolhe IDs, fontes ou regras de
+elegibilidade. Não há cliente OpenRouter, credenciais ou acesso à rede no fluxo.
+
+Execute a partir de `Backend`:
+
+```text
+pnpm eval --mode offline --dataset universal-core
+pnpm eval --mode offline --dataset hidrasplash-conversations --scenario hidrasplash.conversation.budget-change.001
+```
+
+Datasets aceitos: `universal-core`, `universal-safety`,
+`hidrasplash-recommendations` e `hidrasplash-conversations`. `--mode offline` é
+opcional porque este é o modo padrão e único desta etapa.
+
+Cada cenário recebe uma instância isolada do modelo, do serviço e dos coletores.
+O histórico usa as respostas reais, e `recommendationContext: auto` deriva apenas
+de respostas `recommendation` ou `comparison`. Respostas textuais intermediárias
+preservam a última referência; `replace` a substitui e `clear` a remove para os
+turnos seguintes até que uma nova recomendação ou comparação seja realmente
+produzida. Violações dos limites do contrato geram `technical_failure`; o runner
+nunca trunca estado silenciosamente.
+
+As evidências em memória registram estado aplicado, resposta, ferramentas,
+grounding e resolução canônica de ingredientes. Textos passam por redação de
+credenciais e identificadores comuns, e prompts internos ou resultados brutos de
+ferramentas não são armazenados.
+
+Ferramentas solicitadas pelo modelo e ferramentas efetivamente executadas são
+registradas separadamente. Quando o orquestrador processa uma chamada individual,
+o trace diferencia `found`, `not_found`, `rejected` e `failed`. Se um lote inteiro
+for rejeitado antes desse processamento, ficam registradas somente as solicitações
+e a terminação do orquestrador; o runner não inventa uma execução ou um resultado
+por ferramenta. Ferramentas futuras sem um estado de resultado padronizado usam
+`unknown`, em vez de serem classificadas falsamente como sucesso ou falha.
+
+`completed` significa somente que a infraestrutura executou o caso. Assertions,
+pontuação e critérios subjetivos não são avaliados: todos permanecem
+explicitamente como `not_evaluated` até as etapas futuras.
+
+### Cobertura do modelo offline
+
+Os oito cenários iniciais podem ser percorridos tecnicamente. O modelo local
+cobre as rotas de busca de produto, FAQ, grounding vazio e continuidade
+multi-turno, mas não comprova naturalidade, resistência semântica a injeção,
+qualidade consultiva ou correção factual de paráfrases. Também não é um modelo
+geral: novas intenções podem terminar em falha técnica ou grounding `not_found` e
+exigir extensão TypeScript revisada. Nenhum contrato JSON de planos foi criado.

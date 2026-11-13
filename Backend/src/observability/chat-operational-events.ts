@@ -21,6 +21,20 @@ export type ChatOperationalEvent =
       readonly requestId: string
     } & BudgetedModelUsageEvent)
   | {
+      readonly type: 'orchestrator_tool'
+      readonly requestId: string
+      readonly ordinal: number
+      readonly toolName: string
+      readonly status: string
+      readonly executed: boolean
+      readonly outcome:
+        | 'found'
+        | 'not_found'
+        | 'rejected'
+        | 'failed'
+        | 'unknown'
+    }
+  | {
       readonly type: 'orchestrator_termination'
       readonly requestId: string
       readonly status: string

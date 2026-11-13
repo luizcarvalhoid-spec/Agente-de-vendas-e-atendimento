@@ -12,6 +12,7 @@
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/server.js",
     "demo:mvp": "tsx test/helpers/mvp-browser-server.ts",
+    "eval": "tsx src/scripts/run-eval.ts",
     "test": "tsc -p tsconfig.json && tsx --test \"test/**/*.test.ts\"",
     "smoke:chat": "tsx src/scripts/smoke-chat.ts",
     "smoke:openrouter": "tsx src/scripts/smoke-openrouter.ts",

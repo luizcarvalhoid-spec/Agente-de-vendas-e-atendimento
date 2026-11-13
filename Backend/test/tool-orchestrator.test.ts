@@ -16,6 +16,7 @@ import { createConsultativeSystemInstruction } from '../src/agent/consultative-a
 import {
   TOOL_ORCHESTRATOR_MAX_CONTEXT_BYTES,
   createToolOrchestrator,
+  type ToolOrchestratorEvent,
 } from '../src/agent/tool-orchestrator.js'
 import {
   createBudgetedAgentModel,
@@ -203,6 +204,7 @@ test('rejects a batch over three calls before executing any tool', async () => {
 
 test('handles unknown tools, invalid JSON and Zod failures without execution', async () => {
   const fake = createFakeTool({})
+  const events: ToolOrchestratorEvent[] = []
   const { model } = createQueueModel([
     assistant(null, [
       toolCall('unknown', 'run_command', {}),
@@ -224,11 +226,24 @@ test('handles unknown tools, invalid JSON and Zod failures without execution', a
   const result = await createToolOrchestrator({
     model,
     tools: createAgentToolRegistry([fake.tool]),
+    log: (event) => events.push(event),
   }).run(runInput())
 
   assert.equal(result.status, 'completed')
   assert.equal(fake.executions, 0)
   assert.equal(result.diagnostics.toolErrors, 3)
+  const toolEvents = events.filter((event) => event.type === 'tool')
+  assert.deepEqual(
+    toolEvents.map((event) => ({
+      executed: event.executed,
+      outcome: event.outcome,
+    })),
+    [
+      { executed: false, outcome: 'rejected' },
+      { executed: false, outcome: 'rejected' },
+      { executed: false, outcome: 'rejected' },
+    ],
+  )
 })
 
 test('does not execute the same validated signature twice', async () => {

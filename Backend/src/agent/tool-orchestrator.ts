@@ -182,6 +182,13 @@ export interface ToolOrchestratorEvent {
   readonly ordinal?: number
   readonly durationMs?: number
   readonly status: string
+  readonly executed?: boolean
+  readonly outcome?:
+    | 'found'
+    | 'not_found'
+    | 'rejected'
+    | 'failed'
+    | 'unknown'
   readonly usage?: AggregatedUsage
   readonly modelCalls?: number
   readonly toolCalls?: number
@@ -536,6 +543,7 @@ export function createToolOrchestrator(
         let result: unknown
         let groundingCandidate: unknown
         let status = 'ok'
+        let executed = false
 
         if (!tool) {
           toolErrors += 1
@@ -582,6 +590,7 @@ export function createToolOrchestrator(
             } else {
               executedSignatures.add(signature)
               try {
+                executed = true
                 const rawResult = await raceWithAbort(
                   tool.execute(parsedArguments.data, toolExecutionContext),
                   operationController.signal,
@@ -593,7 +602,18 @@ export function createToolOrchestrator(
                 result = parsedResult.data
                 groundingCandidate = result
               } catch {
-                if (operationController.signal.aborted) throw new DOMException('Aborted', 'AbortError')
+                if (operationController.signal.aborted) {
+                  log({
+                    type: 'tool',
+                    toolName: toolCall.function.name,
+                    ordinal: toolCalls,
+                    durationMs: Math.max(0, now() - startedAt),
+                    status: 'cancelled',
+                    executed: true,
+                    outcome: 'failed',
+                  })
+                  throw new DOMException('Aborted', 'AbortError')
+                }
                 toolErrors += 1
                 status = 'execution_failed'
                 result = sanitizedToolError(
@@ -650,6 +670,18 @@ export function createToolOrchestrator(
           status?: string
           error?: { code?: string }
         }
+        const outcome =
+          finalResult.ok === true && finalResult.status === 'found'
+            ? 'found'
+            : finalResult.ok === true && finalResult.status === 'not_found'
+              ? 'not_found'
+              : finalResult.ok === true
+                ? 'unknown'
+              : finalResult.error?.code === 'INVALID_ARGUMENTS' ||
+                  finalResult.error?.code === 'TOOL_NOT_FOUND' ||
+                  finalResult.error?.code === 'DUPLICATE_TOOL_CALL'
+                ? 'rejected'
+                : 'failed'
         if (finalResult.ok === true && finalResult.status === 'found') {
           toolOutcomes.found += 1
         } else if (
@@ -681,6 +713,8 @@ export function createToolOrchestrator(
           ordinal: toolCalls,
           durationMs: Math.max(0, now() - startedAt),
           status,
+          executed,
+          outcome,
         })
         return {
           role: 'tool' as const,

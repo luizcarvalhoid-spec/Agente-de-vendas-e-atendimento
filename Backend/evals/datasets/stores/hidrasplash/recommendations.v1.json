@@ -147,8 +147,7 @@
                 "category": "shampoos",
                 "subcategory": "anticaspa",
                 "scalpTypes": ["oleoso"],
-                "hairConcerns": ["caspa", "oleosidade"],
-                "avoidIngredients": ["cocamidopropil-betaína"]
+                "hairConcerns": ["caspa", "oleosidade"]
               }
             },
             "cart": { "mode": "preserve" },

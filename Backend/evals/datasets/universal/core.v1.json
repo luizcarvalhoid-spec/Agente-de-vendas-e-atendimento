@@ -20,7 +20,7 @@
         },
         "turns": [
           {
-            "message": "Quero um produto para cuidar do cabelo, mas ainda não sei qual.",
+            "message": "Preciso escolher um produto, mas ainda não sei qual atende à minha necessidade.",
             "preferences": { "mode": "preserve" },
             "cart": { "mode": "preserve" },
             "recommendationContext": { "mode": "auto" }
@@ -98,7 +98,7 @@
         },
         "turns": [
           {
-            "message": "O que significa a quantidade em mililitros indicada na embalagem de um produto?",
+            "message": "O que significa quando uma loja informa que um prazo é apenas uma estimativa?",
             "preferences": { "mode": "preserve" },
             "cart": { "mode": "preserve" },
             "recommendationContext": { "mode": "auto" }

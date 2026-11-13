@@ -11,7 +11,7 @@ estrutural do dataset; não comprova que o agente atende às expectativas.
 | `universal/core.v1.json` | `universal.core.incomplete-need.001` | Uma pergunta consultiva para necessidade incompleta |
 | `universal/core.v1.json` | `universal.core.informational-no-pressure.001` | Resposta informativa sem pressão de compra |
 | `universal/safety.v1.json` | `universal.safety.prompt-injection.001` | Resistência a exfiltração de prompt e segredos |
-| `universal/safety.v1.json` | `universal.safety.adverse-reaction.001` | Limite clínico e ausência de recomendação comercial |
+| `universal/safety.v1.json` | `universal.safety.personal-data-request.001` | Proteção contra envio de dados pessoais e de pagamento |
 | `stores/hidrasplash/recommendations.v1.json` | `hidrasplash.recommendation.oily-refreshing-budget.001` | Recomendação canônica por perfil, sensorial e orçamento |
 | `stores/hidrasplash/recommendations.v1.json` | `hidrasplash.recommendation.rejection-ingredient.001` | Rejeição e restrição de ingrediente simultâneas |
 | `stores/hidrasplash/conversations.v1.json` | `hidrasplash.conversation.budget-change.001` | Substituição de orçamento em conversa multi-turno |
@@ -28,6 +28,21 @@ Assertions objetivas cobrem tipos de resposta, limites de perguntas, IDs
 canônicos, cards, restrições de ingrediente, fontes e domínios de grounding. Elas
 não comparam mensagens completas. Naturalidade, clareza consultiva e avaliações
 semânticas de segurança permanecem subjetivas e `not_evaluated`.
+
+O contrato v1 ainda não possui uma assertion determinística que valide o sentido
+de uma paráfrase comercial. No cenário de frete, as assertions exigem a fonte
+canônica `faq-002`, restringem as fontes permitidas e verificam o grounding. A
+correção da fronteira de R$ 100,00 e a comunicação do caráter fictício ficam em
+um critério humano obrigatório até existir uma assertion semântica específica.
+
+Da mesma forma, prefixos textuais de credenciais não provam vazamento nem sua
+ausência. O cenário de injeção verifica apenas estrutura e uso de ferramentas de
+forma determinística; a proteção semântica permanece em revisão humana obrigatória.
+
+No caso combinado de rejeição e ingrediente, `avoidIngredients` não é fornecido
+nas preferências estruturadas. A restrição deve ser interpretada da mensagem pelo
+futuro executor, enquanto categoria, subcategoria e perfil comercial continuam
+explícitos para isolar o comportamento avaliado.
 
 ## Preparação para a EVAL-03
 
@@ -49,9 +64,9 @@ ser especificado e aprovado antes de ser adicionado.
 ## Cobertura ainda ausente
 
 Ainda não há casos de comparação, carrinho, mudança de categoria, múltiplas FAQs,
-privacidade detalhada, informação insuficiente após vários turnos, indisponibilidade
-operacional, produto removido ou sem estoque, ambiguidades de contexto e variações
-linguísticas dos mesmos comportamentos.
+situações clínicas específicas da loja, informação insuficiente após vários
+turnos, indisponibilidade operacional, produto removido ou sem estoque,
+ambiguidades de contexto e variações linguísticas dos mesmos comportamentos.
 
 ## Expansão planejada
 

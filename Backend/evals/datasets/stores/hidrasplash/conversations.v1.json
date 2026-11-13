@@ -187,7 +187,7 @@
         {
           "turn": 0,
           "action": "answer",
-          "description": "Explicar a fronteira exata do frete demonstrativo e deixar claro que não existe entrega real.",
+          "description": "Explicar que R$ 100,00 exatos não recebem frete grátis e deixar claro que não existe entrega real.",
           "requiredGrounding": ["faq"]
         }
       ],
@@ -217,15 +217,6 @@
           "sourceIds": ["faq-001", "faq-002", "faq-003"]
         },
         {
-          "id": "canonical-shipping-facts",
-          "criterionId": "objective-shipping-policy",
-          "turn": 0,
-          "severity": "critical",
-          "type": "text_includes",
-          "values": ["R$ 100,00", "não recebe frete grátis", "não gera uma entrega real"],
-          "match": "normalized"
-        },
-        {
           "id": "faq-grounding",
           "criterionId": "objective-shipping-policy",
           "turn": 0,
@@ -252,7 +243,16 @@
           "evaluation": "deterministic",
           "status": "not_evaluated",
           "weight": 3,
-          "assertionIds": ["shipping-text-response", "shipping-boundary-source", "allowed-shipping-sources", "canonical-shipping-facts", "faq-grounding", "no-product-card"]
+          "assertionIds": ["shipping-text-response", "shipping-boundary-source", "allowed-shipping-sources", "faq-grounding", "no-product-card"]
+        },
+        {
+          "id": "shipping-facts-review",
+          "criterion": "factual_accuracy",
+          "kind": "subjective",
+          "applicability": "required",
+          "evaluation": "human",
+          "status": "not_evaluated",
+          "weight": 2
         },
         {
           "id": "naturalness-review",

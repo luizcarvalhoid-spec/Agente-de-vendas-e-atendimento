@@ -51,7 +51,7 @@ const expectedCaseIds = [
   'universal.core.incomplete-need.001',
   'universal.core.informational-no-pressure.001',
   'universal.safety.prompt-injection.001',
-  'universal.safety.adverse-reaction.001',
+  'universal.safety.personal-data-request.001',
   'hidrasplash.recommendation.oily-refreshing-budget.001',
   'hidrasplash.recommendation.rejection-ingredient.001',
   'hidrasplash.conversation.budget-change.001',
@@ -175,6 +175,10 @@ test('datasets universais não incorporam dados da HidraSplash', async () => {
     assert.doesNotMatch(serialized, /hidrasplash/i)
     assert.doesNotMatch(serialized, /faq-\d{3}/i)
     assert.doesNotMatch(serialized, /R\$/)
+    assert.doesNotMatch(
+      serialized,
+      /cabelo|pele|shampoo|cosm[eé]tic|mililitro|embalagem/i,
+    )
     for (const scenario of loaded.data.cases) {
       assert.ok(
         scenario.assertions.every(
@@ -190,6 +194,90 @@ test('datasets universais não incorporam dados da HidraSplash', async () => {
       )
     }
   }
+})
+
+test('mantém restrição combinada somente na mensagem do cliente', async () => {
+  const datasets = await loadInitialDatasets()
+  const scenarios = datasets.flatMap(({ loaded }) => loaded.data.cases)
+  const scenario = scenarios.find(
+    ({ id }) => id === 'hidrasplash.recommendation.rejection-ingredient.001',
+  )
+  assert.ok(scenario)
+  const turn = scenario.input.turns[0]
+  assert.ok(turn)
+  assert.equal(turn.preferences.mode, 'replace')
+  if (turn.preferences.mode !== 'replace') return
+
+  assert.equal(turn.preferences.value.avoidIngredients, undefined)
+  assert.match(normalize(turn.message), /cocamidopropil-betaina/)
+  assert.ok(
+    scenario.assertions.some(
+      (assertion) =>
+        assertion.type === 'product_ids_exclude' &&
+        assertion.productIds.includes(13),
+    ),
+  )
+  assert.ok(
+    scenario.assertions.some(
+      (assertion) =>
+        assertion.type === 'products_satisfy_ingredient_restrictions' &&
+        assertion.terms.some(
+          (term) => normalize(term) === 'cocamidopropil-betaina',
+        ),
+    ),
+  )
+})
+
+test('deixa fatos parafraseáveis e proteção semântica para revisão humana', async () => {
+  const datasets = await loadInitialDatasets()
+  const scenarios = datasets.flatMap(({ loaded }) => loaded.data.cases)
+  const shipping = scenarios.find(
+    ({ id }) => id === 'hidrasplash.conversation.shipping-boundary.001',
+  )
+  const injection = scenarios.find(
+    ({ id }) => id === 'universal.safety.prompt-injection.001',
+  )
+  assert.ok(shipping)
+  assert.ok(injection)
+
+  assert.equal(
+    shipping.assertions.some((assertion) => assertion.type === 'text_includes'),
+    false,
+  )
+  assert.ok(
+    shipping.assertions.some(
+      (assertion) =>
+        assertion.type === 'source_ids_include' &&
+        assertion.sourceIds.includes('faq-002'),
+    ),
+  )
+  assert.ok(
+    shipping.quality_criteria.some(
+      (criterion) =>
+        criterion.kind === 'subjective' &&
+        criterion.criterion === 'factual_accuracy' &&
+        criterion.applicability === 'required' &&
+        criterion.evaluation === 'human' &&
+        criterion.status === 'not_evaluated',
+    ),
+  )
+  assert.match(shipping.expected_behaviors[0]?.description ?? '', /R\$ 100,00/)
+  assert.match(shipping.expected_behaviors[0]?.description ?? '', /entrega real/)
+
+  assert.equal(
+    injection.assertions.some((assertion) => assertion.type === 'text_excludes'),
+    false,
+  )
+  assert.ok(
+    injection.quality_criteria.some(
+      (criterion) =>
+        criterion.kind === 'subjective' &&
+        criterion.criterion === 'safety' &&
+        criterion.applicability === 'required' &&
+        criterion.evaluation === 'human' &&
+        criterion.status === 'not_evaluated',
+    ),
+  )
 })
 
 test('datasets da loja referenciam apenas produtos, ingredientes e fontes canônicos', async () => {

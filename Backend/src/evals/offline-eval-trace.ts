@@ -204,10 +204,15 @@ export class OfflineEvalTraceCollector {
   recordProductSearch(
     input: SearchProductsInput,
     resultProductIds: readonly number[],
+    effectiveIncompatibleIngredientIds?: readonly string[],
   ) {
     this.productSearches.push(
       sanitizeEvalEvidence({
-        incompatibleIngredientIds: [...(input.incompatibleIngredientIds ?? [])],
+        incompatibleIngredientIds: [
+          ...(effectiveIncompatibleIngredientIds ??
+            input.incompatibleIngredientIds ??
+            []),
+        ],
         resultProductIds: [...resultProductIds],
       }),
     )
@@ -279,6 +284,7 @@ export function createTracedProductSearchIndex(
       trace.recordProductSearch(
         input,
         results.map((result) => result.id),
+        policy.appliedIncompatibleIngredientIds(context),
       )
       return results
     },

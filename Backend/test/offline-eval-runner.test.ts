@@ -633,3 +633,67 @@ test('percorre tecnicamente os oito cenários e captura restrição combinada', 
     ),
   )
 })
+
+test('avalia objetivamente os oito cenários sem repetir a execução do agente', async () => {
+  const executions = await Promise.all(
+    Object.keys(OFFLINE_EVAL_DATASETS).map((dataset) =>
+      runOfflineEval(dataset, { evaluateAssertions: true }),
+    ),
+  )
+  assert.equal(
+    executions.reduce(
+      (total, execution) => total + execution.scenarios.length,
+      0,
+    ),
+    8,
+  )
+  assert(executions.every((execution) => execution.evaluation !== undefined))
+  assert.equal(
+    executions.reduce(
+      (total, execution) =>
+        total + (execution.evaluation?.assertionSummary.passed ?? 0),
+      0,
+    ),
+    33,
+  )
+  assert.equal(
+    executions.reduce(
+      (total, execution) =>
+        total + (execution.evaluation?.assertionSummary.failed ?? 0),
+      0,
+    ),
+    2,
+  )
+  assert.equal(
+    executions.reduce(
+      (total, execution) =>
+        total + (execution.evaluation?.assertionSummary.notEvaluated ?? 0),
+      0,
+    ),
+    0,
+  )
+  assert(
+    executions.every(
+      (execution) => execution.evaluation?.criticalFailures === 0,
+    ),
+  )
+  assert(
+    executions.every(
+      (execution) => execution.evaluation?.overallStatus === 'needs_review',
+    ),
+  )
+
+  const recommendation = executions
+    .find(
+      (execution) =>
+        execution.dataset.id === 'hidrasplash-recommendations',
+    )
+    ?.scenarios.find(
+      (scenario) =>
+        scenario.scenarioId ===
+        'hidrasplash.recommendation.oily-refreshing-budget.001',
+    )
+  const card = recommendation?.turns[0]?.response?.products[0]
+  assert.equal(card?.id, 13)
+  assert.equal(typeof card?.name, 'string')
+})

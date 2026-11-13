@@ -923,7 +923,7 @@ function mixedFaqAnswer(
   return composeFaqAnswer({ question, sourceIds, faqDocuments })
 }
 
-function toProductCard(
+export function toProductCard(
   product: Product,
   catalog: CatalogRepository,
 ): ChatProductCard | undefined {

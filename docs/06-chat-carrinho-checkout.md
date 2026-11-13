@@ -78,3 +78,11 @@ Durante a confirmação, outras confirmações e mutações são recusadas como 
 
 **Relatório:** [`06.5-mvp-validation.md`](./06.5-mvp-validation.md).
 **Commit:** `test(e2e): validate portfolio MVP journey`.
+
+## Consolidação da fase 06 (12/11/2026)
+
+- **6.1–6.4 implementadas e mescladas:** [PR #24](https://github.com/luizcarvalhoid-spec/Agente-de-vendas-e-atendimento/pull/24), [#25](https://github.com/luizcarvalhoid-spec/Agente-de-vendas-e-atendimento/pull/25), [#26](https://github.com/luizcarvalhoid-spec/Agente-de-vendas-e-atendimento/pull/26) e [#27](https://github.com/luizcarvalhoid-spec/Agente-de-vendas-e-atendimento/pull/27).
+- **6.5 automatizada e mesclada:** [PR #28](https://github.com/luizcarvalhoid-spec/Agente-de-vendas-e-atendimento/pull/28); o [PR #29](https://github.com/luizcarvalhoid-spec/Agente-de-vendas-e-atendimento/pull/29) complementou o layout e o mini-carrinho, sem evidência de inspeção visual em navegador real.
+- **Extensão posterior:** o [PR #34](https://github.com/luizcarvalhoid-spec/Agente-de-vendas-e-atendimento/pull/34) incluiu cotação demonstrativa contextual; o [PR #35](https://github.com/luizcarvalhoid-spec/Agente-de-vendas-e-atendimento/pull/35) humanizou a composição textual mantendo contratos e dados canônicos.
+
+**Status da fase:** jornada funcional e coberta por testes offline. Ainda **não marcar a fase 06 como concluída**: falta executar/registrar a inspeção visual desktop/mobile e verificar o vídeo da 6.5. A integração real do modelo continua pendente na fase 05. Não confundir validação DOM com navegador real.

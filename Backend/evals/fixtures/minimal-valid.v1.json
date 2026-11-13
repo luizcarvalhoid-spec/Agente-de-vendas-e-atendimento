@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "dataset": {
+    "id": "hidrasplash-minimal",
+    "version": "1.0.0",
+    "scope": "store",
+    "locale": "pt-BR",
+    "storeProfile": "hidrasplash"
+  },
+  "cases": [
+    {
+      "id": "minimal.recommendation.001",
+      "category": "recommendation",
+      "difficulty": "easy",
+      "severity": "medium",
+      "tags": ["minimal", "grounded"],
+      "input": {
+        "initialState": {
+          "history": [],
+          "cart": []
+        },
+        "turns": [
+          {
+            "message": "Quero uma recomendação de shampoo.",
+            "preferences": { "mode": "preserve" },
+            "cart": { "mode": "preserve" },
+            "recommendationContext": { "mode": "auto" }
+          }
+        ]
+      },
+      "expected_behaviors": [
+        {
+          "turn": 0,
+          "action": "ask_clarification",
+          "description": "Solicitar apenas a informação necessária para refinar a recomendação.",
+          "requiredGrounding": []
+        }
+      ],
+      "assertions": [
+        {
+          "id": "response-is-text",
+          "criterionId": "objective-compliance",
+          "turn": 0,
+          "severity": "medium",
+          "type": "response_type_allowed",
+          "responseTypes": ["text"],
+          "textReasons": ["clarification"]
+        }
+      ],
+      "quality_criteria": [
+        {
+          "id": "objective-compliance",
+          "criterion": "context_continuity",
+          "kind": "objective",
+          "applicability": "required",
+          "evaluation": "deterministic",
+          "status": "not_evaluated",
+          "weight": 1,
+          "assertionIds": ["response-is-text"]
+        },
+        {
+          "id": "naturalness-review",
+          "criterion": "naturalness",
+          "kind": "subjective",
+          "applicability": "required",
+          "evaluation": "human",
+          "status": "not_evaluated",
+          "weight": 1
+        },
+        {
+          "id": "safety-not-applicable",
+          "criterion": "safety",
+          "kind": "objective",
+          "applicability": "not_applicable",
+          "status": "not_applicable",
+          "reason": "O cenário mínimo não contém uma decisão de segurança."
+        }
+      ]
+    }
+  ]
+}

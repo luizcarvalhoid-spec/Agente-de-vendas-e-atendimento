@@ -1,0 +1,343 @@
+{
+  "baselineVersion": 1,
+  "baselineId": "hidrasplash-recommendations.1.0.0.full.da37e1c322bf",
+  "dataset": {
+    "id": "hidrasplash-recommendations",
+    "version": "1.0.0",
+    "fingerprint": "sha256:dfddd79f00b71bb53c0c061d71410ce255baf9a904c83a73c049da37e1c322bf"
+  },
+  "execution": {
+    "mode": "offline",
+    "reportVersion": 1,
+    "evaluationEngine": "deterministic-assertion-engine-v1",
+    "captureTool": "eval-regression-v1"
+  },
+  "referenceData": {
+    "catalogFingerprint": "sha256:2be5d531e8027f94ab471711bb930e856ea0125d4eeaca39252b0cf024eff1d0",
+    "faqFingerprint": "sha256:1e480d1897bc244b303275171a0ac422d9dafb129dc0d1e7a0f45ec277ac1d51"
+  },
+  "scope": {
+    "kind": "full_dataset",
+    "completeForScope": true,
+    "datasetCoverage": "complete",
+    "expectedScenarioIds": [
+      "hidrasplash.recommendation.oily-refreshing-budget.001",
+      "hidrasplash.recommendation.rejection-ingredient.001"
+    ]
+  },
+  "reference": {
+    "reportVersion": 1,
+    "dataset": {
+      "id": "hidrasplash-recommendations",
+      "version": "1.0.0"
+    },
+    "execution": {
+      "mode": "offline",
+      "evaluationEngine": "deterministic-assertion-engine-v1"
+    },
+    "coverage": {
+      "scope": "full_dataset",
+      "completeForScope": true,
+      "datasetCoverage": "complete",
+      "expectedScenarioIds": [
+        "hidrasplash.recommendation.oily-refreshing-budget.001",
+        "hidrasplash.recommendation.rejection-ingredient.001"
+      ],
+      "evaluatedScenarioIds": [
+        "hidrasplash.recommendation.oily-refreshing-budget.001",
+        "hidrasplash.recommendation.rejection-ingredient.001"
+      ],
+      "missingScenarioIds": [],
+      "excludedScenarioIds": []
+    },
+    "summary": {
+      "scenarios": {
+        "expected": 2,
+        "evaluated": 2,
+        "completed": 2,
+        "technicalFailures": 0,
+        "notExecuted": 0
+      },
+      "assertions": {
+        "passed": 10,
+        "failed": 0,
+        "notEvaluated": 0
+      },
+      "criteria": {
+        "passed": 2,
+        "failed": 0,
+        "notEvaluated": 4,
+        "notApplicable": 0
+      },
+      "criticalFailures": 0,
+      "requiredHumanCriteriaPending": 2,
+      "objectiveStatus": "passed",
+      "overallStatus": "needs_review",
+      "objectiveScore": {
+        "raw": 10,
+        "final": 10,
+        "partial": false
+      }
+    },
+    "scenarios": [
+      {
+        "id": "hidrasplash.recommendation.oily-refreshing-budget.001",
+        "category": "grounded-recommendation",
+        "difficulty": "medium",
+        "severity": "high",
+        "technicalStatus": "completed",
+        "objectiveStatus": "passed",
+        "overallStatus": "needs_review",
+        "criticalFailures": 0,
+        "requiredHumanCriteriaPending": 1,
+        "objectiveScore": {
+          "raw": 10,
+          "final": 10,
+          "partial": false
+        },
+        "criteria": [
+          {
+            "criterionId": "objective-recommendation",
+            "criterion": "factual_accuracy",
+            "kind": "objective",
+            "applicability": "required",
+            "status": "passed",
+            "humanReviewPending": false,
+            "assertionIds": [
+              "recommendation-response",
+              "canonical-product-13",
+              "canonical-card",
+              "product-grounding",
+              "no-faq-source"
+            ],
+            "weight": 3,
+            "score": 10,
+            "partial": false
+          },
+          {
+            "criterionId": "naturalness-review",
+            "criterion": "naturalness",
+            "kind": "subjective",
+            "applicability": "required",
+            "status": "not_evaluated",
+            "humanReviewPending": true,
+            "assertionIds": [],
+            "weight": 1,
+            "partial": false
+          },
+          {
+            "criterionId": "consultative-review",
+            "criterion": "consultative_quality",
+            "kind": "subjective",
+            "applicability": "optional",
+            "status": "not_evaluated",
+            "humanReviewPending": false,
+            "assertionIds": [],
+            "weight": 1,
+            "partial": false
+          }
+        ],
+        "turns": [
+          {
+            "index": 0,
+            "scenarioId": "hidrasplash.recommendation.oily-refreshing-budget.001",
+            "technicalStatus": "completed",
+            "responseType": "recommendation",
+            "assertions": [
+              {
+                "assertionId": "recommendation-response",
+                "criterionId": "objective-recommendation",
+                "type": "response_type_allowed",
+                "severity": "high",
+                "status": "passed",
+                "reason": "O tipo e o motivo estruturado da resposta são permitidos.",
+                "evidenceReferences": [
+                  "scenarios.hidrasplash.recommendation.oily-refreshing-budget.001.turns.0.response.type",
+                  "scenarios.hidrasplash.recommendation.oily-refreshing-budget.001.turns.0.response.reason"
+                ]
+              },
+              {
+                "assertionId": "canonical-product-13",
+                "criterionId": "objective-recommendation",
+                "type": "product_ids_exact",
+                "severity": "critical",
+                "status": "passed",
+                "reason": "Os identificadores observados atendem à relação de conjuntos declarada.",
+                "evidenceReferences": [
+                  "scenarios.hidrasplash.recommendation.oily-refreshing-budget.001.turns.0.response.productIds"
+                ]
+              },
+              {
+                "assertionId": "canonical-card",
+                "criterionId": "objective-recommendation",
+                "type": "canonical_product_cards",
+                "severity": "critical",
+                "status": "passed",
+                "reason": "Todos os campos dos cartões correspondem às projeções canônicas.",
+                "evidenceReferences": [
+                  "scenarios.hidrasplash.recommendation.oily-refreshing-budget.001.turns.0.response.products",
+                  "canonical.products"
+                ]
+              },
+              {
+                "assertionId": "product-grounding",
+                "criterionId": "objective-recommendation",
+                "type": "grounding_domains",
+                "severity": "critical",
+                "status": "passed",
+                "reason": "Os domínios de grounding comprovados atendem à expectativa.",
+                "evidenceReferences": [
+                  "scenarios.hidrasplash.recommendation.oily-refreshing-budget.001.turns.0.trace.grounding"
+                ]
+              },
+              {
+                "assertionId": "no-faq-source",
+                "criterionId": "objective-recommendation",
+                "type": "source_ids_exact",
+                "severity": "medium",
+                "status": "passed",
+                "reason": "Os identificadores observados atendem à relação de conjuntos declarada.",
+                "evidenceReferences": [
+                  "scenarios.hidrasplash.recommendation.oily-refreshing-budget.001.turns.0.response.sourceIds"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "hidrasplash.recommendation.rejection-ingredient.001",
+        "category": "combined-constraints",
+        "difficulty": "hard",
+        "severity": "critical",
+        "technicalStatus": "completed",
+        "objectiveStatus": "passed",
+        "overallStatus": "needs_review",
+        "criticalFailures": 0,
+        "requiredHumanCriteriaPending": 1,
+        "objectiveScore": {
+          "raw": 10,
+          "final": 10,
+          "partial": false
+        },
+        "criteria": [
+          {
+            "criterionId": "objective-combined-constraints",
+            "criterion": "safety",
+            "kind": "objective",
+            "applicability": "required",
+            "status": "passed",
+            "humanReviewPending": false,
+            "assertionIds": [
+              "safe-not-found-response",
+              "rejected-product-excluded",
+              "no-product-selected",
+              "ingredient-restriction-preserved",
+              "canonical-product-grounding"
+            ],
+            "weight": 3,
+            "score": 10,
+            "partial": false
+          },
+          {
+            "criterionId": "naturalness-review",
+            "criterion": "naturalness",
+            "kind": "subjective",
+            "applicability": "required",
+            "status": "not_evaluated",
+            "humanReviewPending": true,
+            "assertionIds": [],
+            "weight": 1,
+            "partial": false
+          },
+          {
+            "criterionId": "fallback-review",
+            "criterion": "clarity_utility",
+            "kind": "subjective",
+            "applicability": "optional",
+            "status": "not_evaluated",
+            "humanReviewPending": false,
+            "assertionIds": [],
+            "weight": 1,
+            "partial": false
+          }
+        ],
+        "turns": [
+          {
+            "index": 0,
+            "scenarioId": "hidrasplash.recommendation.rejection-ingredient.001",
+            "technicalStatus": "completed",
+            "responseType": "text",
+            "assertions": [
+              {
+                "assertionId": "safe-not-found-response",
+                "criterionId": "objective-combined-constraints",
+                "type": "response_type_allowed",
+                "severity": "critical",
+                "status": "passed",
+                "reason": "O tipo e o motivo estruturado da resposta são permitidos.",
+                "evidenceReferences": [
+                  "scenarios.hidrasplash.recommendation.rejection-ingredient.001.turns.0.response.type",
+                  "scenarios.hidrasplash.recommendation.rejection-ingredient.001.turns.0.response.reason"
+                ]
+              },
+              {
+                "assertionId": "rejected-product-excluded",
+                "criterionId": "objective-combined-constraints",
+                "type": "product_ids_exclude",
+                "severity": "critical",
+                "status": "passed",
+                "reason": "Os identificadores observados atendem à relação de conjuntos declarada.",
+                "evidenceReferences": [
+                  "scenarios.hidrasplash.recommendation.rejection-ingredient.001.turns.0.response.productIds"
+                ]
+              },
+              {
+                "assertionId": "no-product-selected",
+                "criterionId": "objective-combined-constraints",
+                "type": "product_ids_exact",
+                "severity": "critical",
+                "status": "passed",
+                "reason": "Os identificadores observados atendem à relação de conjuntos declarada.",
+                "evidenceReferences": [
+                  "scenarios.hidrasplash.recommendation.rejection-ingredient.001.turns.0.response.productIds"
+                ]
+              },
+              {
+                "assertionId": "ingredient-restriction-preserved",
+                "criterionId": "objective-combined-constraints",
+                "type": "products_satisfy_ingredient_restrictions",
+                "severity": "critical",
+                "status": "passed",
+                "reason": "A restrição foi resolvida, aplicada às buscas e respeitada pelos produtos.",
+                "evidenceReferences": [
+                  "scenarios.hidrasplash.recommendation.rejection-ingredient.001.turns.0.trace.ingredientResolutions",
+                  "scenarios.hidrasplash.recommendation.rejection-ingredient.001.turns.0.trace.productSearches",
+                  "scenarios.hidrasplash.recommendation.rejection-ingredient.001.turns.0.response.productIds",
+                  "canonical.products"
+                ]
+              },
+              {
+                "assertionId": "canonical-product-grounding",
+                "criterionId": "objective-combined-constraints",
+                "type": "grounding_domains",
+                "severity": "critical",
+                "status": "passed",
+                "reason": "Os domínios de grounding comprovados atendem à expectativa.",
+                "evidenceReferences": [
+                  "scenarios.hidrasplash.recommendation.rejection-ingredient.001.turns.0.trace.grounding"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "limitations": [
+      "A execução offline usa um modelo determinístico e não comprova o comportamento de modelos externos.",
+      "Critérios subjetivos obrigatórios permanecem pendentes de avaliação humana.",
+      "Assertions determinísticas não comprovam, isoladamente, naturalidade, empatia ou correção semântica geral.",
+      "Mensagens completas, argumentos e resultados brutos de ferramentas são omitidos por minimização de dados."
+    ]
+  }
+}

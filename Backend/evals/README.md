@@ -243,3 +243,12 @@ resumos humanos estão documentados em `HUMAN_REVIEW.md`. O fluxo usa
 julgamentos separados dos relatórios objetivos. Nenhuma nota subjetiva é
 atribuída automaticamente e as fixtures sintéticas não são apresentadas como
 avaliações humanas realizadas.
+
+## Baselines e regressões objetivas (EVAL-08)
+
+O fluxo `pnpm eval:regression` captura referências imutáveis e compara novas
+execuções usando diretamente o relatório JSON v1, sem recalcular assertions ou
+notas. Fingerprints detectam mudanças silenciosas no dataset, catálogo e FAQs;
+falhas conhecidas, melhorias, perdas de evidência, novas falhas críticas e
+problemas técnicos permanecem separados. A política de atualização, os códigos
+de saída e os quatro baselines iniciais estão em `BASELINES.md`.

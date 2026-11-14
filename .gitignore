@@ -8,3 +8,4 @@ dist/
 .obsidian/
 Backend/content/catalog/editorial-review.local.md
 Backend/eval-reports/
+Backend/human-eval-local/

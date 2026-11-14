@@ -1,0 +1,23 @@
+{
+  "sampleVersion": 1,
+  "sample": {
+    "id": "fixture.synthetic.incomplete-need.001",
+    "datasetId": "universal-core",
+    "datasetVersion": "1.0.0",
+    "scenarioId": "universal.core.incomplete-need.001",
+    "rubricId": "universal.conversation",
+    "rubricVersion": "1.0.0",
+    "origin": {
+      "kind": "manually_simulated",
+      "attestation": "synthetic_conversation",
+      "performanceEvidence": "not_real_performance"
+    }
+  },
+  "turns": [
+    {
+      "index": 0,
+      "user": "Preciso escolher um produto, mas ainda não sei qual atende à minha necessidade.",
+      "assistant": "Posso ajudar. Qual é a principal necessidade que você quer atender?"
+    }
+  ]
+}

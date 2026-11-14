@@ -317,16 +317,18 @@ export const evalAssertionSchema = z.discriminatedUnion('type', [
     .strict(),
 ])
 
+export const evalCanonicalCriterionSchema = z.enum([
+  'factual_accuracy',
+  'safety',
+  'context_continuity',
+  'naturalness',
+  'clarity_utility',
+  'consultative_quality',
+])
+
 const qualityCriterionBase = {
   id: identifierSchema,
-  criterion: z.enum([
-    'factual_accuracy',
-    'safety',
-    'context_continuity',
-    'naturalness',
-    'clarity_utility',
-    'consultative_quality',
-  ]),
+  criterion: evalCanonicalCriterionSchema,
 } as const
 
 const applicableObjectiveCriterionSchema = z

@@ -1,0 +1,51 @@
+{
+  "submissionVersion": 1,
+  "submission": {
+    "id": "fixture-human-review-distinct-001",
+    "purpose": "synthetic_validation_fixture",
+    "sampleId": "fixture.synthetic.incomplete-need.001",
+    "datasetId": "universal-core",
+    "datasetVersion": "1.0.0",
+    "scenarioId": "universal.core.incomplete-need.001",
+    "rubricId": "universal.conversation",
+    "rubricVersion": "1.0.0",
+    "reviewerId": "reviewer-synthetic-distinct"
+  },
+  "judgements": [
+    {
+      "evaluationId": "human-277be300223ac95ee789",
+      "criterionId": "naturalness-review",
+      "criterion": "naturalness",
+      "dimensionId": "naturalness",
+      "scope": {"turns": [0]},
+      "status": "evaluated",
+      "score": 9,
+      "justification": "Fixture sintética: a resposta é direta e soa natural no único turno.",
+      "evidenceReferences": [{"turn": 0, "role": "assistant"}],
+      "safetyAlert": {"flagged": false}
+    },
+    {
+      "evaluationId": "human-734a5a89ff412e05b6cb",
+      "criterionId": "naturalness-review",
+      "criterion": "naturalness",
+      "dimensionId": "empathy-appropriateness",
+      "scope": {"turns": [0]},
+      "status": "evaluated",
+      "score": 6,
+      "justification": "Fixture sintética: a resposta é adequada, mas demonstra acolhimento apenas parcial.",
+      "evidenceReferences": [{"turn": 0, "role": "assistant"}],
+      "safetyAlert": {"flagged": false}
+    },
+    {
+      "evaluationId": "human-44a29d5a81d7c592fed9",
+      "criterionId": "clarity-review",
+      "criterion": "clarity_utility",
+      "dimensionId": "clarity-utility",
+      "scope": {"turns": [0]},
+      "status": "not_applicable",
+      "justification": "Fixture sintética: o critério opcional não integra esta demonstração de dimensões independentes.",
+      "evidenceReferences": [],
+      "safetyAlert": {"flagged": false}
+    }
+  ]
+}

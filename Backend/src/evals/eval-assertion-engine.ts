@@ -33,6 +33,13 @@ export type EvalOverallStatus =
   | 'needs_review'
   | 'failed_critical'
 
+export type EvalEvaluationScope =
+  | { readonly kind: 'full_dataset' }
+  | {
+      readonly kind: 'selected_scenarios'
+      readonly scenarioIds: readonly string[]
+    }
+
 export interface EvalCanonicalData {
   readonly catalog: CatalogRepository
   readonly productIndex: ProductSearchIndex
@@ -81,6 +88,15 @@ export interface EvalScenarioEvaluation {
 
 export interface EvalDatasetEvaluation {
   readonly datasetId: string
+  readonly coverage: {
+    readonly scope: EvalEvaluationScope['kind']
+    readonly completeForScope: boolean
+    readonly datasetCoverage: 'complete' | 'partial'
+    readonly expectedScenarioIds: readonly string[]
+    readonly evaluatedScenarioIds: readonly string[]
+    readonly missingScenarioIds: readonly string[]
+    readonly excludedScenarioIds: readonly string[]
+  }
   readonly objectiveStatus: EvalObjectiveStatus
   readonly overallStatus: EvalOverallStatus
   readonly criticalFailures: number
@@ -96,7 +112,9 @@ export interface EvalDatasetEvaluation {
     readonly notEvaluated: number
     readonly notApplicable: number
   }
-  readonly objectiveScore?: EvalObjectiveScore
+  readonly objectiveScore?: EvalObjectiveScore & {
+    readonly scope: EvalEvaluationScope['kind']
+  }
   readonly scenarios: readonly EvalScenarioEvaluation[]
 }
 
@@ -134,6 +152,61 @@ function sameSet<T>(first: readonly T[], second: readonly T[]) {
 
 function includesAll<T>(actual: readonly T[], expected: readonly T[]) {
   return expected.every((value) => actual.includes(value))
+}
+
+function hasCompleteOrchestratorCompletion(turn: EvalTurnExecution) {
+  const { trace } = turn
+  const termination = trace.termination
+  return (
+    termination !== undefined &&
+    trace.earlyCompletion === undefined &&
+    termination.modelCalls === trace.modelCalls
+  )
+}
+
+function hasCompleteOrchestratorToolEvidence(turn: EvalTurnExecution) {
+  const { trace } = turn
+  const termination = trace.termination
+  if (!hasCompleteOrchestratorCompletion(turn) || termination === undefined) {
+    return false
+  }
+  const executedNames = trace.toolExecutions
+    .filter((item) => item.executed)
+    .map((item) => item.name)
+  return (
+    termination.toolCalls === trace.toolExecutions.length &&
+    isDeepStrictEqual(
+      trace.toolCalls.map((item) => item.name),
+      trace.toolsRequested,
+    ) &&
+    isDeepStrictEqual(executedNames, trace.toolsExecuted)
+  )
+}
+
+function hasCompleteEarlyFlowEvidence(turn: EvalTurnExecution) {
+  const { trace } = turn
+  return (
+    trace.earlyCompletion !== undefined &&
+    trace.termination === undefined &&
+    trace.modelCalls === 0 &&
+    trace.toolsRequested.length === 0 &&
+    trace.toolsExecuted.length === 0 &&
+    trace.toolCalls.length === 0 &&
+    trace.toolExecutions.length === 0 &&
+    trace.grounding.requirement === 'not_required' &&
+    trace.grounding.product === 'not_consulted' &&
+    trace.grounding.faq === 'not_consulted' &&
+    trace.ingredientResolutions.length === 0 &&
+    trace.productSearches.length === 0 &&
+    trace.faqSearches.length === 0
+  )
+}
+
+function hasProvenNoFurtherToolExecution(turn: EvalTurnExecution) {
+  return (
+    hasCompleteOrchestratorToolEvidence(turn) ||
+    hasCompleteEarlyFlowEvidence(turn)
+  )
 }
 
 function assertionResult(
@@ -323,6 +396,18 @@ function evaluateIngredientRestrictions(
   }
 
   const restrictedIds = canonicalResolution.resolvedIds
+  const unknownResponseProduct = response.productIds.find(
+    (productId) => canonical.catalog.findById(productId) === undefined,
+  )
+  if (unknownResponseProduct !== undefined) {
+    return assertionResult(
+      scenarioId,
+      assertion,
+      'failed',
+      'A resposta apresentou produto inexistente no catálogo canônico.',
+      evidence,
+    )
+  }
   const incompatibleProduct = response.productIds.find((productId) => {
     const product = canonical.catalog.findById(productId)
     return (
@@ -400,8 +485,16 @@ function evaluateIngredientRestrictions(
   for (const search of turn.trace.productSearches) {
     for (const productId of search.resultProductIds) {
       const product = canonical.catalog.findById(productId)
+      if (product === undefined) {
+        return assertionResult(
+          scenarioId,
+          assertion,
+          'failed',
+          'Uma busca retornou produto inexistente no catálogo canônico.',
+          evidence,
+        )
+      }
       if (
-        product !== undefined &&
         [...productIngredientIds(product)].some((id) =>
           restrictedIds.includes(id),
         )
@@ -547,6 +640,20 @@ function evaluateAssertion(
         'O comprimento da mensagem está fora do intervalo.',
       )
     case 'grounding_domains': {
+      if (!hasCompleteOrchestratorCompletion(turn)) {
+        return assertionResult(
+          scenario.id,
+          assertion,
+          'not_evaluated',
+          turn.trace.earlyCompletion === undefined
+            ? 'A instrumentação não comprova a conclusão do grounding.'
+            : 'O fluxo antecipado não registra domínios de grounding comparáveis.',
+          [
+            `scenarios.${scenario.id}.turns.${assertion.turn}.trace.termination`,
+            `scenarios.${scenario.id}.turns.${assertion.turn}.trace.earlyCompletion`,
+          ],
+        )
+      }
       const observed = (['product', 'faq'] as const).filter(
         (domain) =>
           turn.trace.grounding[domain] === 'found' ||
@@ -569,6 +676,19 @@ function evaluateAssertion(
       const executed = turn.trace.toolExecutions.some(
         (item) => item.name === assertion.toolName && item.executed,
       )
+      if (!executed && !hasProvenNoFurtherToolExecution(turn)) {
+        return assertionResult(
+          scenario.id,
+          assertion,
+          'not_evaluated',
+          'A instrumentação não comprova a ausência de execução da ferramenta.',
+          [
+            `scenarios.${scenario.id}.turns.${assertion.turn}.trace.toolExecutions`,
+            `scenarios.${scenario.id}.turns.${assertion.turn}.trace.termination`,
+            `scenarios.${scenario.id}.turns.${assertion.turn}.trace.earlyCompletion`,
+          ],
+        )
+      }
       return responseResult(
         scenario.id,
         assertion,
@@ -584,6 +704,19 @@ function evaluateAssertion(
       const executed = turn.trace.toolExecutions.some(
         (item) => item.name === assertion.toolName && item.executed,
       )
+      if (!executed && !hasProvenNoFurtherToolExecution(turn)) {
+        return assertionResult(
+          scenario.id,
+          assertion,
+          'not_evaluated',
+          'A instrumentação não comprova o encerramento sem execução da ferramenta.',
+          [
+            `scenarios.${scenario.id}.turns.${assertion.turn}.trace.toolExecutions`,
+            `scenarios.${scenario.id}.turns.${assertion.turn}.trace.termination`,
+            `scenarios.${scenario.id}.turns.${assertion.turn}.trace.earlyCompletion`,
+          ],
+        )
+      }
       return responseResult(
         scenario.id,
         assertion,
@@ -595,15 +728,36 @@ function evaluateAssertion(
         'A ferramenta possui evidência de execução real.',
       )
     }
-    case 'max_model_calls':
+    case 'max_model_calls': {
+      const observedModelCalls =
+        (hasCompleteOrchestratorCompletion(turn)
+          ? turn.trace.termination?.modelCalls
+          : undefined) ??
+        (hasCompleteEarlyFlowEvidence(turn) ? 0 : undefined)
+      if (observedModelCalls === undefined) {
+        return assertionResult(
+          scenario.id,
+          assertion,
+          'not_evaluated',
+          'A instrumentação não comprova a quantidade final de chamadas ao modelo.',
+          [
+            `scenarios.${scenario.id}.turns.${assertion.turn}.trace.termination`,
+            `scenarios.${scenario.id}.turns.${assertion.turn}.trace.earlyCompletion`,
+          ],
+        )
+      }
       return responseResult(
         scenario.id,
         assertion,
-        turn.trace.modelCalls <= assertion.maximum,
-        [`scenarios.${scenario.id}.turns.${assertion.turn}.trace.modelCalls`],
+        observedModelCalls <= assertion.maximum,
+        [
+          `scenarios.${scenario.id}.turns.${assertion.turn}.trace.termination.modelCalls`,
+          `scenarios.${scenario.id}.turns.${assertion.turn}.trace.earlyCompletion`,
+        ],
         'A quantidade de chamadas ao modelo respeita o limite.',
         'A quantidade de chamadas ao modelo excede o limite.',
       )
+    }
     case 'products_satisfy_ingredient_restrictions':
       return evaluateIngredientRestrictions(
         scenario.id,
@@ -812,21 +966,110 @@ function countStatuses<T extends string>(
   return values.filter((value) => value === status).length
 }
 
+function validateEvaluationCoverage(
+  loaded: LoadedEvalDataset,
+  execution: OfflineEvalExecution,
+  scope: EvalEvaluationScope,
+): EvalDatasetEvaluation['coverage'] {
+  if (execution.dataset.id !== loaded.data.dataset.id) {
+    throw new TypeError('A execução pertence a outro dataset.')
+  }
+  const datasetScenarioIds = loaded.data.cases.map((scenario) => scenario.id)
+  if (new Set(datasetScenarioIds).size !== datasetScenarioIds.length) {
+    throw new TypeError('O dataset carregado possui cenários duplicados.')
+  }
+  const executionScenarioIds = execution.scenarios.map(
+    (scenario) => scenario.scenarioId,
+  )
+  if (new Set(executionScenarioIds).size !== executionScenarioIds.length) {
+    throw new TypeError('A execução possui cenários duplicados.')
+  }
+  for (const scenario of execution.scenarios) {
+    if (
+      scenario.turns.some(
+        (turn) =>
+          turn.datasetId !== execution.dataset.id ||
+          turn.scenarioId !== scenario.scenarioId,
+      )
+    ) {
+      throw new TypeError(
+        `A execução do cenário ${scenario.scenarioId} possui turnos inconsistentes.`,
+      )
+    }
+  }
+  const unexpectedDatasetScenario = executionScenarioIds.find(
+    (scenarioId) => !datasetScenarioIds.includes(scenarioId),
+  )
+  if (unexpectedDatasetScenario !== undefined) {
+    throw new TypeError(
+      `Execução referencia cenário ausente: ${unexpectedDatasetScenario}.`,
+    )
+  }
+
+  const expectedScenarioIds =
+    scope.kind === 'full_dataset'
+      ? datasetScenarioIds
+      : [...scope.scenarioIds]
+  if (expectedScenarioIds.length === 0) {
+    throw new TypeError('O escopo selecionado não pode ser vazio.')
+  }
+  if (new Set(expectedScenarioIds).size !== expectedScenarioIds.length) {
+    throw new TypeError('O escopo selecionado possui cenários duplicados.')
+  }
+  const unknownSelectedScenario = expectedScenarioIds.find(
+    (scenarioId) => !datasetScenarioIds.includes(scenarioId),
+  )
+  if (unknownSelectedScenario !== undefined) {
+    throw new TypeError(
+      `Escopo referencia cenário ausente: ${unknownSelectedScenario}.`,
+    )
+  }
+  const outsideScope = executionScenarioIds.find(
+    (scenarioId) => !expectedScenarioIds.includes(scenarioId),
+  )
+  if (outsideScope !== undefined) {
+    throw new TypeError(
+      `Execução contém cenário fora do escopo: ${outsideScope}.`,
+    )
+  }
+
+  const missingScenarioIds = expectedScenarioIds.filter(
+    (scenarioId) => !executionScenarioIds.includes(scenarioId),
+  )
+  const excludedScenarioIds = datasetScenarioIds.filter(
+    (scenarioId) => !expectedScenarioIds.includes(scenarioId),
+  )
+  return {
+    scope: scope.kind,
+    completeForScope: missingScenarioIds.length === 0,
+    datasetCoverage:
+      missingScenarioIds.length === 0 && excludedScenarioIds.length === 0
+        ? 'complete'
+        : 'partial',
+    expectedScenarioIds,
+    evaluatedScenarioIds: executionScenarioIds,
+    missingScenarioIds,
+    excludedScenarioIds,
+  }
+}
+
 export function evaluateOfflineEvalExecution(
   loaded: LoadedEvalDataset,
   execution: OfflineEvalExecution,
   canonical: EvalCanonicalData,
+  scope: EvalEvaluationScope = { kind: 'full_dataset' },
 ): EvalDatasetEvaluation {
-  const scenarios = execution.scenarios.map((scenarioExecution) => {
-    const scenario = loaded.data.cases.find(
-      (item) => item.id === scenarioExecution.scenarioId,
-    )
+  const coverage = validateEvaluationCoverage(loaded, execution, scope)
+  const scenarios = coverage.expectedScenarioIds.map((scenarioId) => {
+    const scenario = loaded.data.cases.find((item) => item.id === scenarioId)
     if (scenario === undefined) {
-      throw new TypeError(
-        `Execução referencia cenário ausente: ${scenarioExecution.scenarioId}.`,
-      )
+      throw new TypeError(`Dataset sem cenário esperado: ${scenarioId}.`)
     }
-    return evaluateScenario(scenario, scenarioExecution, canonical)
+    return evaluateScenario(
+      scenario,
+      execution.scenarios.find((item) => item.scenarioId === scenarioId),
+      canonical,
+    )
   })
   const assertionStatuses = scenarios.flatMap((scenario) =>
     scenario.assertionResults.map((result) => result.status),
@@ -878,11 +1121,14 @@ export function evaluateOfflineEvalExecution(
           ) / scoredScenarios.length,
         )
   const scorePartial =
+    coverage.datasetCoverage === 'partial' ||
+    !coverage.completeForScope ||
     scoredScenarios.length !== scenarios.length ||
     scoredScenarios.some((scenario) => scenario.objectiveScore.partial)
 
   return {
     datasetId: loaded.data.dataset.id,
+    coverage,
     objectiveStatus,
     overallStatus,
     criticalFailures,
@@ -905,6 +1151,7 @@ export function evaluateOfflineEvalExecution(
             raw: rawScore,
             final: criticalFailures > 0 ? Math.min(rawScore, 3) : rawScore,
             partial: scorePartial,
+            scope: coverage.scope,
           },
         }),
     scenarios,

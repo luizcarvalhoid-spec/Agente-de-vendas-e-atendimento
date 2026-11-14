@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { toProductCard } from '../src/agent/chat-service.js'
+import { productIngredientIds } from '../src/agent/tools/product-tools.js'
 import { loadCatalogRepository } from '../src/catalog/catalog-repository.js'
 import type { ChatProductCard } from '../src/contracts/chat.js'
 import {
@@ -40,6 +41,39 @@ function emptyTrace(overrides: Partial<EvalRuntimeTrace> = {}): EvalRuntimeTrace
     faqSearches: [],
     ...overrides,
   }
+}
+
+function completedOrchestratorTrace(
+  overrides: Partial<EvalRuntimeTrace> = {},
+): EvalRuntimeTrace {
+  const trace = emptyTrace(overrides)
+  const toolCalls =
+    overrides.toolCalls ??
+    trace.toolsRequested.map((name, index) => ({
+      ordinal: index + 1,
+      name,
+      arguments: {},
+    }))
+  return {
+    ...trace,
+    toolCalls,
+    termination: {
+      status: 'ASSISTANT_RESPONSE',
+      modelCalls: trace.modelCalls,
+      toolCalls: trace.toolExecutions.length,
+      toolErrors: trace.toolExecutions.filter(
+      (execution) =>
+        execution.outcome === 'rejected' || execution.outcome === 'failed',
+      ).length,
+    },
+  }
+}
+
+function completedEarlyTrace(): EvalRuntimeTrace {
+  return emptyTrace({
+    modelCalls: 0,
+    earlyCompletion: { reason: 'clinical_boundary' },
+  })
 }
 
 function textResponse(
@@ -119,6 +153,12 @@ function scenarioWith(
 }
 
 function loadedWith(scenario: EvalCase): LoadedEvalDataset {
+  return loadedWithScenarios([scenario])
+}
+
+function loadedWithScenarios(
+  scenarios: readonly EvalCase[],
+): LoadedEvalDataset {
   const data = {
     schemaVersion: 1,
     dataset: {
@@ -128,18 +168,40 @@ function loadedWith(scenario: EvalCase): LoadedEvalDataset {
       locale: 'pt-BR',
       storeProfile: 'hidrasplash',
     },
-    cases: [scenario],
+    cases: [...scenarios],
   } as EvalDataset
   return {
     sourcePath: '<engine-test>',
     data,
-    cases: [
-      {
-        index: 0,
-        sourcePath: '<engine-test>#engine.scenario.001',
-        scenario,
-      },
-    ],
+    cases: scenarios.map((scenario, index) => ({
+      index,
+      sourcePath: `<engine-test>#${scenario.id}`,
+      scenario,
+    })),
+  }
+}
+
+function executionWithScenarioIds(
+  scenarioIds: readonly string[],
+): OfflineEvalExecution {
+  const base = executionWith(textResponse())
+  const template = base.scenarios[0]
+  assert.ok(template)
+  return {
+    ...base,
+    scenarios: scenarioIds.map((scenarioId) => ({
+      ...structuredClone(template),
+      scenarioId,
+      turns: template.turns.map((turn) => ({
+        ...structuredClone(turn),
+        scenarioId,
+      })),
+    })),
+    summary: {
+      scenarios: scenarioIds.length,
+      completed: scenarioIds.length,
+      technicalFailures: 0,
+    },
   }
 }
 
@@ -302,7 +364,7 @@ test('usa grounding, execução real de ferramenta e chamadas de modelo', async 
     assertion({ type: 'tool_not_called', toolName: 'search_faq' }, 3),
     assertion({ type: 'max_model_calls', maximum: 2 }, 4),
   ]
-  const trace = emptyTrace({
+  const trace = completedOrchestratorTrace({
     modelCalls: 2,
     toolsRequested: ['search_products', 'search_faq'],
     toolsExecuted: ['search_products'],
@@ -343,7 +405,7 @@ test('solicitação rejeitada não conta como ferramenta executada', async () =>
   const result = await evaluate(
     assertions,
     textResponse(),
-    emptyTrace({
+    completedOrchestratorTrace({
       toolsRequested: ['search_products'],
       toolExecutions: [
         {
@@ -359,6 +421,44 @@ test('solicitação rejeitada não conta como ferramenta executada', async () =>
   assert.deepEqual(
     result.scenarios[0]?.assertionResults.map((item) => item.status),
     ['failed', 'passed'],
+  )
+})
+
+test('trace vazio ou incompleto não fabrica resultados instrumentais', async () => {
+  const assertions = [
+    assertion(
+      { type: 'grounding_domains', domains: ['product'], match: 'exact' },
+      1,
+    ),
+    assertion({ type: 'tool_called', toolName: 'search_products' }, 2),
+    assertion({ type: 'tool_not_called', toolName: 'search_products' }, 3),
+    assertion({ type: 'max_model_calls', maximum: 1 }, 4),
+  ]
+  const result = await evaluate(assertions, textResponse(), emptyTrace())
+  assert.deepEqual(
+    result.scenarios[0]?.assertionResults.map((item) => item.status),
+    ['not_evaluated', 'not_evaluated', 'not_evaluated', 'not_evaluated'],
+  )
+})
+
+test('conclusão antecipada comprova zero ferramentas e zero chamadas de modelo', async () => {
+  const assertions = [
+    assertion(
+      { type: 'grounding_domains', domains: ['product'], match: 'exact' },
+      1,
+    ),
+    assertion({ type: 'tool_called', toolName: 'search_products' }, 2),
+    assertion({ type: 'tool_not_called', toolName: 'search_products' }, 3),
+    assertion({ type: 'max_model_calls', maximum: 0 }, 4),
+  ]
+  const result = await evaluate(
+    assertions,
+    textResponse(),
+    completedEarlyTrace(),
+  )
+  assert.deepEqual(
+    result.scenarios[0]?.assertionResults.map((item) => item.status),
+    ['not_evaluated', 'failed', 'passed', 'passed'],
   )
 })
 
@@ -427,7 +527,8 @@ test('restrição de ingrediente exige resolução e aplicação, não apenas au
     'not_evaluated',
   )
 
-  const trace = emptyTrace({
+  const trace = completedOrchestratorTrace({
+    toolsRequested: ['search_products'],
     toolsExecuted: ['search_products'],
     toolExecutions: [
       {
@@ -454,6 +555,106 @@ test('restrição de ingrediente exige resolução e aplicação, não apenas au
   })
   const proven = await evaluate([assertionValue], textResponse(), trace)
   assert.equal(proven.scenarios[0]?.assertionResults[0]?.status, 'passed')
+
+  const compatibleProduct = canonical.productIndex.products.find(
+    (product) =>
+      ![...productIngredientIds(product)].some((ingredientId) =>
+        resolution.resolvedIds.includes(ingredientId),
+      ) && toProductCard(product, canonical.catalog) !== undefined,
+  )
+  assert.ok(compatibleProduct)
+  const compatibleCard = toProductCard(
+    compatibleProduct,
+    canonical.catalog,
+  )
+  assert.ok(compatibleCard)
+  const compatible = await evaluate(
+    [assertionValue],
+    productResponse([compatibleCard]),
+    completedOrchestratorTrace({
+      toolsRequested: ['search_products'],
+      toolsExecuted: ['search_products'],
+      toolExecutions: [
+        {
+          ordinal: 1,
+          name: 'search_products',
+          executed: true,
+          status: 'ok',
+          outcome: 'found',
+        },
+      ],
+      ingredientResolutions: [
+        {
+          terms: ['cocamidopropil-betaína'],
+          resolvedIds: resolution.resolvedIds,
+          unresolvedTerms: [],
+        },
+      ],
+      productSearches: [
+        {
+          incompatibleIngredientIds: resolution.resolvedIds,
+          resultProductIds: [compatibleProduct.id],
+        },
+      ],
+    }),
+  )
+  assert.equal(compatible.scenarios[0]?.assertionResults[0]?.status, 'passed')
+})
+
+test('produto inexistente não aprova restrição mesmo com trace positivo', async () => {
+  const canonical = await canonicalPromise
+  const resolution = canonical.productIndex.resolveIngredientTerms([
+    'cocamidopropil-betaína',
+  ])
+  const assertionValue = assertion(
+    {
+      type: 'products_satisfy_ingredient_restrictions',
+      terms: ['cocamidopropil-betaína'],
+    },
+    1,
+    'critical',
+  )
+  const response = {
+    ...textResponse(),
+    type: 'recommendation' as const,
+    productIds: [999_999],
+  }
+  const result = await evaluate(
+    [assertionValue],
+    response,
+    completedOrchestratorTrace({
+      toolsRequested: ['search_products'],
+      toolsExecuted: ['search_products'],
+      toolExecutions: [
+        {
+          ordinal: 1,
+          name: 'search_products',
+          executed: true,
+          status: 'ok',
+          outcome: 'found',
+        },
+      ],
+      ingredientResolutions: [
+        {
+          terms: ['cocamidopropil-betaína'],
+          resolvedIds: resolution.resolvedIds,
+          unresolvedTerms: [],
+        },
+      ],
+      productSearches: [
+        {
+          incompatibleIngredientIds: resolution.resolvedIds,
+          resultProductIds: [999_999],
+        },
+      ],
+    }),
+  )
+  assert.equal(result.scenarios[0]?.assertionResults[0]?.status, 'failed')
+  assert.equal(result.criticalFailures, 1)
+  assert.match(
+    result.scenarios[0]?.assertionResults[0]?.reason ?? '',
+    /inexistente/,
+  )
 })
 
 test('outcome desconhecido não aprova restrição de ingrediente', async () => {
@@ -702,6 +903,146 @@ test('evidência ausente mantém todas as famílias de assertion não avaliadas'
   assert.equal(result.assertionSummary.notEvaluated, assertions.length)
   assert.equal(result.assertionSummary.passed, 0)
   assert.equal(result.assertionSummary.failed, 0)
+  assert.equal(result.objectiveScore, undefined)
+})
+
+test('valida cobertura completa e identifica escopo selecionado como parcial', async () => {
+  const assertionValue = assertion(
+    { type: 'response_type_allowed', responseTypes: ['text'] },
+    1,
+  )
+  const first = scenarioWith([assertionValue])
+  const second = {
+    ...structuredClone(first),
+    id: 'engine.scenario.002',
+  } as EvalCase
+  const loaded = loadedWithScenarios([first, second])
+  const canonical = await canonicalPromise
+
+  const complete = evaluateOfflineEvalExecution(
+    loaded,
+    executionWithScenarioIds([first.id, second.id]),
+    canonical,
+  )
+  assert.deepEqual(complete.coverage, {
+    scope: 'full_dataset',
+    completeForScope: true,
+    datasetCoverage: 'complete',
+    expectedScenarioIds: [first.id, second.id],
+    evaluatedScenarioIds: [first.id, second.id],
+    missingScenarioIds: [],
+    excludedScenarioIds: [],
+  })
+  assert.equal(complete.objectiveScore?.partial, false)
+
+  const selected = evaluateOfflineEvalExecution(
+    loaded,
+    executionWithScenarioIds([second.id]),
+    canonical,
+    { kind: 'selected_scenarios', scenarioIds: [second.id] },
+  )
+  assert.equal(selected.coverage.scope, 'selected_scenarios')
+  assert.equal(selected.coverage.completeForScope, true)
+  assert.equal(selected.coverage.datasetCoverage, 'partial')
+  assert.deepEqual(selected.coverage.excludedScenarioIds, [first.id])
+  assert.equal(selected.objectiveScore?.scope, 'selected_scenarios')
+  assert.equal(selected.objectiveScore?.partial, true)
+})
+
+test('identifica cenário faltante sem apresentar avaliação completa', async () => {
+  const assertionValue = assertion(
+    { type: 'response_type_allowed', responseTypes: ['text'] },
+    1,
+  )
+  const first = scenarioWith([assertionValue])
+  const second = {
+    ...structuredClone(first),
+    id: 'engine.scenario.002',
+  } as EvalCase
+  const result = evaluateOfflineEvalExecution(
+    loadedWithScenarios([first, second]),
+    executionWithScenarioIds([first.id]),
+    await canonicalPromise,
+  )
+  assert.equal(result.coverage.completeForScope, false)
+  assert.equal(result.coverage.datasetCoverage, 'partial')
+  assert.deepEqual(result.coverage.missingScenarioIds, [second.id])
+  assert.equal(result.objectiveStatus, 'not_evaluated')
+  assert.equal(result.overallStatus, 'needs_review')
+  assert.equal(result.objectiveScore?.partial, true)
+})
+
+test('rejeita cenários duplicados, inesperados ou fora do escopo', async () => {
+  const assertionValue = assertion(
+    { type: 'response_type_allowed', responseTypes: ['text'] },
+    1,
+  )
+  const scenario = scenarioWith([assertionValue])
+  const loaded = loadedWith(scenario)
+  const canonical = await canonicalPromise
+  assert.throws(
+    () =>
+      evaluateOfflineEvalExecution(
+        loaded,
+        executionWithScenarioIds([scenario.id, scenario.id]),
+        canonical,
+      ),
+    /duplicados/,
+  )
+  assert.throws(
+    () =>
+      evaluateOfflineEvalExecution(
+        loaded,
+        executionWithScenarioIds(['engine.unexpected.001']),
+        canonical,
+      ),
+    /cenário ausente/,
+  )
+  assert.throws(
+    () =>
+      evaluateOfflineEvalExecution(
+        loaded,
+        executionWithScenarioIds([scenario.id]),
+        canonical,
+        { kind: 'selected_scenarios', scenarioIds: ['engine.other.001'] },
+      ),
+    /Escopo referencia cenário ausente/,
+  )
+  const inconsistent = executionWithScenarioIds([scenario.id])
+  const executedScenario = inconsistent.scenarios[0]
+  const executedTurn = executedScenario?.turns[0]
+  assert(executedScenario && executedTurn)
+  const inconsistentExecution: OfflineEvalExecution = {
+    ...inconsistent,
+    scenarios: [
+      {
+        ...executedScenario,
+        turns: [{ ...executedTurn, scenarioId: 'engine.other.001' }],
+      },
+    ],
+  }
+  assert.throws(
+    () =>
+      evaluateOfflineEvalExecution(loaded, inconsistentExecution, canonical),
+    /turnos inconsistentes/,
+  )
+})
+
+test('execução vazia nunca produz aprovação ou nota de dataset', async () => {
+  const assertionValue = assertion(
+    { type: 'response_type_allowed', responseTypes: ['text'] },
+    1,
+  )
+  const scenario = scenarioWith([assertionValue])
+  const result = evaluateOfflineEvalExecution(
+    loadedWith(scenario),
+    executionWithScenarioIds([]),
+    await canonicalPromise,
+  )
+  assert.equal(result.coverage.completeForScope, false)
+  assert.deepEqual(result.coverage.missingScenarioIds, [scenario.id])
+  assert.equal(result.objectiveStatus, 'not_evaluated')
+  assert.equal(result.overallStatus, 'needs_review')
   assert.equal(result.objectiveScore, undefined)
 })
 

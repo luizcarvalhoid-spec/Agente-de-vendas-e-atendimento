@@ -50,6 +50,14 @@ export type ChatOperationalEvent =
       readonly faqGrounding: ToolOrchestratorGroundingDomainStatus
     }
   | {
+      readonly type: 'chat_service_early_completion'
+      readonly requestId: string
+      readonly reason:
+        | 'clinical_boundary'
+        | 'contextual_quote'
+        | 'comparison_clarification'
+    }
+  | {
       readonly type: 'execution_completed'
       readonly requestId: string
       readonly status: 'success' | 'rejected' | 'failed' | 'cancelled'

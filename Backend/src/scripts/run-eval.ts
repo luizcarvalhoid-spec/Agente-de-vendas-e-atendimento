@@ -92,7 +92,7 @@ async function main() {
       `assertions_passed=${evaluation.assertionSummary.passed} assertions_failed=${evaluation.assertionSummary.failed} assertions_not_evaluated=${evaluation.assertionSummary.notEvaluated} critical_failures=${evaluation.criticalFailures}`,
     )
     console.log(
-      `objective_score=${evaluation.objectiveScore?.final ?? 'not_evaluated'} objective_score_raw=${evaluation.objectiveScore?.raw ?? 'not_evaluated'} objective_score_partial=${evaluation.objectiveScore?.partial ?? false} overall_status=${evaluation.overallStatus} required_human_review=${evaluation.requiredHumanCriteriaPending}`,
+      `objective_score=${evaluation.objectiveScore?.final ?? 'not_evaluated'} objective_score_raw=${evaluation.objectiveScore?.raw ?? 'not_evaluated'} objective_score_partial=${evaluation.objectiveScore?.partial ?? false} objective_score_scope=${evaluation.objectiveScore?.scope ?? evaluation.coverage.scope} dataset_coverage=${evaluation.coverage.datasetCoverage} scope_complete=${evaluation.coverage.completeForScope} missing_scenarios=${evaluation.coverage.missingScenarioIds.length} overall_status=${evaluation.overallStatus} required_human_review=${evaluation.requiredHumanCriteriaPending}`,
     )
   }
   if (execution.technicalStatus !== 'completed') process.exitCode = 1

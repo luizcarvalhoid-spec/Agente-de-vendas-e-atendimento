@@ -126,12 +126,34 @@ diacríticos, ignora caixa e normaliza espaços, mas não tenta inferir
 equivalência semântica.
 
 `tool_called` e `tool_not_called` consultam somente execuções reais. Solicitações
-rejeitadas não contam como execução. Grounding exige estado canônico `found` ou
+rejeitadas não contam como execução. A ausência só é conclusiva quando o trace
+contém uma terminação íntegra do orquestrador ou um encerramento antecipado do
+`ChatService` explicitamente instrumentado. Um evento `executed: true` comprova
+a chamada mesmo se o restante do trace estiver incompleto; sem nenhuma dessas
+evidências, o resultado é `not_evaluated`. Encerramentos antecipados comprovam
+zero ferramentas e zero chamadas de modelo, mas não fabricam grounding.
+
+Grounding exige terminação instrumentada e estado canônico `found` ou
 `not_found`; falhas de ferramenta não comprovam grounding. Cards são comparados
 campo a campo com a projeção canônica. Restrições de ingrediente só passam quando
 há resolução canônica, restrição efetivamente aplicada às buscas e ausência de
-incompatibilidade nos resultados; resposta sem produtos, isoladamente, é
-evidência insuficiente. Outcomes `unknown` também não aprovam essa verificação.
+incompatibilidade nos resultados. IDs inexistentes no catálogo reprovam a
+assertion; resposta sem produtos, isoladamente, é evidência insuficiente.
+Outcomes `unknown` também não aprovam essa verificação.
+
+### Cobertura da avaliação
+
+Por padrão, a avaliação exige todos os cenários do dataset. IDs duplicados,
+inesperados, pertencentes a outro dataset ou turnos com identificação
+inconsistente são rejeitados. Cenários esperados ausentes aparecem em
+`missingScenarioIds`, mantêm assertions como `not_evaluated` e impedem uma
+aprovação completa; uma execução vazia nunca produz `passed`.
+
+Com `--scenario`, o escopo é explicitamente `selected_scenarios`: a cobertura do
+escopo pode estar completa, mas `datasetCoverage` permanece `partial`, a nota é
+marcada como parcial e não é apresentada como nota completa do dataset. Assim,
+um subconjunto intencional é distinguido de perda acidental de resultados no
+escopo solicitado.
 
 ### Política de pontuação
 
@@ -146,7 +168,8 @@ Assertions `not_evaluated` ficam fora do denominador e tornam a nota parcial;
 se nenhuma assertion foi avaliada, o critério não recebe nota. Os pesos
 declarados dos critérios não alteram assertions individuais: eles servem apenas
 para a média ponderada dos critérios no cenário. Datasets usam média simples dos
-cenários que possuem nota. Todas as notas são arredondadas para duas casas.
+cenários que possuem nota. Escopos selecionados ou incompletos também marcam a
+nota como parcial. Todas as notas são arredondadas para duas casas.
 
 Uma falha comprovada em assertion `critical` marca cenário e dataset como
 `failed_critical`, preserva a nota bruta e limita a nota final a 3. Assertion

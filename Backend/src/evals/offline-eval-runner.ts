@@ -503,6 +503,12 @@ export async function runOfflineEvalDataset(
     loaded,
     execution,
     canonicalData,
+    options.scenarioId === undefined
+      ? { kind: 'full_dataset' }
+      : {
+          kind: 'selected_scenarios',
+          scenarioIds: [options.scenarioId],
+        },
   )
   return {
     ...execution,

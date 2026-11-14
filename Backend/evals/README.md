@@ -179,8 +179,7 @@ pendente mantém o status geral `needs_review`, salvo quando já existe veto
 `failed_critical`. Critérios opcionais são diagnósticos e critérios
 `not_applicable` ficam fora da pontuação.
 
-O resumo da CLI é transitório e não constitui relatório persistido. Avaliação
-humana, LLM-as-judge e exportação JSON/Markdown continuam fora deste escopo.
+Avaliação humana e LLM-as-judge continuam fora deste escopo.
 
 ### Baseline dos oito cenários
 
@@ -190,3 +189,48 @@ injeção: o modelo offline efetivamente executa `search_products` e `search_faq
 contrariando as assertions `tool_not_called`. Isso é uma divergência observada,
 não mascarada por ajuste do modelo falso. Não há falha crítica. Todos os datasets
 permanecem `needs_review` devido aos critérios humanos obrigatórios.
+
+## Relatórios JSON e Markdown (EVAL-05)
+
+Relatórios são construídos a partir do mesmo `OfflineEvalExecution` já avaliado;
+o builder não executa novamente o agente e não recalcula assertions, critérios
+ou notas. O contrato JSON usa `reportVersion: 1`, é validado por Zod e identifica
+explicitamente mecanismo, escopo, cobertura e parcialidade da nota.
+
+Para exportar, informe formato e diretório de forma explícita:
+
+```text
+pnpm eval --mode offline --dataset universal-core --evaluate --report-format json --report-dir ./eval-reports
+pnpm eval --mode offline --dataset universal-safety --evaluate --report-format markdown --report-dir ./eval-reports
+pnpm eval --mode offline --dataset hidrasplash-recommendations --evaluate --report-format both --report-dir ./eval-reports
+pnpm eval --mode offline --dataset universal-core --scenario universal.core.incomplete-need.001 --evaluate --report-format both --report-dir ./eval-reports
+```
+
+`--report-format` aceita `json`, `markdown` ou `both` e exige `--evaluate` e
+`--report-dir`. Sem essas opções, a CLI mantém o comportamento anterior. Os dois
+formatos usam o mesmo objeto em memória e nomes determinísticos que incluem o
+dataset, sua versão, o escopo e a versão do relatório. Arquivos existentes nunca
+são sobrescritos; selecione outro diretório ou remova o artefato conscientemente
+antes de repetir a exportação. `Backend/eval-reports/` é ignorado pelo Git para
+evitar commits acidentais dos exemplos locais.
+
+### Minimização e reprodutibilidade
+
+O relatório é uma projeção por campos permitidos. Ele não serializa o runner,
+mensagens completas, estado aplicado, prompts, credenciais, headers, argumentos
+ou resultados brutos de ferramentas, variáveis de ambiente, stacks ou caminhos
+locais. Referências de evidência aceitam apenas identificadores lógicos como
+`scenarios.<id>.turns.<índice>.response.type` e `canonical.products`; valores
+fora desse formato são redigidos. A sanitização de segredos, dados pessoais e
+caminhos é uma defesa adicional à allowlist.
+
+Valores dinâmicos do Markdown são escapados para impedir links, imagens ou HTML
+arbitrários. Cenários, turnos, critérios e assertions seguem a ordem validada do
+dataset. Sem `generatedAt` fornecido pelo chamador, entradas idênticas geram JSON
+e Markdown idênticos byte a byte; a CLI não injeta horário nem IDs aleatórios.
+
+Os relatórios distinguem nota ausente, parcial e completa. Execuções faltantes
+aparecem como `not_executed`; falhas técnicas e evidência insuficiente não são
+convertidas em zero. O Markdown destaca falhas críticas e o veto de nota 3, mas
+continua declarando que o modelo offline e assertions determinísticas não
+substituem revisão humana de naturalidade, empatia e qualidade semântica.

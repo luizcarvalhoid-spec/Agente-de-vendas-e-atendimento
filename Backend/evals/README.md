@@ -234,3 +234,12 @@ aparecem como `not_executed`; falhas técnicas e evidência insuficiente não s�
 convertidas em zero. O Markdown destaca falhas críticas e o veto de nota 3, mas
 continua declarando que o modelo offline e assertions determinísticas não
 substituem revisão humana de naturalidade, empatia e qualidade semântica.
+
+## Avaliação humana (EVAL-06)
+
+A rubrica universal, os contratos de amostras, pacotes, templates, submissões e
+resumos humanos estão documentados em `HUMAN_REVIEW.md`. O fluxo usa
+`pnpm eval:human`, aceita somente arquivos locais sanitizados e mantém todos os
+julgamentos separados dos relatórios objetivos. Nenhuma nota subjetiva é
+atribuída automaticamente e as fixtures sintéticas não são apresentadas como
+avaliações humanas realizadas.

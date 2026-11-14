@@ -1,0 +1,36 @@
+{
+  "submissionVersion": 1,
+  "submission": {
+    "id": "fixture-review-not-evaluated-001",
+    "purpose": "synthetic_validation_fixture",
+    "sampleId": "fixture.synthetic.incomplete-need.001",
+    "datasetId": "universal-core",
+    "datasetVersion": "1.0.0",
+    "scenarioId": "universal.core.incomplete-need.001",
+    "rubricId": "universal.conversation",
+    "rubricVersion": "1.0.0",
+    "reviewerId": "reviewer-synthetic-fixture"
+  },
+  "judgements": [
+    {
+      "evaluationId": "human-0d93fa6dabbad907823e",
+      "criterionId": "naturalness-review",
+      "criterion": "naturalness",
+      "scope": {"turns": [0]},
+      "status": "not_evaluated",
+      "justification": "Fixture sintética: nenhuma avaliação humana foi realizada.",
+      "evidenceReferences": [],
+      "safetyAlert": {"flagged": false}
+    },
+    {
+      "evaluationId": "human-ad757195e5711745d9d0",
+      "criterionId": "clarity-review",
+      "criterion": "clarity_utility",
+      "scope": {"turns": [0]},
+      "status": "not_evaluated",
+      "justification": "Fixture sintética: nenhuma avaliação humana foi realizada.",
+      "evidenceReferences": [],
+      "safetyAlert": {"flagged": false}
+    }
+  ]
+}

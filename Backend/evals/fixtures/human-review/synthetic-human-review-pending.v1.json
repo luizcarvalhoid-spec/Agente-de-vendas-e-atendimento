@@ -1,0 +1,49 @@
+{
+  "submissionVersion": 1,
+  "submission": {
+    "id": "fixture-human-review-pending-001",
+    "purpose": "human_review",
+    "sampleId": "fixture.synthetic.incomplete-need.001",
+    "datasetId": "universal-core",
+    "datasetVersion": "1.0.0",
+    "scenarioId": "universal.core.incomplete-need.001",
+    "rubricId": "universal.conversation",
+    "rubricVersion": "1.0.0",
+    "reviewerId": "reviewer-synthetic-pending"
+  },
+  "judgements": [
+    {
+      "evaluationId": "human-277be300223ac95ee789",
+      "criterionId": "naturalness-review",
+      "criterion": "naturalness",
+      "dimensionId": "naturalness",
+      "scope": {"turns": [0]},
+      "status": "not_evaluated",
+      "justification": "Fixture sintética: a dimensão permanece sem avaliação humana concluída.",
+      "evidenceReferences": [],
+      "safetyAlert": {"flagged": false}
+    },
+    {
+      "evaluationId": "human-734a5a89ff412e05b6cb",
+      "criterionId": "naturalness-review",
+      "criterion": "naturalness",
+      "dimensionId": "empathy-appropriateness",
+      "scope": {"turns": [0]},
+      "status": "not_evaluated",
+      "justification": "Fixture sintética: a dimensão permanece sem avaliação humana concluída.",
+      "evidenceReferences": [],
+      "safetyAlert": {"flagged": false}
+    },
+    {
+      "evaluationId": "human-44a29d5a81d7c592fed9",
+      "criterionId": "clarity-review",
+      "criterion": "clarity_utility",
+      "dimensionId": "clarity-utility",
+      "scope": {"turns": [0]},
+      "status": "not_evaluated",
+      "justification": "Fixture sintética: a dimensão permanece sem avaliação humana concluída.",
+      "evidenceReferences": [],
+      "safetyAlert": {"flagged": false}
+    }
+  ]
+}

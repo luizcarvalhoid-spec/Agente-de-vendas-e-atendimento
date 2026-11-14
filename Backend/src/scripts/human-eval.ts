@@ -6,6 +6,7 @@ import {
   loadHumanEvalRubric,
 } from '../evals/human-eval-rubric.js'
 import {
+  calculateHumanReviewProgress,
   HumanReviewEvaluationError,
   loadHumanReviewPackage,
   loadHumanReviewSubmission,
@@ -127,11 +128,18 @@ async function validate(options: CliOptions) {
     loadHumanReviewSubmission(options.reviews[0] ?? ''),
   ])
   const validated = validateHumanReviewSubmission(reviewPackage, review)
+  const progress = calculateHumanReviewProgress(reviewPackage, validated)
   console.log(
     `review_status=valid submission=${validated.submission.id} purpose=${validated.submission.purpose}`,
   )
   console.log(
-    `human_evaluation_recorded=${validated.submission.purpose === 'human_review'}`,
+    `human_review_status=${progress.humanReviewStatus} human_evaluation_recorded=${progress.humanEvaluationRecorded} all_applicable_dimensions_completed=${progress.allApplicableDimensionsCompleted}`,
+  )
+  console.log(
+    `dimensions_evaluated=${progress.dimensionCounts.evaluated} dimensions_pending=${progress.dimensionCounts.pending} dimensions_not_applicable=${progress.dimensionCounts.notApplicable}`,
+  )
+  console.log(
+    `sample_origin=${reviewPackage.sample.origin.kind} performance_evidence=${reviewPackage.sample.origin.performanceEvidence}`,
   )
 }
 

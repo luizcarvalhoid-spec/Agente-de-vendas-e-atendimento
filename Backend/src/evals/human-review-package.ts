@@ -85,9 +85,13 @@ function originWarning(origin: HumanConversationSample['sample']['origin']) {
   }
 }
 
-function evaluationId(sampleId: string, criterionId: string) {
+function evaluationId(
+  sampleId: string,
+  criterionId: string,
+  dimensionId: string,
+) {
   return `human-${createHash('sha256')
-    .update(`${sampleId}:${criterionId}`)
+    .update(`${sampleId}:${criterionId}:${dimensionId}`)
     .digest('hex')
     .slice(0, 20)}`
 }
@@ -144,7 +148,7 @@ export function buildHumanReviewPackage(
       'O cenário não possui critérios subjetivos configurados para avaliação humana.',
     )
   }
-  const reviewItems = humanCriteria.map((criterion) => {
+  const reviewItems = humanCriteria.flatMap((criterion) => {
     const dimensions = rubric.dimensions.filter((dimension) =>
       dimension.criteria.includes(criterion.criterion),
     )
@@ -153,18 +157,22 @@ export function buildHumanReviewPackage(
         `A rubrica não cobre o critério ${criterion.criterion}.`,
       )
     }
-    return {
-      evaluationId: evaluationId(sample.sample.id, criterion.id),
+    return dimensions.map((dimension) => ({
+      evaluationId: evaluationId(
+        sample.sample.id,
+        criterion.id,
+        dimension.id,
+      ),
       criterionId: criterion.id,
       criterion: criterion.criterion,
       applicability: criterion.applicability,
-      rubricDimensionIds: dimensions.map((dimension) => dimension.id),
+      dimensionId: dimension.id,
       scope: { turns: sample.turns.map((turn) => turn.index) },
       status: 'not_evaluated' as const,
-    }
+    }))
   })
   const applicableDimensionIds = new Set(
-    reviewItems.flatMap((item) => item.rubricDimensionIds),
+    reviewItems.map((item) => item.dimensionId),
   )
 
   return humanReviewPackageSchema.parse({
@@ -228,6 +236,7 @@ export function buildHumanReviewTemplate(
       evaluationId: item.evaluationId,
       criterionId: item.criterionId,
       criterion: item.criterion,
+      dimensionId: item.dimensionId,
       scope: { turns: [...item.scope.turns] },
       status: null,
       score: null,

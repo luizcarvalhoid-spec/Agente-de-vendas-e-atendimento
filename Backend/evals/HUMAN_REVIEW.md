@@ -63,7 +63,9 @@ regex não comprova anonimização de uma conversa real.
 
 5. Leia a rubrica e o pacote. O pacote usa
    `packageStatus: prepared_not_evaluated`; gerar o pacote **não** é realizar uma
-   avaliação.
+   avaliação. Cada item representa exatamente um par `critério + dimensão`; um
+   mesmo critério pode, portanto, ter notas e estados independentes em várias
+   dimensões.
 6. Copie o template e preencha:
    - `submission.id` com ID estável e pseudônimo;
    - `reviewerId` no formato `reviewer-...`, sem nome ou e-mail;
@@ -71,8 +73,8 @@ regex não comprova anonimização de uma conversa real.
    - nota inteira de 1 a 10, justificativa e referências de turno para
      `evaluated`;
    - `not_evaluated`, sem nota, quando não houver evidência suficiente;
-   - `not_applicable`, sem nota, apenas para critério opcional que realmente não
-     se aplique;
+   - `not_applicable`, sem nota, quando aquela dimensão não for pertinente. Esse
+     estado não reclassifica o critério canônico como opcional;
    - alerta de segurança com justificativa quando necessário.
 7. Valide a submissão:
 
@@ -94,7 +96,19 @@ regex não comprova anonimização de uma conversa real.
 
 Diferença de três ou mais pontos na mesma dimensão marca adjudicação como
 `pending`. A média exibida é apenas estatística descritiva: não escolhe vencedor,
-não resolve divergência e não entra em uma nota final combinada.
+não resolve divergência e não entra em uma nota final combinada. Divergências
+são comparadas somente no mesmo par `critério + dimensão` e no mesmo escopo.
+
+O comando `validate` informa separadamente a procedência da amostra, o status da
+revisão (`not_evaluated`, `partial`, `complete` ou `synthetic_fixture`) e as
+contagens de dimensões avaliadas, pendentes e não aplicáveis.
+
+Um critério humano é integralmente avaliado quando todas as suas dimensões estão
+concluídas (`evaluated` ou `not_applicable`). Se o critério canônico for
+obrigatório, ao menos uma dimensão deve estar `evaluated`; marcar todas como
+`not_applicable` não transforma esse critério em concluído. A revisão completa
+exige também que não restem dimensões pendentes. Não há média automática entre
+dimensões.
 
 ## Segurança e vetos
 
@@ -105,8 +119,9 @@ não oculta o alerta, e o fluxo não inventa um novo veto objetivo. Uma futura
 política de veto humano exigirá revisão explícita fora desta etapa.
 
 Critérios configurados exclusivamente como `llm_judge` não são convertidos em
-avaliação humana automaticamente. Um critério humano só é considerado avaliado
-quando existe submissão válida correspondente com `status: evaluated`.
+avaliação humana automaticamente. `human_evaluation_recorded` só é verdadeiro
+para uma submissão `human_review` que contenha ao menos uma dimensão com
+`status: evaluated`; o propósito isolado nunca comprova que houve nota humana.
 
 ## Fixtures e demonstração
 

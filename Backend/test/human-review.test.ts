@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import test from 'node:test'
@@ -16,7 +16,9 @@ import {
 } from '../src/evals/human-eval-rubric.js'
 import { humanEvalRubricSchema } from '../src/evals/human-eval-rubric-schema.js'
 import {
+  calculateHumanReviewProgress,
   HumanReviewEvaluationError,
+  loadHumanReviewSubmission,
   parseHumanReviewSubmission,
   summarizeHumanReviews,
   validateHumanReviewSubmission,
@@ -49,6 +51,18 @@ const syntheticSamplePath = resolve(
   backendRoot,
   'evals/fixtures/human-review/synthetic-conversation.v1.json',
 )
+const syntheticReviewPath = resolve(
+  backendRoot,
+  'evals/fixtures/human-review/synthetic-not-evaluated-review.v1.json',
+)
+const pendingHumanReviewPath = resolve(
+  backendRoot,
+  'evals/fixtures/human-review/synthetic-human-review-pending.v1.json',
+)
+const distinctHumanReviewPath = resolve(
+  backendRoot,
+  'evals/fixtures/human-review/synthetic-human-review-distinct.v1.json',
+)
 
 async function fixture() {
   const [rubric, sample, loaded] = await Promise.all([
@@ -70,7 +84,7 @@ function reviewFor(
     purpose?: 'human_review' | 'synthetic_validation_fixture'
     scores?: readonly number[]
     statuses?: readonly ('evaluated' | 'not_evaluated' | 'not_applicable')[]
-    safetyCriterionId?: string
+    safetyEvaluationId?: string
   } = {},
 ): HumanReviewSubmission {
   return humanReviewSubmissionSchema.parse({
@@ -92,11 +106,12 @@ function reviewFor(
         evaluationId: item.evaluationId,
         criterionId: item.criterionId,
         criterion: item.criterion,
+        dimensionId: item.dimensionId,
         scope: { turns: [...item.scope.turns] },
         evidenceReferences:
           status === 'evaluated' ? [{ turn: 0, role: 'assistant' }] : [],
         safetyAlert:
-          item.criterionId === options.safetyCriterionId
+          item.evaluationId === options.safetyEvaluationId
             ? {
                 flagged: true,
                 rationale: 'A resposta apresenta uma preocupação semântica observável.',
@@ -156,8 +171,12 @@ test('pacote gerado é reproduzível, inclui somente critérios humanos e não i
     ),
   )
   assert.deepEqual(
-    reviewPackage.reviewItems.map((item) => item.criterionId),
-    ['naturalness-review', 'clarity-review'],
+    reviewPackage.reviewItems.map((item) => [item.criterionId, item.dimensionId]),
+    [
+      ['naturalness-review', 'naturalness'],
+      ['naturalness-review', 'empathy-appropriateness'],
+      ['clarity-review', 'clarity-utility'],
+    ],
   )
 })
 
@@ -226,13 +245,13 @@ test('rejeita dados sensíveis na transcrição em vez de persistir correção s
 
 test('aceita nota humana inteira de 1 a 10 com justificativa e evidência', async () => {
   const { reviewPackage } = await fixturePromise
-  const review = reviewFor(reviewPackage, { scores: [1, 10] })
+  const review = reviewFor(reviewPackage, { scores: [1, 9, 10] })
   const validated = validateHumanReviewSubmission(reviewPackage, review)
   assert.deepEqual(
     validated.judgements.map((item) =>
       item.status === 'evaluated' ? item.score : undefined,
     ),
-    [1, 10],
+    [1, 9, 10],
   )
 })
 
@@ -267,38 +286,105 @@ test('rejeita nota fora do intervalo, justificativa ou evidência ausente', asyn
   )
 })
 
-test('not_evaluated não aceita nota e not_applicable respeita aplicabilidade', async () => {
+test('not_evaluated não aceita nota e not_applicable pertence à dimensão', async () => {
   const { reviewPackage } = await fixturePromise
   const pending = reviewFor(reviewPackage, {
-    statuses: ['not_evaluated', 'not_evaluated'],
+    statuses: ['not_evaluated', 'not_evaluated', 'not_evaluated'],
   })
   assert.deepEqual(
     validateHumanReviewSubmission(reviewPackage, pending).judgements.map(
       (item) => item.status,
     ),
-    ['not_evaluated', 'not_evaluated'],
+    ['not_evaluated', 'not_evaluated', 'not_evaluated'],
   )
   assert.throws(() =>
     parseHumanReviewSubmission({
       ...pending,
-      judgements: [{ ...pending.judgements[0], score: 5 }, pending.judgements[1]],
+      judgements: [
+        { ...pending.judgements[0], score: 5 },
+        ...pending.judgements.slice(1),
+      ],
     }),
   )
-  const invalidRequired = reviewFor(reviewPackage, {
-    statuses: ['not_applicable', 'not_evaluated'],
+  const dimensionNotApplicable = reviewFor(reviewPackage, {
+    scores: [9],
+    statuses: ['evaluated', 'not_applicable', 'not_applicable'],
   })
-  assert.throws(
-    () => validateHumanReviewSubmission(reviewPackage, invalidRequired),
-    /obrigatório/,
+  const progress = calculateHumanReviewProgress(
+    reviewPackage,
+    dimensionNotApplicable,
   )
-  const validOptional = reviewFor(reviewPackage, {
-    statuses: ['not_evaluated', 'not_applicable'],
+  assert.equal(dimensionNotApplicable.judgements[0]?.status, 'evaluated')
+  assert.equal(dimensionNotApplicable.judgements[1]?.status, 'not_applicable')
+  assert.equal(progress.humanReviewStatus, 'complete')
+})
+
+test('naturalidade e empatia preservam estados e notas independentes', async () => {
+  const { reviewPackage } = await fixturePromise
+  const mixed = await loadHumanReviewSubmission(distinctHumanReviewPath)
+  assert.equal(mixed.judgements[0]?.dimensionId, 'naturalness')
+  assert.equal(mixed.judgements[0]?.status, 'evaluated')
+  assert.equal(
+    mixed.judgements[0]?.status === 'evaluated'
+      ? mixed.judgements[0].score
+      : undefined,
+    9,
+  )
+  assert.equal(mixed.judgements[1]?.dimensionId, 'empathy-appropriateness')
+  assert.equal(
+    mixed.judgements[1]?.status === 'evaluated'
+      ? mixed.judgements[1].score
+      : undefined,
+    6,
+  )
+  const progress = calculateHumanReviewProgress(reviewPackage, mixed)
+  assert.equal(progress.humanReviewStatus, 'complete')
+  assert.equal(progress.humanEvaluationRecorded, true)
+  assert.deepEqual(progress.dimensionCounts, {
+    evaluated: 2,
+    pending: 0,
+    notApplicable: 1,
+  })
+})
+
+test('progresso distingue ausência, avaliação parcial, conclusão e fixture sintética', async () => {
+  const { reviewPackage } = await fixturePromise
+  const none = reviewFor(reviewPackage, {
+    statuses: ['not_evaluated', 'not_evaluated', 'not_evaluated'],
+  })
+  assert.deepEqual(calculateHumanReviewProgress(reviewPackage, none), {
+    humanReviewStatus: 'not_evaluated',
+    humanEvaluationRecorded: false,
+    allApplicableDimensionsCompleted: false,
+    dimensionCounts: { evaluated: 0, pending: 3, notApplicable: 0 },
+  })
+
+  const partial = reviewFor(reviewPackage, {
+    statuses: ['evaluated', 'not_evaluated', 'not_applicable'],
   })
   assert.equal(
-    validateHumanReviewSubmission(reviewPackage, validOptional).judgements[1]
-      ?.status,
-    'not_applicable',
+    calculateHumanReviewProgress(reviewPackage, partial).humanReviewStatus,
+    'partial',
   )
+
+  const complete = reviewFor(reviewPackage, {
+    statuses: ['evaluated', 'not_applicable', 'not_applicable'],
+  })
+  assert.equal(
+    calculateHumanReviewProgress(reviewPackage, complete).humanReviewStatus,
+    'complete',
+  )
+
+  const synthetic = reviewFor(reviewPackage, {
+    purpose: 'synthetic_validation_fixture',
+    statuses: ['not_evaluated', 'not_evaluated', 'not_evaluated'],
+  })
+  assert.deepEqual(calculateHumanReviewProgress(reviewPackage, synthetic), {
+    humanReviewStatus: 'synthetic_fixture',
+    humanEvaluationRecorded: false,
+    allApplicableDimensionsCompleted: false,
+    dimensionCounts: { evaluated: 0, pending: 3, notApplicable: 0 },
+  })
 })
 
 test('rejeita IDs, versões, critérios e turnos incompatíveis', async () => {
@@ -328,6 +414,42 @@ test('rejeita IDs, versões, critérios e turnos incompatíveis', async () => {
       }),
     /turno inexistente/,
   )
+
+  assert.throws(
+    () =>
+      validateHumanReviewSubmission(reviewPackage, {
+        ...review,
+        judgements: [
+          { ...first, dimensionId: 'unknown-dimension' },
+          ...review.judgements.slice(1),
+        ],
+      }),
+    /não corresponde/,
+  )
+  assert.throws(() =>
+    humanReviewPackageSchema.parse({
+      ...reviewPackage,
+      reviewItems: [
+        { ...reviewPackage.reviewItems[0], dimensionId: 'clarity-utility' },
+        ...reviewPackage.reviewItems.slice(1),
+      ],
+    }),
+  )
+  assert.throws(() =>
+    humanReviewPackageSchema.parse({
+      ...reviewPackage,
+      reviewItems: [
+        { ...reviewPackage.reviewItems[0], dimensionId: 'unknown-dimension' },
+        ...reviewPackage.reviewItems.slice(1),
+      ],
+    }),
+  )
+  assert.throws(() =>
+    parseHumanReviewSubmission({
+      ...review,
+      judgements: [review.judgements[0], review.judgements[0], review.judgements[2]],
+    }),
+  )
 })
 
 test('preserva múltiplos julgamentos e sinaliza divergência sem decidir por média', async () => {
@@ -335,24 +457,26 @@ test('preserva múltiplos julgamentos e sinaliza divergência sem decidir por m�
   const alpha = reviewFor(reviewPackage, {
     id: 'review-alpha-001',
     reviewerId: 'reviewer-alpha',
-    scores: [3, 7],
+    scores: [3, 9, 7],
   })
   const beta = reviewFor(reviewPackage, {
     id: 'review-beta-001',
     reviewerId: 'reviewer-beta',
-    scores: [8, 8],
+    scores: [8, 8, 8],
   })
   const summary = summarizeHumanReviews(reviewPackage, [alpha, beta])
   assert.deepEqual(humanReviewSummarySchema.parse(summary), summary)
   assert.equal(summary.reviews.length, 2)
   assert.equal(summary.adjudicationRequired, true)
-  assert.equal(summary.criteria[0]?.adjudicationStatus, 'pending')
-  assert.deepEqual(summary.criteria[0]?.scores, [3, 8])
-  assert.deepEqual(summary.criteria[0]?.descriptiveStatistics, {
+  assert.equal(summary.dimensions[0]?.adjudicationStatus, 'pending')
+  assert.deepEqual(summary.dimensions[0]?.scores, [3, 8])
+  assert.deepEqual(summary.dimensions[0]?.descriptiveStatistics, {
     minimum: 3,
     maximum: 8,
     mean: 5.5,
   })
+  assert.equal(summary.dimensions[1]?.adjudicationStatus, 'not_needed')
+  assert.deepEqual(summary.dimensions[1]?.scores, [9, 8])
 })
 
 test('não aceita submissões duplicadas ou o mesmo avaliador como revisões independentes', async () => {
@@ -375,7 +499,7 @@ test('não aceita submissões duplicadas ou o mesmo avaliador como revisões ind
 test('destaca alerta humano sem alterar falha crítica objetiva', async () => {
   const { reviewPackage } = await fixturePromise
   const review = reviewFor(reviewPackage, {
-    safetyCriterionId: reviewPackage.reviewItems[0]?.criterionId,
+    safetyEvaluationId: reviewPackage.reviewItems[0]?.evaluationId,
   })
   const summary = summarizeHumanReviews(reviewPackage, [review])
   assert.equal(summary.safetyAlerts.length, 1)
@@ -389,14 +513,20 @@ test('destaca alerta humano sem alterar falha crítica objetiva', async () => {
 
 test('submissão sintética de validação não é apresentada como avaliação humana real', async () => {
   const { reviewPackage } = await fixturePromise
-  const synthetic = reviewFor(reviewPackage, {
-    purpose: 'synthetic_validation_fixture',
-    statuses: ['not_evaluated', 'not_evaluated'],
-  })
+  const synthetic = await loadHumanReviewSubmission(syntheticReviewPath)
   const summary = summarizeHumanReviews(reviewPackage, [synthetic])
   assert.equal(summary.humanReviewSubmissions, 0)
   assert.equal(summary.syntheticFixtureSubmissions, 1)
-  assert.ok(summary.criteria.every((criterion) => criterion.scores.length === 0))
+  assert.ok(summary.dimensions.every((dimension) => dimension.scores.length === 0))
+  assert.deepEqual(summary.humanDimensionCounts, {
+    evaluated: 0,
+    pending: 0,
+    notApplicable: 0,
+  })
+  assert.equal(summary.origin.kind, 'manually_simulated')
+  assert.equal(summary.origin.performanceEvidence, 'not_real_performance')
+  assert.equal(summary.reviews[0]?.humanReviewStatus, 'synthetic_fixture')
+  assert.equal(summary.reviews[0]?.humanEvaluationRecorded, false)
 })
 
 test('rejeita dados sensíveis em justificativas e alertas', async () => {
@@ -468,6 +598,27 @@ test('escrita local é exclusiva e a CLI distingue pacote de avaliação realiza
   )
   assert.match(stdout, /package_status=prepared_not_evaluated/)
   assert.match(stdout, /human_evaluation_recorded=false/)
+
+  const validated = await execFileAsync(
+    process.execPath,
+    [
+      '--import',
+      'tsx',
+      'src/scripts/human-eval.ts',
+      '--action',
+      'validate',
+      '--package',
+      written.package,
+      '--review',
+      pendingHumanReviewPath,
+    ],
+    { cwd: backendRoot },
+  )
+  assert.match(validated.stdout, /human_review_status=not_evaluated/)
+  assert.match(validated.stdout, /human_evaluation_recorded=false/)
+  assert.match(validated.stdout, /dimensions_evaluated=0 dimensions_pending=3/)
+  assert.match(validated.stdout, /sample_origin=manually_simulated/)
+  assert.match(validated.stdout, /performance_evidence=not_real_performance/)
 })
 
 test('fluxo de pacote e resumo não chama rede nem OpenRouter', async () => {
@@ -481,7 +632,7 @@ test('fluxo de pacote e resumo não chama rede nem OpenRouter', async () => {
     const { reviewPackage } = await fixture()
     const review = reviewFor(reviewPackage, {
       purpose: 'synthetic_validation_fixture',
-      statuses: ['not_evaluated', 'not_evaluated'],
+      statuses: ['not_evaluated', 'not_evaluated', 'not_evaluated'],
     })
     summarizeHumanReviews(reviewPackage, [review])
     assert.equal(calls, 0)

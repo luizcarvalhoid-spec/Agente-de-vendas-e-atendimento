@@ -99,7 +99,7 @@ const packageReviewItemSchema = z
     criterionId: identifierSchema,
     criterion: evalCanonicalCriterionSchema,
     applicability: z.enum(['required', 'optional']),
-    rubricDimensionIds: z.array(identifierSchema).min(1).max(10),
+    dimensionId: identifierSchema,
     scope: reviewScopeSchema,
     status: z.literal('not_evaluated'),
   })
@@ -143,7 +143,13 @@ export const humanReviewPackageSchema = z
   .strict()
   .superRefine((reviewPackage, context) => {
     const ids = new Set<string>()
-    const criteria = new Set<string>()
+    const pairs = new Set<string>()
+    const dimensions = new Map(
+      reviewPackage.rubricDimensions.map((dimension) => [
+        dimension.id,
+        dimension,
+      ]),
+    )
     for (const [index, item] of reviewPackage.reviewItems.entries()) {
       if (ids.has(item.evaluationId)) {
         context.addIssue({
@@ -152,15 +158,27 @@ export const humanReviewPackageSchema = z
           message: 'evaluationId duplicado.',
         })
       }
-      if (criteria.has(item.criterionId)) {
+      const pair = `${item.criterionId}:${item.dimensionId}:${JSON.stringify(item.scope.turns)}`
+      if (pairs.has(pair)) {
         context.addIssue({
           code: 'custom',
-          path: ['reviewItems', index, 'criterionId'],
-          message: 'Critério duplicado no pacote.',
+          path: ['reviewItems', index, 'dimensionId'],
+          message: 'Par de critério, dimensão e escopo duplicado no pacote.',
         })
       }
       ids.add(item.evaluationId)
-      criteria.add(item.criterionId)
+      pairs.add(pair)
+      const dimension = dimensions.get(item.dimensionId)
+      if (
+        dimension === undefined ||
+        !dimension.criteria.includes(item.criterion)
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['reviewItems', index, 'dimensionId'],
+          message: 'Dimensão inexistente ou incompatível com o critério.',
+        })
+      }
     }
   })
 
@@ -176,6 +194,7 @@ const reviewTemplateItemSchema = z
     evaluationId: identifierSchema,
     criterionId: identifierSchema,
     criterion: evalCanonicalCriterionSchema,
+    dimensionId: identifierSchema,
     scope: reviewScopeSchema,
     status: z.null(),
     score: z.null(),
@@ -223,6 +242,7 @@ const judgementBase = {
   evaluationId: identifierSchema,
   criterionId: identifierSchema,
   criterion: evalCanonicalCriterionSchema,
+  dimensionId: identifierSchema,
   scope: reviewScopeSchema,
   evidenceReferences: z.array(evidenceReferenceSchema).max(50),
   safetyAlert: safetyAlertSchema,
@@ -281,7 +301,7 @@ export const humanReviewSubmissionSchema = z
   .strict()
   .superRefine((review, context) => {
     const evaluationIds = new Set<string>()
-    const criterionIds = new Set<string>()
+    const pairs = new Set<string>()
     for (const [index, judgement] of review.judgements.entries()) {
       if (evaluationIds.has(judgement.evaluationId)) {
         context.addIssue({
@@ -290,22 +310,25 @@ export const humanReviewSubmissionSchema = z
           message: 'evaluationId duplicado.',
         })
       }
-      if (criterionIds.has(judgement.criterionId)) {
+      const pair = `${judgement.criterionId}:${judgement.dimensionId}:${JSON.stringify(judgement.scope.turns)}`
+      if (pairs.has(pair)) {
         context.addIssue({
           code: 'custom',
-          path: ['judgements', index, 'criterionId'],
-          message: 'Critério duplicado na submissão.',
+          path: ['judgements', index, 'dimensionId'],
+          message: 'Par de critério, dimensão e escopo duplicado na submissão.',
         })
       }
       evaluationIds.add(judgement.evaluationId)
-      criterionIds.add(judgement.criterionId)
+      pairs.add(pair)
     }
   })
 
-const criterionSummarySchema = z
+const dimensionSummarySchema = z
   .object({
     criterionId: identifierSchema,
     criterion: evalCanonicalCriterionSchema,
+    dimensionId: identifierSchema,
+    scope: reviewScopeSchema,
     reviewCount: z.number().int().nonnegative(),
     evaluatedCount: z.number().int().nonnegative(),
     notEvaluatedCount: z.number().int().nonnegative(),
@@ -332,6 +355,13 @@ export const humanReviewSummarySchema = z
     submissions: z.number().int().positive(),
     humanReviewSubmissions: z.number().int().nonnegative(),
     syntheticFixtureSubmissions: z.number().int().nonnegative(),
+    humanDimensionCounts: z
+      .object({
+        evaluated: z.number().int().nonnegative(),
+        pending: z.number().int().nonnegative(),
+        notApplicable: z.number().int().nonnegative(),
+      })
+      .strict(),
     reviews: z
       .array(
         z
@@ -339,12 +369,27 @@ export const humanReviewSummarySchema = z
             submissionId: identifierSchema,
             reviewerId: z.string().max(80),
             purpose: z.enum(['human_review', 'synthetic_validation_fixture']),
+            humanReviewStatus: z.enum([
+              'not_evaluated',
+              'partial',
+              'complete',
+              'synthetic_fixture',
+            ]),
+            humanEvaluationRecorded: z.boolean(),
+            dimensionCounts: z
+              .object({
+                evaluated: z.number().int().nonnegative(),
+                pending: z.number().int().nonnegative(),
+                notApplicable: z.number().int().nonnegative(),
+              })
+              .strict(),
             judgements: z
               .array(
                 z
                   .object({
                     evaluationId: identifierSchema,
                     criterionId: identifierSchema,
+                    dimensionId: identifierSchema,
                     status: z.enum([
                       'evaluated',
                       'not_evaluated',
@@ -364,7 +409,7 @@ export const humanReviewSummarySchema = z
       )
       .min(1)
       .max(100),
-    criteria: z.array(criterionSummarySchema).min(1).max(100),
+    dimensions: z.array(dimensionSummarySchema).min(1).max(100),
     safetyAlerts: z
       .array(
         z
@@ -372,6 +417,7 @@ export const humanReviewSummarySchema = z
             submissionId: identifierSchema,
             reviewerId: z.string().max(80),
             criterionId: identifierSchema,
+            dimensionId: identifierSchema,
             rationale: reviewTextSchema,
             priority: z.literal('human_review_required'),
             objectiveCriticalFailureChanged: z.literal(false),

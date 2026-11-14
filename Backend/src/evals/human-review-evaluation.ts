@@ -112,7 +112,7 @@ export function validateHumanReviewSubmission(
   }
   if (review.judgements.length !== reviewPackage.reviewItems.length) {
     throw new HumanReviewEvaluationError(
-      'A submissão deve registrar exatamente todos os critérios do pacote.',
+      'A submissão deve registrar exatamente todas as dimensões do pacote.',
     )
   }
 
@@ -125,18 +125,22 @@ export function validateHumanReviewSubmission(
       judgement === undefined ||
       judgement.criterionId !== item.criterionId ||
       judgement.criterion !== item.criterion ||
+      judgement.dimensionId !== item.dimensionId ||
       !isDeepStrictEqual(judgement.scope.turns, item.scope.turns)
     ) {
       throw new HumanReviewEvaluationError(
         `O julgamento ${item.evaluationId} não corresponde ao pacote.`,
       )
     }
+    const dimension = reviewPackage.rubricDimensions.find(
+      (candidate) => candidate.id === item.dimensionId,
+    )
     if (
-      judgement.status === 'not_applicable' &&
-      item.applicability === 'required'
+      dimension === undefined ||
+      !dimension.criteria.includes(item.criterion)
     ) {
       throw new HumanReviewEvaluationError(
-        `O critério obrigatório ${item.criterionId} não pode ser marcado como not_applicable.`,
+        `A dimensão ${item.dimensionId} não é compatível com o critério ${item.criterionId}.`,
       )
     }
     if (
@@ -150,6 +154,65 @@ export function validateHumanReviewSubmission(
     }
   }
   return review
+}
+
+export function calculateHumanReviewProgress(
+  reviewPackageInput: HumanReviewPackage,
+  reviewInput: HumanReviewSubmission,
+) {
+  const reviewPackage = humanReviewPackageSchema.parse(reviewPackageInput)
+  const review = validateHumanReviewSubmission(reviewPackage, reviewInput)
+  const evaluated = review.judgements.filter(
+    (judgement) => judgement.status === 'evaluated',
+  ).length
+  const pending = review.judgements.filter(
+    (judgement) => judgement.status === 'not_evaluated',
+  ).length
+  const notApplicable = review.judgements.filter(
+    (judgement) => judgement.status === 'not_applicable',
+  ).length
+
+  const requiredCriterionIds = new Set(
+    reviewPackage.reviewItems
+      .filter((item) => item.applicability === 'required')
+      .map((item) => item.criterionId),
+  )
+  const requiredCriteriaComplete = [...requiredCriterionIds].every(
+    (criterionId) => {
+      const itemIds = new Set(
+        reviewPackage.reviewItems
+          .filter((item) => item.criterionId === criterionId)
+          .map((item) => item.evaluationId),
+      )
+      const judgements = review.judgements.filter((judgement) =>
+        itemIds.has(judgement.evaluationId),
+      )
+      return (
+        judgements.every(
+          (judgement) => judgement.status !== 'not_evaluated',
+        ) && judgements.some((judgement) => judgement.status === 'evaluated')
+      )
+    },
+  )
+  const allApplicableDimensionsCompleted =
+    pending === 0 && requiredCriteriaComplete
+  const humanEvaluationRecorded =
+    review.submission.purpose === 'human_review' && evaluated > 0
+  const humanReviewStatus =
+    review.submission.purpose === 'synthetic_validation_fixture'
+      ? ('synthetic_fixture' as const)
+      : allApplicableDimensionsCompleted
+        ? ('complete' as const)
+        : evaluated > 0
+          ? ('partial' as const)
+          : ('not_evaluated' as const)
+
+  return {
+    humanReviewStatus,
+    humanEvaluationRecorded,
+    allApplicableDimensionsCompleted,
+    dimensionCounts: { evaluated, pending, notApplicable },
+  }
 }
 
 function round(value: number) {
@@ -187,7 +250,7 @@ export function summarizeHumanReviews(
   const humanReviews = reviews.filter(
     (review) => review.submission.purpose === 'human_review',
   )
-  const criteria = reviewPackage.reviewItems.map((item) => {
+  const dimensions = reviewPackage.reviewItems.map((item) => {
     const judgements = humanReviews.map((review) =>
       review.judgements.find(
         (judgement) => judgement.evaluationId === item.evaluationId,
@@ -207,6 +270,8 @@ export function summarizeHumanReviews(
     return {
       criterionId: item.criterionId,
       criterion: item.criterion,
+      dimensionId: item.dimensionId,
+      scope: { turns: [...item.scope.turns] },
       reviewCount: judgements.filter(Boolean).length,
       evaluatedCount: judgements.filter(
         (judgement) => judgement?.status === 'evaluated',
@@ -241,6 +306,7 @@ export function summarizeHumanReviews(
               submissionId: review.submission.id,
               reviewerId: review.submission.reviewerId,
               criterionId: judgement.criterionId,
+              dimensionId: judgement.dimensionId,
               rationale: judgement.safetyAlert.rationale,
               priority: 'human_review_required' as const,
               objectiveCriticalFailureChanged: false as const,
@@ -248,6 +314,9 @@ export function summarizeHumanReviews(
           ]
         : [],
     ),
+  )
+  const humanProgress = humanReviews.map((review) =>
+    calculateHumanReviewProgress(reviewPackage, review),
   )
 
   return humanReviewSummarySchema.parse({
@@ -258,31 +327,48 @@ export function summarizeHumanReviews(
     submissions: reviews.length,
     humanReviewSubmissions: humanReviews.length,
     syntheticFixtureSubmissions: reviews.length - humanReviews.length,
-    reviews: reviews.map((review) => ({
-      submissionId: review.submission.id,
-      reviewerId: review.submission.reviewerId,
-      purpose: review.submission.purpose,
-      judgements: review.judgements.map((judgement) => ({
-        evaluationId: judgement.evaluationId,
-        criterionId: judgement.criterionId,
-        status: judgement.status,
-        ...(judgement.status === 'evaluated'
-          ? { score: judgement.score }
-          : {}),
-        justification: judgement.justification,
-        evidenceReferences: judgement.evidenceReferences.map((reference) => ({
-          ...reference,
+    humanDimensionCounts: humanProgress.reduce(
+      (counts, progress) => ({
+        evaluated: counts.evaluated + progress.dimensionCounts.evaluated,
+        pending: counts.pending + progress.dimensionCounts.pending,
+        notApplicable:
+          counts.notApplicable + progress.dimensionCounts.notApplicable,
+      }),
+      { evaluated: 0, pending: 0, notApplicable: 0 },
+    ),
+    reviews: reviews.map((review) => {
+      const progress = calculateHumanReviewProgress(reviewPackage, review)
+      return {
+        submissionId: review.submission.id,
+        reviewerId: review.submission.reviewerId,
+        purpose: review.submission.purpose,
+        humanReviewStatus: progress.humanReviewStatus,
+        humanEvaluationRecorded: progress.humanEvaluationRecorded,
+        dimensionCounts: progress.dimensionCounts,
+        judgements: review.judgements.map((judgement) => ({
+          evaluationId: judgement.evaluationId,
+          criterionId: judgement.criterionId,
+          dimensionId: judgement.dimensionId,
+          status: judgement.status,
+          ...(judgement.status === 'evaluated'
+            ? { score: judgement.score }
+            : {}),
+          justification: judgement.justification,
+          evidenceReferences: judgement.evidenceReferences.map((reference) => ({
+            ...reference,
+          })),
+          safetyAlert: { ...judgement.safetyAlert },
         })),
-        safetyAlert: { ...judgement.safetyAlert },
-      })),
-    })),
-    criteria,
+      }
+    }),
+    dimensions,
     safetyAlerts,
-    adjudicationRequired: criteria.some(
-      (criterion) => criterion.adjudicationStatus === 'pending',
+    adjudicationRequired: dimensions.some(
+      (dimension) => dimension.adjudicationStatus === 'pending',
     ),
     limitations: [
       'Estatísticas são descritivas e não constituem decisão final ou média combinada com scores objetivos.',
+      'Cada estatística humana corresponde ao mesmo par de critério, dimensão e escopo; dimensões distintas não são agregadas.',
       'Divergências marcadas como pending exigem revisão ou adjudicação humana.',
       'Alertas humanos de segurança não alteram automaticamente falhas críticas objetivas.',
       reviewPackage.sample.origin.performanceEvidence === 'not_real_performance'

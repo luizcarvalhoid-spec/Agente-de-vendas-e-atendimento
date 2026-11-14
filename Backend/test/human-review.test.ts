@@ -319,32 +319,60 @@ test('not_evaluated não aceita nota e not_applicable pertence à dimensão', as
   assert.equal(progress.humanReviewStatus, 'complete')
 })
 
-test('naturalidade e empatia preservam estados e notas independentes', async () => {
+test('notas sintéticas permanecem diagnósticas e dimensões humanas continuam independentes', async () => {
   const { reviewPackage } = await fixturePromise
-  const mixed = await loadHumanReviewSubmission(distinctHumanReviewPath)
-  assert.equal(mixed.judgements[0]?.dimensionId, 'naturalness')
-  assert.equal(mixed.judgements[0]?.status, 'evaluated')
+  const synthetic = await loadHumanReviewSubmission(distinctHumanReviewPath)
+  assert.equal(synthetic.judgements[0]?.dimensionId, 'naturalness')
+  assert.equal(synthetic.judgements[0]?.status, 'evaluated')
   assert.equal(
-    mixed.judgements[0]?.status === 'evaluated'
-      ? mixed.judgements[0].score
+    synthetic.judgements[0]?.status === 'evaluated'
+      ? synthetic.judgements[0].score
       : undefined,
     9,
   )
-  assert.equal(mixed.judgements[1]?.dimensionId, 'empathy-appropriateness')
   assert.equal(
-    mixed.judgements[1]?.status === 'evaluated'
-      ? mixed.judgements[1].score
+    synthetic.judgements[1]?.dimensionId,
+    'empathy-appropriateness',
+  )
+  assert.equal(
+    synthetic.judgements[1]?.status === 'evaluated'
+      ? synthetic.judgements[1].score
       : undefined,
     6,
   )
-  const progress = calculateHumanReviewProgress(reviewPackage, mixed)
-  assert.equal(progress.humanReviewStatus, 'complete')
-  assert.equal(progress.humanEvaluationRecorded, true)
-  assert.deepEqual(progress.dimensionCounts, {
+  const syntheticProgress = calculateHumanReviewProgress(
+    reviewPackage,
+    synthetic,
+  )
+  assert.equal(syntheticProgress.humanReviewStatus, 'synthetic_fixture')
+  assert.equal(syntheticProgress.humanEvaluationRecorded, false)
+  assert.deepEqual(syntheticProgress.dimensionCounts, {
     evaluated: 2,
     pending: 0,
     notApplicable: 1,
   })
+  const syntheticSummary = summarizeHumanReviews(reviewPackage, [synthetic])
+  assert.equal(syntheticSummary.humanReviewSubmissions, 0)
+  assert.equal(syntheticSummary.syntheticFixtureSubmissions, 1)
+  assert.ok(
+    syntheticSummary.dimensions.every(
+      (dimension) => dimension.scores.length === 0,
+    ),
+  )
+  assert.deepEqual(
+    syntheticSummary.reviews[0]?.judgements.flatMap((judgement) =>
+      judgement.status === 'evaluated' ? [judgement.score] : [],
+    ),
+    [9, 6],
+  )
+
+  const human = reviewFor(reviewPackage, {
+    scores: [9, 6],
+    statuses: ['evaluated', 'evaluated', 'not_applicable'],
+  })
+  const humanProgress = calculateHumanReviewProgress(reviewPackage, human)
+  assert.equal(humanProgress.humanReviewStatus, 'complete')
+  assert.equal(humanProgress.humanEvaluationRecorded, true)
 })
 
 test('progresso distingue ausência, avaliação parcial, conclusão e fixture sintética', async () => {
@@ -614,7 +642,7 @@ test('escrita local é exclusiva e a CLI distingue pacote de avaliação realiza
     ],
     { cwd: backendRoot },
   )
-  assert.match(validated.stdout, /human_review_status=not_evaluated/)
+  assert.match(validated.stdout, /human_review_status=synthetic_fixture/)
   assert.match(validated.stdout, /human_evaluation_recorded=false/)
   assert.match(validated.stdout, /dimensions_evaluated=0 dimensions_pending=3/)
   assert.match(validated.stdout, /sample_origin=manually_simulated/)

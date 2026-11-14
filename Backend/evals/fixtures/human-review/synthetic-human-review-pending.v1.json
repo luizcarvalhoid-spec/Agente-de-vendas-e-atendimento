@@ -2,7 +2,7 @@
   "submissionVersion": 1,
   "submission": {
     "id": "fixture-human-review-pending-001",
-    "purpose": "human_review",
+    "purpose": "synthetic_validation_fixture",
     "sampleId": "fixture.synthetic.incomplete-need.001",
     "datasetId": "universal-core",
     "datasetVersion": "1.0.0",

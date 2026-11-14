@@ -125,11 +125,14 @@ para uma submissão `human_review` que contenha ao menos uma dimensão com
 
 ## Fixtures e demonstração
 
-As fixtures em `evals/fixtures/human-review/` são explicitamente sintéticas. A
-submissão de demonstração usa `purpose: synthetic_validation_fixture`, mantém
-todos os critérios como `not_evaluated`, não contém notas e produz
-`humanReviewSubmissions: 0`. Ela testa o fluxo, mas não constitui avaliação
-humana realizada.
+As fixtures em `evals/fixtures/human-review/` são explicitamente sintéticas e
+usam `purpose: synthetic_validation_fixture`. Há exemplos totalmente pendentes
+e um exemplo com notas fictícias 9 e 6 para comprovar a independência entre
+naturalidade e empatia. Mesmo quando contém notas, uma fixture preserva os
+julgamentos apenas para diagnóstico, produz `humanReviewStatus:
+synthetic_fixture`, `humanEvaluationRecorded: false` e
+`humanReviewSubmissions: 0`; suas notas não entram nas estatísticas humanas.
+Assim, a demonstração testa o fluxo sem afirmar que houve avaliação humana real.
 
 `Backend/human-eval-local/` é ignorado pelo Git. Os arquivos não são enviados a
 serviços externos. Não armazene artefatos reais fora de um local aprovado pela

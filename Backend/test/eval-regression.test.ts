@@ -61,6 +61,21 @@ async function fixture(datasetId = 'universal-core') {
 
 const corePromise = fixture()
 const safetyPromise = fixture('universal-safety')
+const selectedPromise = (async () => {
+  const loaded = await loadEvalDataset(
+    resolveOfflineEvalDataset('universal-core'),
+  )
+  const [execution, referenceData] = await Promise.all([
+    runOfflineEvalDataset(loaded, {
+      evaluateAssertions: true,
+      scenarioId: 'universal.core.incomplete-need.001',
+    }),
+    fingerprintEvalReferenceData(),
+  ])
+  const report = buildEvalReport(loaded, execution)
+  const baseline = buildEvalBaseline(loaded, report, referenceData)
+  return { loaded, report, baseline, referenceData }
+})()
 
 function firstAssertion(report: EvalReport) {
   const assertion = report.scenarios[0]?.turns[0]?.assertions[0]
@@ -116,6 +131,7 @@ test('códigos de saída distinguem regressão, falha técnica e incompatibilida
   assert.equal(evalRegressionExitCode('no_regressions'), 0)
   assert.equal(evalRegressionExitCode('known_failures_only'), 0)
   assert.equal(evalRegressionExitCode('regressions_detected'), 2)
+  assert.equal(evalRegressionExitCode('scoring_inconsistency'), 2)
   assert.equal(evalRegressionExitCode('technical_failure'), 3)
   assert.equal(evalRegressionExitCode('incompatible'), 4)
 })
@@ -285,6 +301,14 @@ test('detecta dataset de outra versão e conteúdo alterado sem versionamento', 
     referenceData,
   )
   assert.equal(versionComparison.result, 'incompatible')
+  assert.equal(versionComparison.score.comparable, false)
+  assert.equal(versionComparison.score.rawDelta, undefined)
+  assert.equal(versionComparison.score.finalDelta, undefined)
+  assert(
+    versionComparison.scenarios.every(
+      (scenario) => scenario.score.comparable === false,
+    ),
+  )
   assert(
     versionComparison.compatibility.issues.some(
       (issue) => issue.code === 'dataset_version',
@@ -303,6 +327,8 @@ test('detecta dataset de outra versão e conteúdo alterado sem versionamento', 
     referenceData,
   )
   assert.equal(fingerprintComparison.result, 'incompatible')
+  assert.equal(fingerprintComparison.score.comparable, false)
+  assert.equal(fingerprintComparison.score.rawDelta, undefined)
   assert(
     fingerprintComparison.compatibility.issues.some(
       (issue) => issue.code === 'dataset_fingerprint',
@@ -371,6 +397,8 @@ test('escopo incompatível é distinto de cobertura insuficiente', async () => {
     referenceData,
   )
   assert.equal(incompatible.result, 'incompatible')
+  assert.equal(incompatible.score.comparable, false)
+  assert.equal(incompatible.score.finalDelta, undefined)
 
   const incomplete = structuredClone(report)
   const missing = incomplete.coverage.expectedScenarioIds[0]
@@ -389,6 +417,155 @@ test('escopo incompatível é distinto de cobertura insuficiente', async () => {
     referenceData,
   )
   assert.equal(technical.result, 'technical_failure')
+  assert.equal(technical.score.comparable, false)
+  assert.equal(technical.score.finalDelta, undefined)
+})
+
+test('escopo parcial intencional e equivalente permite deltas', async () => {
+  const { loaded, report, baseline, referenceData } = await selectedPromise
+  assert.equal(report.coverage.scope, 'selected_scenarios')
+  assert.equal(report.summary.objectiveScore?.partial, true)
+  const comparison = compareEvalBaseline(
+    baseline,
+    loaded,
+    report,
+    referenceData,
+  )
+  assert.equal(comparison.result, 'no_regressions')
+  assert.equal(comparison.score.comparable, true)
+  assert.equal(comparison.score.rawDelta, 0)
+  assert.equal(comparison.score.finalDelta, 0)
+})
+
+test('mudança de nota sem transição objetiva bloqueia no dataset e no cenário', async () => {
+  const { loaded, report, baseline, referenceData } = await corePromise
+  const aggregate = structuredClone(report)
+  assert(aggregate.summary.objectiveScore)
+  aggregate.summary.objectiveScore.raw = 8
+  aggregate.summary.objectiveScore.final = 8
+  const aggregateComparison = compareEvalBaseline(
+    baseline,
+    loaded,
+    evalReportSchema.parse(aggregate),
+    referenceData,
+  )
+  assert.equal(aggregateComparison.result, 'scoring_inconsistency')
+  assert.equal(aggregateComparison.summary.scoringInconsistencies, 1)
+  assert.equal(aggregateComparison.scoringIssues[0]?.scope, 'dataset')
+  assert.equal(evalRegressionExitCode(aggregateComparison.result), 2)
+
+  const scenarioOnly = structuredClone(report)
+  const scenario = scenarioOnly.scenarios[0]
+  assert(scenario?.objectiveScore)
+  scenario.objectiveScore.raw = 8
+  scenario.objectiveScore.final = 8
+  const scenarioComparison = compareEvalBaseline(
+    baseline,
+    loaded,
+    evalReportSchema.parse(scenarioOnly),
+    referenceData,
+  )
+  assert.equal(scenarioComparison.result, 'scoring_inconsistency')
+  assert.equal(scenarioComparison.summary.scoringInconsistencies, 1)
+  assert.equal(scenarioComparison.scoringIssues[0]?.scope, 'scenario')
+  assert.equal(
+    scenarioComparison.scoringIssues[0]?.scenarioId,
+    scenario.id,
+  )
+})
+
+test('regressão e melhoria com variação coerente mantêm classificação objetiva', async () => {
+  const { loaded, report, baseline, referenceData } = await corePromise
+  const regression = currentWithStatus(report, 'failed')
+  assert(regression.summary.objectiveScore)
+  regression.summary.objectiveScore.raw = 8
+  regression.summary.objectiveScore.final = 8
+  const regressionScenario = regression.scenarios[0]
+  assert(regressionScenario?.objectiveScore)
+  regressionScenario.objectiveScore.raw = 8
+  regressionScenario.objectiveScore.final = 8
+  const regressionComparison = compareEvalBaseline(
+    baseline,
+    loaded,
+    regression,
+    referenceData,
+  )
+  assert.equal(regressionComparison.result, 'regressions_detected')
+  assert.equal(regressionComparison.summary.regressions, 1)
+  assert.equal(regressionComparison.summary.scoringInconsistencies, 0)
+
+  const improvementBaseline = baselineWithStatus(baseline, 'failed')
+  assert(improvementBaseline.reference.summary.objectiveScore)
+  improvementBaseline.reference.summary.objectiveScore.raw = 8
+  improvementBaseline.reference.summary.objectiveScore.final = 8
+  const baselineScenario = improvementBaseline.reference.scenarios[0]
+  assert(baselineScenario?.objectiveScore)
+  baselineScenario.objectiveScore.raw = 8
+  baselineScenario.objectiveScore.final = 8
+  const improvementComparison = compareEvalBaseline(
+    evalBaselineSchema.parse(improvementBaseline),
+    loaded,
+    report,
+    referenceData,
+  )
+  assert.equal(improvementComparison.summary.improvements, 1)
+  assert.equal(improvementComparison.summary.scoringInconsistencies, 0)
+  assert.equal(improvementComparison.result, 'no_regressions')
+})
+
+test('identidades duplicadas no relatório atual impedem comparação', async () => {
+  const { loaded, report, baseline, referenceData } = await corePromise
+  const duplicateAssertion = structuredClone(report)
+  const assertion = firstAssertion(duplicateAssertion)
+  duplicateAssertion.scenarios[0]?.turns[0]?.assertions.push({
+    ...assertion,
+    status: 'failed',
+  })
+  const assertionComparison = compareEvalBaseline(
+    baseline,
+    loaded,
+    evalReportSchema.parse(duplicateAssertion),
+    referenceData,
+  )
+  assert.equal(assertionComparison.result, 'incompatible')
+  assert.equal(assertionComparison.score.comparable, false)
+  assert(
+    assertionComparison.compatibility.issues.some(
+      (issue) => issue.code === 'duplicate_assertion',
+    ),
+  )
+
+  const duplicateScenario = structuredClone(report)
+  const scenario = duplicateScenario.scenarios[0]
+  assert(scenario)
+  duplicateScenario.scenarios.push(structuredClone(scenario))
+  const scenarioComparison = compareEvalBaseline(
+    baseline,
+    loaded,
+    evalReportSchema.parse(duplicateScenario),
+    referenceData,
+  )
+  assert(
+    scenarioComparison.compatibility.issues.some(
+      (issue) => issue.code === 'duplicate_scenario',
+    ),
+  )
+
+  const duplicateTurn = structuredClone(report)
+  const turn = duplicateTurn.scenarios[0]?.turns[0]
+  assert(turn)
+  duplicateTurn.scenarios[0]?.turns.push(structuredClone(turn))
+  const turnComparison = compareEvalBaseline(
+    baseline,
+    loaded,
+    evalReportSchema.parse(duplicateTurn),
+    referenceData,
+  )
+  assert(
+    turnComparison.compatibility.issues.some(
+      (issue) => issue.code === 'duplicate_turn',
+    ),
+  )
 })
 
 test('loader rejeita baseline inexistente, inválido ou corrompido', async (t) => {

@@ -41,7 +41,7 @@ function usage() {
     '',
     'capture exige execução objetiva completa e nunca sobrescreve o baseline.',
     'check executa o dataset uma vez, preserva falhas conhecidas e grava JSON e Markdown.',
-    'Códigos: 0 sem regressões novas; 2 regressão; 3 falha técnica; 4 incompatível; 1 erro operacional.',
+    'Códigos: 0 sem regressões novas; 2 regressão ou scoring inconsistente; 3 falha técnica; 4 incompatível; 1 erro operacional.',
   ].join('\n')
 }
 
@@ -145,7 +145,7 @@ async function check(options: Options) {
     `action=check dataset=${comparison.current.datasetId} result=${comparison.result} compatibility=${comparison.compatibility.status}`,
   )
   console.log(
-    `regressions=${comparison.summary.regressions} evidence_losses=${comparison.summary.evidenceLosses} improvements=${comparison.summary.improvements} known_failures=${comparison.summary.knownFailures} newly_detected_failures=${comparison.summary.newlyDetectedFailures} new_critical_failures=${comparison.summary.newCriticalFailures} technical_problems=${comparison.summary.technicalProblems}`,
+    `regressions=${comparison.summary.regressions} evidence_losses=${comparison.summary.evidenceLosses} improvements=${comparison.summary.improvements} known_failures=${comparison.summary.knownFailures} newly_detected_failures=${comparison.summary.newlyDetectedFailures} new_critical_failures=${comparison.summary.newCriticalFailures} technical_problems=${comparison.summary.technicalProblems} scoring_inconsistencies=${comparison.summary.scoringInconsistencies}`,
   )
   console.log(
     `score_before=${comparison.score.baseline?.final ?? 'not_evaluated'} score_current=${comparison.score.current?.final ?? 'not_evaluated'} score_delta=${comparison.score.finalDelta ?? 'not_comparable'} required_human_review=${comparison.current.requiredHumanCriteriaPending}`,

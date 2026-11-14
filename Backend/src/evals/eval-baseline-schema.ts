@@ -81,6 +81,7 @@ export const evalBaselineSchema = z
     }
     const assertionKeys = new Set<string>()
     for (const [scenarioIndex, scenario] of report.scenarios.entries()) {
+      const turnIndexes = new Set<number>()
       if (
         scenario.technicalStatus !== 'completed' ||
         scenario.turns.some((turn) => turn.technicalStatus !== 'completed')
@@ -91,6 +92,13 @@ export const evalBaselineSchema = z
         ])
       }
       for (const turn of scenario.turns) {
+        if (turnIndexes.has(turn.index)) {
+          mismatches.push([
+            ['reference', 'scenarios', scenarioIndex, 'turns'],
+            'O baseline não aceita índices de turno duplicados.',
+          ])
+        }
+        turnIndexes.add(turn.index)
         for (const assertion of turn.assertions) {
           const key = `${scenario.id}:${turn.index}:${assertion.assertionId}`
           if (assertionKeys.has(key)) {

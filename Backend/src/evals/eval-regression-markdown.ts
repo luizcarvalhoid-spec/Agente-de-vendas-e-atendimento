@@ -28,9 +28,9 @@ export function renderEvalRegressionMarkdown(
     '',
     '## Resumo',
     '',
-    '| Regressões | Perdas de evidência | Melhorias | Falhas conhecidas | Novas falhas | Novas falhas críticas | Problemas técnicos |',
-    '| ---: | ---: | ---: | ---: | ---: | ---: | ---: |',
-    `| ${report.summary.regressions} | ${report.summary.evidenceLosses} | ${report.summary.improvements} | ${report.summary.knownFailures} | ${report.summary.newlyDetectedFailures} | ${report.summary.newCriticalFailures} | ${report.summary.technicalProblems} |`,
+    '| Regressões | Perdas de evidência | Melhorias | Falhas conhecidas | Novas falhas | Novas falhas críticas | Problemas técnicos | Inconsistências de scoring |',
+    '| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |',
+    `| ${report.summary.regressions} | ${report.summary.evidenceLosses} | ${report.summary.improvements} | ${report.summary.knownFailures} | ${report.summary.newlyDetectedFailures} | ${report.summary.newCriticalFailures} | ${report.summary.technicalProblems} | ${report.summary.scoringInconsistencies} |`,
     '',
     '## Notas objetivas preservadas',
     '',
@@ -65,6 +65,16 @@ export function renderEvalRegressionMarkdown(
     for (const problem of report.technicalProblems) {
       lines.push(
         `- **${value(problem.code)}**${problem.scenarioId === undefined ? '' : ` em ${value(problem.scenarioId)}`}${problem.turn === undefined ? '' : ` / turno ${problem.turn}`}: ${value(problem.detail)}`,
+      )
+    }
+    lines.push('')
+  }
+
+  if (report.scoringIssues.length > 0) {
+    lines.push('## Inconsistências de scoring', '')
+    for (const issue of report.scoringIssues) {
+      lines.push(
+        `- **${value(issue.code)}** em ${value(issue.scope)}${issue.scenarioId === undefined ? '' : ` / ${value(issue.scenarioId)}`}: ${value(issue.detail)}`,
       )
     }
     lines.push('')

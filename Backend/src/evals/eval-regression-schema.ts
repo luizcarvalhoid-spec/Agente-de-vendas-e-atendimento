@@ -14,6 +14,7 @@ export const evalRegressionResultSchema = z.enum([
   'no_regressions',
   'known_failures_only',
   'regressions_detected',
+  'scoring_inconsistency',
   'technical_failure',
   'incompatible',
 ])
@@ -34,6 +35,9 @@ const compatibilityIssueSchema = z
       'assertion_added',
       'assertion_removed',
       'assertion_modified',
+      'duplicate_scenario',
+      'duplicate_turn',
+      'duplicate_assertion',
       'baseline_reference',
     ]),
     detail: z.string().min(1).max(1_000),
@@ -73,6 +77,19 @@ const scoreComparisonSchema = z
     rawDelta: z.number().finite().min(-9).max(9).optional(),
     finalDelta: z.number().finite().min(-9).max(9).optional(),
     comparable: z.boolean(),
+  })
+  .strict()
+
+const scoringIssueSchema = z
+  .object({
+    code: z.enum([
+      'score_changed_without_objective_transition',
+      'score_direction_unexplained',
+      'critical_failure_count_inconsistent',
+    ]),
+    scope: z.enum(['dataset', 'scenario']),
+    scenarioId: identifierSchema.optional(),
+    detail: z.string().min(1).max(1_000),
   })
   .strict()
 
@@ -169,10 +186,12 @@ export const evalRegressionReportSchema = z
         unchanged: z.number().int().nonnegative(),
         newCriticalFailures: z.number().int().nonnegative(),
         technicalProblems: z.number().int().nonnegative(),
+        scoringInconsistencies: z.number().int().nonnegative(),
       })
       .strict(),
     score: scoreComparisonSchema,
     technicalProblems: z.array(technicalProblemSchema).max(1_000),
+    scoringIssues: z.array(scoringIssueSchema).max(1_000),
     scenarios: z.array(scenarioComparisonSchema).max(1_000),
     limitations: z.array(z.string().min(1).max(1_000)).min(1).max(20),
   })

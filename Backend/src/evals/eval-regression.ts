@@ -27,6 +27,7 @@ export const EVAL_REGRESSION_LIMITATIONS = [
 
 type CompatibilityIssue = EvalRegressionReport['compatibility']['issues'][number]
 type TechnicalProblem = EvalRegressionReport['technicalProblems'][number]
+type ScoringIssue = EvalRegressionReport['scoringIssues'][number]
 
 interface AssertionEntry {
   readonly scenarioId: string
@@ -55,6 +56,54 @@ function assertionEntries(report: EvalReport) {
       })),
     ),
   )
+}
+
+function reportIntegrityIssues(report: EvalReport) {
+  const issues: CompatibilityIssue[] = []
+  const scenarioIds = new Set<string>()
+  const assertionIdentities = new Set<string>()
+  for (const scenario of report.scenarios) {
+    if (scenarioIds.has(scenario.id)) {
+      issues.push(
+        compatibilityIssue(
+          'duplicate_scenario',
+          'O relatório atual contém ID de cenário duplicado.',
+          { scenarioId: scenario.id },
+        ),
+      )
+    }
+    scenarioIds.add(scenario.id)
+    const turns = new Set<number>()
+    for (const turn of scenario.turns) {
+      if (turns.has(turn.index)) {
+        issues.push(
+          compatibilityIssue(
+            'duplicate_turn',
+            'O relatório atual contém índice de turno duplicado no cenário.',
+            { scenarioId: scenario.id },
+          ),
+        )
+      }
+      turns.add(turn.index)
+      for (const assertion of turn.assertions) {
+        const identity = `${scenario.id}\u0000${turn.index}\u0000${assertion.assertionId}`
+        if (assertionIdentities.has(identity)) {
+          issues.push(
+            compatibilityIssue(
+              'duplicate_assertion',
+              'O relatório atual contém identidade de assertion duplicada.',
+              {
+                scenarioId: scenario.id,
+                assertionId: assertion.assertionId,
+              },
+            ),
+          )
+        }
+        assertionIdentities.add(identity)
+      }
+    }
+  }
+  return issues
 }
 
 function compatibilityIssue(
@@ -105,12 +154,14 @@ function scoreSnapshot(
 function compareScore(
   baselineReport: EvalReport,
   currentReport: EvalReport,
+  comparisonAllowed: boolean,
   baselineScenario?: EvalReport['scenarios'][number],
   currentScenario?: EvalReport['scenarios'][number],
 ) {
   const baseline = scoreSnapshot(baselineReport, baselineScenario)
   const current = scoreSnapshot(currentReport, currentScenario)
-  const comparable = baseline !== undefined && current !== undefined
+  const comparable =
+    comparisonAllowed && baseline !== undefined && current !== undefined
   return {
     ...(baseline === undefined ? {} : { baseline }),
     ...(current === undefined ? {} : { current }),
@@ -122,6 +173,124 @@ function compareScore(
       : {}),
     comparable,
   }
+}
+
+function scoringIssue(
+  code: ScoringIssue['code'],
+  scope: ScoringIssue['scope'],
+  detail: string,
+  scenarioId?: string,
+): ScoringIssue {
+  return {
+    code,
+    scope,
+    detail: sanitizeEvalReportText(detail),
+    ...(scenarioId === undefined ? {} : { scenarioId }),
+  }
+}
+
+function scoreComparisonAllowed(
+  comparisonBaseAllowed: boolean,
+  scope: EvalReport['coverage']['scope'],
+  baselineScore: EvalReport['summary']['objectiveScore'] | undefined,
+  currentScore: EvalReport['summary']['objectiveScore'] | undefined,
+) {
+  if (
+    !comparisonBaseAllowed ||
+    baselineScore === undefined ||
+    currentScore === undefined
+  ) {
+    return false
+  }
+  if (!baselineScore.partial && !currentScore.partial) return true
+  return (
+    scope === 'selected_scenarios' &&
+    baselineScore.partial &&
+    currentScore.partial
+  )
+}
+
+function detectScoringIssue(
+  scope: 'dataset' | 'scenario',
+  score: ReturnType<typeof compareScore>,
+  assertions: readonly {
+    readonly classification:
+      | 'regression'
+      | 'evidence_loss'
+      | 'improvement'
+      | 'known_failure'
+      | 'newly_detected_failure'
+      | 'unchanged'
+    readonly severity: 'low' | 'medium' | 'high' | 'critical'
+    readonly baselineStatus: 'passed' | 'failed' | 'not_evaluated'
+    readonly currentStatus: 'passed' | 'failed' | 'not_evaluated'
+    readonly newCriticalFailure: boolean
+  }[],
+  scenarioId?: string,
+) {
+  if (!score.comparable || score.baseline === undefined || score.current === undefined) {
+    return []
+  }
+  const issues: ScoringIssue[] = []
+  const rawDelta = score.rawDelta ?? 0
+  const finalDelta = score.finalDelta ?? 0
+  const scoreChanged = rawDelta !== 0 || finalDelta !== 0
+  const negativeTransition = assertions.some(
+    (assertion) =>
+      assertion.classification === 'regression' ||
+      assertion.classification === 'newly_detected_failure',
+  )
+  const positiveTransition = assertions.some(
+    (assertion) => assertion.classification === 'improvement',
+  )
+  if (scoreChanged) {
+    const directionExplained =
+      ((rawDelta < 0 || finalDelta < 0) && negativeTransition) ||
+      ((rawDelta > 0 || finalDelta > 0) && positiveTransition)
+    if (!directionExplained) {
+      const hasObjectiveTransition = negativeTransition || positiveTransition
+      issues.push(
+        scoringIssue(
+          hasObjectiveTransition
+            ? 'score_direction_unexplained'
+            : 'score_changed_without_objective_transition',
+          scope,
+          hasObjectiveTransition
+            ? 'A direção da variação de nota não é explicada pelas transições objetivas.'
+            : 'A nota mudou sem transição objetiva que justifique a variação.',
+          scenarioId,
+        ),
+      )
+    }
+  }
+  const criticalDelta =
+    score.current.criticalFailures - score.baseline.criticalFailures
+  const criticalIncreaseExplained = assertions.some(
+    (assertion) => assertion.newCriticalFailure,
+  )
+  const criticalDecreaseExplained = assertions.some(
+    (assertion) =>
+      assertion.severity === 'critical' &&
+      assertion.baselineStatus === 'failed' &&
+      assertion.currentStatus === 'passed',
+  )
+  if (
+    criticalDelta !== 0 &&
+    !(
+      (criticalDelta > 0 && criticalIncreaseExplained) ||
+      (criticalDelta < 0 && criticalDecreaseExplained)
+    )
+  ) {
+    issues.push(
+      scoringIssue(
+        'critical_failure_count_inconsistent',
+        scope,
+        'A quantidade de falhas críticas mudou sem transição crítica correspondente.',
+        scenarioId,
+      ),
+    )
+  }
+  return issues
 }
 
 function classifyTransition(
@@ -269,6 +438,8 @@ export function compareEvalBaseline(
     )
   }
 
+  issues.push(...reportIntegrityIssues(current))
+
   const baselineScenarioIds = reference.scenarios.map((scenario) => scenario.id)
   const currentScenarioIds = current.scenarios.map((scenario) => scenario.id)
   if (!sameArray(baselineScenarioIds, currentScenarioIds)) {
@@ -338,6 +509,22 @@ export function compareEvalBaseline(
 
   const compatible = issues.length === 0
   const technicalProblems: TechnicalProblem[] = []
+  const coverageEquivalent =
+    compatible &&
+    reference.coverage.completeForScope &&
+    current.coverage.completeForScope &&
+    sameArray(
+      reference.coverage.evaluatedScenarioIds,
+      current.coverage.evaluatedScenarioIds,
+    ) &&
+    sameArray(
+      reference.coverage.missingScenarioIds,
+      current.coverage.missingScenarioIds,
+    ) &&
+    sameArray(
+      reference.coverage.excludedScenarioIds,
+      current.coverage.excludedScenarioIds,
+    )
   if (
     !current.coverage.completeForScope ||
     current.coverage.missingScenarioIds.length > 0 ||
@@ -363,8 +550,57 @@ export function compareEvalBaseline(
     )
   }
 
-  const scenarios = compatible
-    ? reference.scenarios.map((baselineScenario) => {
+  if (compatible) {
+    for (const baselineScenario of reference.scenarios) {
+      const currentScenario = current.scenarios.find(
+        (scenario) => scenario.id === baselineScenario.id,
+      )
+      if (currentScenario === undefined) continue
+      if (
+        baselineScenario.technicalStatus === 'completed' &&
+        currentScenario.technicalStatus === 'technical_failure'
+      ) {
+        technicalProblems.push(
+          technicalProblem(
+            'scenario_technical_failure',
+            'Cenário antes concluído apresentou falha técnica.',
+            { scenarioId: baselineScenario.id },
+          ),
+        )
+      }
+      for (const baselineTurn of baselineScenario.turns) {
+        const currentTurn = currentScenario.turns.find(
+          (turn) => turn.index === baselineTurn.index,
+        )
+        if (
+          baselineTurn.technicalStatus === 'completed' &&
+          currentTurn?.technicalStatus !== 'completed'
+        ) {
+          technicalProblems.push(
+            technicalProblem(
+              currentTurn?.technicalStatus === 'technical_failure'
+                ? 'turn_technical_failure'
+                : 'turn_not_executed',
+              'Turno antes concluído não foi concluído na execução atual.',
+              {
+                scenarioId: baselineScenario.id,
+                turn: baselineTurn.index,
+              },
+            ),
+          )
+        }
+      }
+    }
+  }
+
+  const aggregateScoreAllowed = scoreComparisonAllowed(
+    compatible && coverageEquivalent && technicalProblems.length === 0,
+    reference.coverage.scope,
+    reference.summary.objectiveScore,
+    current.summary.objectiveScore,
+  )
+
+  const scenarios = reference.scenarios.map((baselineScenario) => {
         const currentScenario = current.scenarios.find(
           (scenario) => scenario.id === baselineScenario.id,
         )
@@ -375,70 +611,43 @@ export function compareEvalBaseline(
             currentTechnicalStatus: 'not_executed' as const,
             baselineCriticalFailures: baselineScenario.criticalFailures,
             currentCriticalFailures: 0,
-            score: compareScore(reference, current, baselineScenario),
+            score: compareScore(
+              reference,
+              current,
+              false,
+              baselineScenario,
+            ),
             assertions: [],
           }
         }
-        if (
-          baselineScenario.technicalStatus === 'completed' &&
-          currentScenario.technicalStatus === 'technical_failure'
-        ) {
-          technicalProblems.push(
-            technicalProblem(
-              'scenario_technical_failure',
-              'Cenário antes concluído apresentou falha técnica.',
-              { scenarioId: baselineScenario.id },
-            ),
-          )
-        }
-        for (const baselineTurn of baselineScenario.turns) {
-          const currentTurn = currentScenario.turns.find(
-            (turn) => turn.index === baselineTurn.index,
-          )
-          if (
-            baselineTurn.technicalStatus === 'completed' &&
-            currentTurn?.technicalStatus !== 'completed'
-          ) {
-            technicalProblems.push(
-              technicalProblem(
-                currentTurn?.technicalStatus === 'technical_failure'
-                  ? 'turn_technical_failure'
-                  : 'turn_not_executed',
-                'Turno antes concluído não foi concluído na execução atual.',
-                {
-                  scenarioId: baselineScenario.id,
-                  turn: baselineTurn.index,
-                },
-              ),
-            )
-          }
-        }
-        const scenarioAssertions = baselineEntries
-          .filter((entry) => entry.scenarioId === baselineScenario.id)
-          .map((entry) => {
-            const currentEntry = currentByKey.get(assertionKey(entry))
-            if (currentEntry === undefined) return undefined
-            const transition = classifyTransition(
-              entry.assertion.status,
-              currentEntry.assertion.status,
-            )
-            return {
-              scenarioId: entry.scenarioId,
-              turn: entry.turn,
-              assertionId: entry.assertion.assertionId,
-              criterionId: entry.assertion.criterionId,
-              type: entry.assertion.type,
-              severity: entry.assertion.severity,
-              baselineStatus: entry.assertion.status,
-              currentStatus: currentEntry.assertion.status,
-              ...transition,
-              newCriticalFailure:
-                entry.assertion.severity === 'critical' &&
-                entry.assertion.status !== 'failed' &&
-                currentEntry.assertion.status === 'failed',
-            }
-          })
-          .filter((item) => item !== undefined)
+        const scenarioAssertions = compatible
+          ? baselineEntries
+              .filter((entry) => entry.scenarioId === baselineScenario.id)
+              .map((entry) => {
+                const currentEntry = currentByKey.get(assertionKey(entry))
+                if (currentEntry === undefined) return undefined
+                const transition = classifyTransition(
+                  entry.assertion.status,
+                  currentEntry.assertion.status,
+                )
+                return {
+                  scenarioId: entry.scenarioId,
+                  turn: entry.turn,
+                  assertionId: entry.assertion.assertionId,
+                  criterionId: entry.assertion.criterionId,
+                  type: entry.assertion.type,
+                  severity: entry.assertion.severity,
+                  baselineStatus: entry.assertion.status,
+                  currentStatus: currentEntry.assertion.status,
+                  ...transition,
+                  newCriticalFailure:
+                    entry.assertion.severity === 'critical' &&
+                    entry.assertion.status !== 'failed' &&
+                    currentEntry.assertion.status === 'failed',
+                }
+              })
+              .filter((item) => item !== undefined)
+          : []
         return {
           scenarioId: baselineScenario.id,
           baselineTechnicalStatus: baselineScenario.technicalStatus,
@@ -448,17 +657,47 @@ export function compareEvalBaseline(
           score: compareScore(
             reference,
             current,
+            scoreComparisonAllowed(
+              coverageEquivalent &&
+                baselineScenario.technicalStatus === 'completed' &&
+                currentScenario.technicalStatus === 'completed' &&
+                currentScenario.turns.every(
+                  (turn) => turn.technicalStatus === 'completed',
+                ),
+              'full_dataset',
+              baselineScenario.objectiveScore,
+              currentScenario.objectiveScore,
+            ),
             baselineScenario,
             currentScenario,
           ),
           assertions: scenarioAssertions,
         }
       })
-    : []
 
   const assertionComparisons = scenarios.flatMap(
     (scenario) => scenario.assertions,
   )
+  const aggregateScore = compareScore(
+    reference,
+    current,
+    aggregateScoreAllowed,
+  )
+  const scoringIssues = [
+    ...detectScoringIssue(
+      'dataset',
+      aggregateScore,
+      assertionComparisons,
+    ),
+    ...scenarios.flatMap((scenario) =>
+      detectScoringIssue(
+        'scenario',
+        scenario.score,
+        scenario.assertions,
+        scenario.scenarioId,
+      ),
+    ),
+  ]
   const count = (classification: typeof assertionComparisons[number]['classification']) =>
     assertionComparisons.filter(
       (assertion) => assertion.classification === classification,
@@ -474,11 +713,14 @@ export function compareEvalBaseline(
       (assertion) => assertion.newCriticalFailure,
     ).length,
     technicalProblems: technicalProblems.length,
+    scoringInconsistencies: scoringIssues.length,
   }
   const result = !compatible
     ? ('incompatible' as const)
     : technicalProblems.length > 0
       ? ('technical_failure' as const)
+      : scoringIssues.length > 0
+        ? ('scoring_inconsistency' as const)
       : summary.regressions > 0 ||
           summary.evidenceLosses > 0 ||
           summary.newlyDetectedFailures > 0 ||
@@ -521,8 +763,9 @@ export function compareEvalBaseline(
       excludedScenarioIds: [...current.coverage.excludedScenarioIds],
     },
     summary,
-    score: compareScore(reference, current),
+    score: aggregateScore,
     technicalProblems,
+    scoringIssues,
     scenarios,
     limitations: [...EVAL_REGRESSION_LIMITATIONS],
   })
@@ -535,7 +778,12 @@ export function serializeEvalRegressionReport(
 }
 
 export function evalRegressionExitCode(result: EvalRegressionResult) {
-  if (result === 'regressions_detected') return 2
+  if (
+    result === 'regressions_detected' ||
+    result === 'scoring_inconsistency'
+  ) {
+    return 2
+  }
   if (result === 'technical_failure') return 3
   if (result === 'incompatible') return 4
   return 0

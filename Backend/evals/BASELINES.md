@@ -26,6 +26,24 @@ incompatíveis produzem `incompatible`. Cobertura reduzida e falhas técnicas
 produzem `technical_failure`; nenhuma dessas situações pode ser apresentada como
 ausência de regressões.
 
+Notas anteriores e atuais continuam visíveis como snapshots diagnósticos, mas
+`rawDelta` e `finalDelta` só existem quando dataset, fingerprints, motor, versão
+de relatório, escopo e cobertura são equivalentes e não há falha técnica que
+invalide a comparação. Caso contrário, `comparable` é `false`; nota ausente nunca
+vira zero. Escopos `selected_scenarios` podem ter deltas somente quando a mesma
+seleção está completa nos dois relatórios. Notas parciais por evidência
+insuficiente não são comparadas numericamente.
+
+O comparador também valida unicidade de cenário, turno e da identidade
+`scenarioId + turn + assertionId`. Duplicações produzem `incompatible`, antes da
+construção dos mapas, para que nenhum resultado seja substituído silenciosamente.
+
+Se assertions e critérios permanecem equivalentes, mas uma nota comparável muda
+sem transição objetiva que explique sua direção, o resultado é
+`scoring_inconsistency`. Essa inconsistência é bloqueante, usa código de saída 2
+e não inventa uma falha em assertion. Quedas explicadas por regressões e aumentos
+explicados por melhorias mantêm suas classificações próprias.
+
 ## Criação e verificação
 
 Execute a partir de `Backend`:
@@ -52,13 +70,14 @@ Estados consolidados:
 - `known_failures_only`: nenhuma regressão nova, mas há falhas do baseline ainda
   pendentes;
 - `regressions_detected`: regressão comprovada, perda de evidência ou nova falha;
+- `scoring_inconsistency`: nota mudou sem transição objetiva compatível;
 - `technical_failure`: falha técnica ou perda de cobertura;
 - `incompatible`: comparação inválida por contrato, dados ou escopo.
 
 Códigos de saída da CLI:
 
 - `0`: `no_regressions` ou `known_failures_only`;
-- `2`: `regressions_detected`;
+- `2`: `regressions_detected` ou `scoring_inconsistency`;
 - `3`: `technical_failure`;
 - `4`: `incompatible`;
 - `1`: erro operacional, baseline ausente, inválido ou artefato já existente.

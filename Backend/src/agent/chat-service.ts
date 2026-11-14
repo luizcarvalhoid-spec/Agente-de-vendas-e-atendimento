@@ -923,7 +923,7 @@ function mixedFaqAnswer(
   return composeFaqAnswer({ question, sourceIds, faqDocuments })
 }
 
-function toProductCard(
+export function toProductCard(
   product: Product,
   catalog: CatalogRepository,
 ): ChatProductCard | undefined {
@@ -1115,6 +1115,20 @@ export function createChatService(
 
   return {
     async execute(rawInput, execution) {
+      const completeEarly = (
+        response: ChatResponse,
+        reason:
+          | 'clinical_boundary'
+          | 'contextual_quote'
+          | 'comparison_clarification',
+      ) => {
+        observeChatOperation(execution.observer, {
+          type: 'chat_service_early_completion',
+          requestId: execution.requestId,
+          reason,
+        })
+        return response
+      }
       const request = chatRequestSchema.parse(rawInput)
       if (execution.signal.aborted) {
         throw new ChatServiceError('REQUEST_CANCELLED')
@@ -1129,7 +1143,9 @@ export function createChatService(
         request,
         execution.requestId,
       )
-      if (clinicalResponse) return clinicalResponse
+      if (clinicalResponse) {
+        return completeEarly(clinicalResponse, 'clinical_boundary')
+      }
 
       const quoteResponse = contextualQuoteResponse(
         request,
@@ -1137,7 +1153,9 @@ export function createChatService(
         options.catalog,
         faqDocuments,
       )
-      if (quoteResponse) return quoteResponse
+      if (quoteResponse) {
+        return completeEarly(quoteResponse, 'contextual_quote')
+      }
 
       const plan = preserveHistoricalRecommendationIntent(
         request,
@@ -1149,9 +1167,12 @@ export function createChatService(
         hasUnresolvedComparisonReference(request.message) &&
         explicitComparisonIds(request.message, options.catalog).length !== 2
       ) {
-        return controlledConsultativeQuestion(
-          'Quais são os dois produtos que você quer comparar? Informe os dois IDs.',
-          execution.requestId,
+        return completeEarly(
+          controlledConsultativeQuestion(
+            'Quais são os dois produtos que você quer comparar? Informe os dois IDs.',
+            execution.requestId,
+          ),
+          'comparison_clarification',
         )
       }
       const consultationQuestion = consultativeQuestion(plan, commercial)

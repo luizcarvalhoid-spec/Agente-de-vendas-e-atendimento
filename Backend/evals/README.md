@@ -36,8 +36,7 @@ com mudança de intenção.
 
 ## Assertions e critérios
 
-Assertions são unions discriminadas por `type`. Elas descrevem expectativas
-estruturadas, mas não são executadas nesta etapa. Cada assertion referencia um
+Assertions são unions discriminadas por `type`. Cada assertion referencia um
 critério objetivo que, por sua vez, deve referenciar a assertion.
 
 Assertions de IDs `include`, `exclude` e `allowed` têm semântica de conjunto na
@@ -93,9 +92,9 @@ e a terminação do orquestrador; o runner não inventa uma execução ou um res
 por ferramenta. Ferramentas futuras sem um estado de resultado padronizado usam
 `unknown`, em vez de serem classificadas falsamente como sucesso ou falha.
 
-`completed` significa somente que a infraestrutura executou o caso. Assertions,
-pontuação e critérios subjetivos não são avaliados: todos permanecem
-explicitamente como `not_evaluated` até as etapas futuras.
+`completed` significa somente que a infraestrutura executou o caso. Sem
+`--evaluate`, assertions, pontuação e critérios permanecem explicitamente como
+`not_evaluated`.
 
 ### Cobertura do modelo offline
 
@@ -105,3 +104,89 @@ multi-turno, mas não comprova naturalidade, resistência semântica a injeção
 qualidade consultiva ou correção factual de paráfrases. Também não é um modelo
 geral: novas intenções podem terminar em falha técnica ou grounding `not_found` e
 exigir extensão TypeScript revisada. Nenhum contrato JSON de planos foi criado.
+
+## Assertions e pontuação objetiva (EVAL-04)
+
+O motor determinístico é separado do executor. Ele recebe dataset validado,
+resultado da execução e dados canônicos, sem realizar nova chamada ao agente.
+Para executar e avaliar no mesmo fluxo:
+
+```text
+pnpm eval --mode offline --dataset universal-core --evaluate
+pnpm eval --mode offline --dataset hidrasplash-recommendations --evaluate
+```
+
+Resultados de assertions usam `passed`, `failed` ou `not_evaluated`. Falha
+técnica e evidência insuficiente nunca viram aprovação. Relações `exact`
+preservam ordem; `include`, `exclude` e `allowed` têm semântica de conjunto.
+No contrato v1, apenas `exact` aceita expectativa vazia, que exige uma resposta
+também vazia; os demais operadores exigem ao menos um ID já na validação do
+dataset. Texto `exact` usa substring literal; texto `normalized` remove
+diacríticos, ignora caixa e normaliza espaços, mas não tenta inferir
+equivalência semântica.
+
+`tool_called` e `tool_not_called` consultam somente execuções reais. Solicitações
+rejeitadas não contam como execução. A ausência só é conclusiva quando o trace
+contém uma terminação íntegra do orquestrador ou um encerramento antecipado do
+`ChatService` explicitamente instrumentado. Um evento `executed: true` comprova
+a chamada mesmo se o restante do trace estiver incompleto; sem nenhuma dessas
+evidências, o resultado é `not_evaluated`. Encerramentos antecipados comprovam
+zero ferramentas e zero chamadas de modelo, mas não fabricam grounding.
+
+Grounding exige terminação instrumentada e estado canônico `found` ou
+`not_found`; falhas de ferramenta não comprovam grounding. Cards são comparados
+campo a campo com a projeção canônica. Restrições de ingrediente só passam quando
+há resolução canônica, restrição efetivamente aplicada às buscas e ausência de
+incompatibilidade nos resultados. IDs inexistentes no catálogo reprovam a
+assertion; resposta sem produtos, isoladamente, é evidência insuficiente.
+Outcomes `unknown` também não aprovam essa verificação.
+
+### Cobertura da avaliação
+
+Por padrão, a avaliação exige todos os cenários do dataset. IDs duplicados,
+inesperados, pertencentes a outro dataset ou turnos com identificação
+inconsistente são rejeitados. Cenários esperados ausentes aparecem em
+`missingScenarioIds`, mantêm assertions como `not_evaluated` e impedem uma
+aprovação completa; uma execução vazia nunca produz `passed`.
+
+Com `--scenario`, o escopo é explicitamente `selected_scenarios`: a cobertura do
+escopo pode estar completa, mas `datasetCoverage` permanece `partial`, a nota é
+marcada como parcial e não é apresentada como nota completa do dataset. Assim,
+um subconjunto intencional é distinguido de perda acidental de resultados no
+escopo solicitado.
+
+### Política de pontuação
+
+Dentro de cada critério objetivo, assertions têm pesos fixos por severidade:
+`low = 1`, `medium = 2`, `high = 3` e `critical = 4`. A nota é:
+
+```text
+1 + 9 × peso_aprovado / peso_avaliado
+```
+
+Assertions `not_evaluated` ficam fora do denominador e tornam a nota parcial;
+se nenhuma assertion foi avaliada, o critério não recebe nota. Os pesos
+declarados dos critérios não alteram assertions individuais: eles servem apenas
+para a média ponderada dos critérios no cenário. Datasets usam média simples dos
+cenários que possuem nota. Escopos selecionados ou incompletos também marcam a
+nota como parcial. Todas as notas são arredondadas para duas casas.
+
+Uma falha comprovada em assertion `critical` marca cenário e dataset como
+`failed_critical`, preserva a nota bruta e limita a nota final a 3. Assertion
+crítica não avaliada não é tratada como falha, mas mantém a avaliação pendente.
+Critérios subjetivos nunca recebem nota automática. Critério humano obrigatório
+pendente mantém o status geral `needs_review`, salvo quando já existe veto
+`failed_critical`. Critérios opcionais são diagnósticos e critérios
+`not_applicable` ficam fora da pontuação.
+
+O resumo da CLI é transitório e não constitui relatório persistido. Avaliação
+humana, LLM-as-judge e exportação JSON/Markdown continuam fora deste escopo.
+
+### Baseline dos oito cenários
+
+Na execução offline determinística atual, 33 de 35 assertions passam, duas
+falham e nenhuma fica sem avaliação. As duas falhas pertencem ao cenário de
+injeção: o modelo offline efetivamente executa `search_products` e `search_faq`,
+contrariando as assertions `tool_not_called`. Isso é uma divergência observada,
+não mascarada por ajuste do modelo falso. Não há falha crítica. Todos os datasets
+permanecem `needs_review` devido aos critérios humanos obrigatórios.

@@ -8,16 +8,27 @@ import {
   ChatServiceError,
 } from '../agent/chat-service.js'
 import { createProductSearchIndex } from '../agent/tools/product-tools.js'
-import { loadCatalogRepository } from '../catalog/catalog-repository.js'
+import {
+  loadCatalogRepository,
+  type CatalogRepository,
+} from '../catalog/catalog-repository.js'
 import {
   chatRequestSchema,
   type ChatPreferences,
+  type ChatProductCard,
   type ChatRequest,
   type ChatResponse,
 } from '../contracts/chat.js'
 import { loadFaqDocuments } from '../knowledge/faq-content-loader.js'
 import { createFaqSearchIndex } from '../knowledge/faq-search.js'
 import type { ChatOperationalObserver } from '../observability/chat-operational-events.js'
+import {
+  createEvalCanonicalData,
+  evaluateOfflineEvalExecution,
+  type EvalCanonicalData,
+  type EvalDatasetEvaluation,
+  type EvalOverallStatus,
+} from './eval-assertion-engine.js'
 import type { EvalCase } from './eval-dataset-schema.js'
 import {
   loadEvalDataset,
@@ -71,6 +82,7 @@ export interface EvalTurnExecution {
     readonly reason?: 'clarification' | 'not_found' | 'unable_to_verify'
     readonly message: string
     readonly productIds: readonly number[]
+    readonly products: readonly ChatProductCard[]
     readonly sourceIds: readonly string[]
   }
   readonly trace: EvalRuntimeTrace
@@ -80,7 +92,7 @@ export interface EvalTurnExecution {
 export interface EvalScenarioExecution {
   readonly scenarioId: string
   readonly technicalStatus: EvalTechnicalStatus
-  readonly behavioralEvaluation: 'not_evaluated'
+  readonly behavioralEvaluation: 'not_evaluated' | EvalOverallStatus
   readonly turns: readonly EvalTurnExecution[]
 }
 
@@ -92,8 +104,9 @@ export interface OfflineEvalExecution {
     readonly sourcePath: string
   }
   readonly technicalStatus: EvalTechnicalStatus
-  readonly behavioralEvaluation: 'not_evaluated'
+  readonly behavioralEvaluation: 'not_evaluated' | EvalOverallStatus
   readonly scenarios: readonly EvalScenarioExecution[]
+  readonly evaluation?: EvalDatasetEvaluation
   readonly summary: {
     readonly scenarios: number
     readonly completed: number
@@ -113,6 +126,8 @@ export type OfflineScenarioRuntimeFactory = (
 export interface RunOfflineEvalOptions {
   readonly scenarioId?: string
   readonly createScenarioRuntime?: OfflineScenarioRuntimeFactory
+  readonly evaluateAssertions?: boolean
+  readonly canonicalData?: EvalCanonicalData
 }
 
 function resolveEvalRoot(moduleUrl: string = import.meta.url) {
@@ -202,6 +217,10 @@ function responseEvidence(response: ChatResponse) {
     message: response.message,
     productIds:
       response.type === 'text' ? [] : [...response.productIds],
+    products:
+      response.type === 'text'
+        ? []
+        : response.products.map((product) => structuredClone(product)),
     sourceIds: [...response.sourceIds],
   })
 }
@@ -255,9 +274,11 @@ function automaticContextFrom(
   return { productIds: [...response.productIds] }
 }
 
-async function createCanonicalRuntimeFactory(): Promise<OfflineScenarioRuntimeFactory> {
+async function createCanonicalRuntimeFactory(
+  providedCatalog?: CatalogRepository,
+): Promise<OfflineScenarioRuntimeFactory> {
   const [catalog, faqDocuments] = await Promise.all([
-    loadCatalogRepository(),
+    providedCatalog ?? loadCatalogRepository(),
     loadFaqDocuments(),
   ])
 
@@ -429,8 +450,13 @@ export async function runOfflineEvalDataset(
       `Cenário não encontrado no dataset: ${options.scenarioId}.`,
     )
   }
+  const evaluationCatalog =
+    options.evaluateAssertions === true && options.canonicalData === undefined
+      ? await loadCatalogRepository()
+      : undefined
   const createScenarioRuntime =
-    options.createScenarioRuntime ?? (await createCanonicalRuntimeFactory())
+    options.createScenarioRuntime ??
+    (await createCanonicalRuntimeFactory(evaluationCatalog))
   const scenarios: EvalScenarioExecution[] = []
   for (const scenario of selected) {
     scenarios.push(
@@ -446,7 +472,7 @@ export async function runOfflineEvalDataset(
   ).length
   const technicalFailures = scenarios.length - completed
 
-  return {
+  const execution: OfflineEvalExecution = {
     mode: 'offline',
     dataset: {
       id: loaded.data.dataset.id,
@@ -462,6 +488,39 @@ export async function runOfflineEvalDataset(
       completed,
       technicalFailures,
     },
+  }
+  if (options.evaluateAssertions !== true) return execution
+
+  const canonicalData =
+    options.canonicalData ??
+    (evaluationCatalog === undefined
+      ? undefined
+      : createEvalCanonicalData(evaluationCatalog))
+  if (canonicalData === undefined) {
+    throw new TypeError('Dados canônicos indisponíveis para a avaliação.')
+  }
+  const evaluation = evaluateOfflineEvalExecution(
+    loaded,
+    execution,
+    canonicalData,
+    options.scenarioId === undefined
+      ? { kind: 'full_dataset' }
+      : {
+          kind: 'selected_scenarios',
+          scenarioIds: [options.scenarioId],
+        },
+  )
+  return {
+    ...execution,
+    behavioralEvaluation: evaluation.overallStatus,
+    scenarios: execution.scenarios.map((scenario) => ({
+      ...scenario,
+      behavioralEvaluation:
+        evaluation.scenarios.find(
+          (item) => item.scenarioId === scenario.scenarioId,
+        )?.overallStatus ?? 'not_evaluated',
+    })),
+    evaluation,
   }
 }
 

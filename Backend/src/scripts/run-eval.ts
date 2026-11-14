@@ -7,25 +7,34 @@ interface CliOptions {
   mode: string
   dataset?: string
   scenario?: string
+  evaluate: boolean
   help: boolean
 }
 
 function usage() {
   return [
-    'Uso: pnpm eval --mode offline --dataset <id> [--scenario <id>]',
+    'Uso: pnpm eval --mode offline --dataset <id> [--scenario <id>] [--evaluate]',
     '',
     `Datasets: ${Object.keys(OFFLINE_EVAL_DATASETS).join(', ')}`,
     '',
-    'O resultado indica somente execução técnica; conformidade comportamental permanece not_evaluated.',
+    'Use --evaluate para executar assertions determinísticas e calcular a nota objetiva diagnóstica.',
   ].join('\n')
 }
 
 function parseArguments(args: readonly string[]): CliOptions {
-  const options: CliOptions = { mode: 'offline', help: false }
+  const options: CliOptions = {
+    mode: 'offline',
+    evaluate: false,
+    help: false,
+  }
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index]
     if (argument === '--help' || argument === '-h') {
       options.help = true
+      continue
+    }
+    if (argument === '--evaluate') {
+      options.evaluate = true
       continue
     }
     if (
@@ -64,6 +73,7 @@ async function main() {
     ...(options.scenario === undefined
       ? {}
       : { scenarioId: options.scenario }),
+    evaluateAssertions: options.evaluate,
   })
   console.log(
     `dataset=${execution.dataset.id} mode=${execution.mode} technical_status=${execution.technicalStatus}`,
@@ -76,6 +86,15 @@ async function main() {
   console.log(
     `completed=${execution.summary.completed} technical_failures=${execution.summary.technicalFailures} behavioral_evaluation=${execution.behavioralEvaluation}`,
   )
+  if (execution.evaluation !== undefined) {
+    const evaluation = execution.evaluation
+    console.log(
+      `assertions_passed=${evaluation.assertionSummary.passed} assertions_failed=${evaluation.assertionSummary.failed} assertions_not_evaluated=${evaluation.assertionSummary.notEvaluated} critical_failures=${evaluation.criticalFailures}`,
+    )
+    console.log(
+      `objective_score=${evaluation.objectiveScore?.final ?? 'not_evaluated'} objective_score_raw=${evaluation.objectiveScore?.raw ?? 'not_evaluated'} objective_score_partial=${evaluation.objectiveScore?.partial ?? false} objective_score_scope=${evaluation.objectiveScore?.scope ?? evaluation.coverage.scope} dataset_coverage=${evaluation.coverage.datasetCoverage} scope_complete=${evaluation.coverage.completeForScope} missing_scenarios=${evaluation.coverage.missingScenarioIds.length} overall_status=${evaluation.overallStatus} required_human_review=${evaluation.requiredHumanCriteriaPending}`,
+    )
+  }
   if (execution.technicalStatus !== 'completed') process.exitCode = 1
 }
 

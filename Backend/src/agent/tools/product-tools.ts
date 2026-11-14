@@ -340,6 +340,9 @@ export interface ProductEligibilityPolicy {
     context: AgentToolExecutionContext,
     scope?: Pick<SearchProductsInput, 'category' | 'subcategory'>,
   ): { eligible: boolean; reasons: readonly EligibilityReason[] }
+  appliedIncompatibleIngredientIds(
+    context: AgentToolExecutionContext,
+  ): readonly string[]
 }
 
 interface IndexedProduct {
@@ -402,7 +405,7 @@ function normalizeIngredientTerm(value: string) {
   return tokenize(value).join('-')
 }
 
-function productIngredientIds(product: Product) {
+export function productIngredientIds(product: Product) {
   if (product.productKind === 'single') {
     return new Set((product.ingredients ?? []).map((ingredient) => ingredient.id))
   }
@@ -632,6 +635,9 @@ export function createProductEligibilityPolicy(
     }))
 
   return {
+    appliedIncompatibleIngredientIds(context) {
+      return [...stateFor(context).incompatibleIngredientIds].sort()
+    },
     applySearchConstraints(input, context) {
       if (
         (trusted.category !== undefined &&

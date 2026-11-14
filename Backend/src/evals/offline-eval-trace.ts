@@ -58,8 +58,15 @@ export interface EvalRuntimeTrace {
   readonly toolsExecuted: readonly string[]
   readonly toolCalls: readonly EvalToolCallEvidence[]
   readonly toolExecutions: readonly EvalToolExecutionEvidence[]
+  readonly earlyCompletion?: {
+    readonly reason:
+      | 'clinical_boundary'
+      | 'contextual_quote'
+      | 'comparison_clarification'
+  }
   readonly termination?: {
     readonly status: string
+    readonly modelCalls: number
     readonly toolCalls: number
     readonly toolErrors: number
   }
@@ -128,6 +135,7 @@ export class OfflineEvalTraceCollector {
   private modelCallCount = 0
   private requestedToolCalls: EvalToolCallEvidence[] = []
   private toolExecutions: EvalToolExecutionEvidence[] = []
+  private earlyCompletion: EvalRuntimeTrace['earlyCompletion']
   private termination: EvalRuntimeTrace['termination']
   private grounding = emptyGrounding
   private ingredientResolutions: EvalIngredientResolutionEvidence[] = []
@@ -138,6 +146,7 @@ export class OfflineEvalTraceCollector {
     this.modelCallCount = 0
     this.requestedToolCalls = []
     this.toolExecutions = []
+    this.earlyCompletion = undefined
     this.termination = undefined
     this.grounding = emptyGrounding
     this.ingredientResolutions = []
@@ -158,6 +167,12 @@ export class OfflineEvalTraceCollector {
   }
 
   recordOperationalEvent(event: ChatOperationalEvent) {
+    if (event.type === 'chat_service_early_completion') {
+      this.earlyCompletion = sanitizeEvalEvidence({
+        reason: event.reason,
+      })
+      return
+    }
     if (event.type === 'orchestrator_tool') {
       this.toolExecutions.push(
         sanitizeEvalEvidence({
@@ -179,6 +194,7 @@ export class OfflineEvalTraceCollector {
     this.modelCallCount = event.modelCalls
     this.termination = sanitizeEvalEvidence({
       status: event.status,
+      modelCalls: event.modelCalls,
       toolCalls: event.toolCalls,
       toolErrors: event.toolErrors,
     })
@@ -204,10 +220,15 @@ export class OfflineEvalTraceCollector {
   recordProductSearch(
     input: SearchProductsInput,
     resultProductIds: readonly number[],
+    effectiveIncompatibleIngredientIds?: readonly string[],
   ) {
     this.productSearches.push(
       sanitizeEvalEvidence({
-        incompatibleIngredientIds: [...(input.incompatibleIngredientIds ?? [])],
+        incompatibleIngredientIds: [
+          ...(effectiveIncompatibleIngredientIds ??
+            input.incompatibleIngredientIds ??
+            []),
+        ],
         resultProductIds: [...resultProductIds],
       }),
     )
@@ -236,6 +257,9 @@ export class OfflineEvalTraceCollector {
       toolExecutions: this.toolExecutions.map((execution) => ({
         ...execution,
       })),
+      ...(this.earlyCompletion === undefined
+        ? {}
+        : { earlyCompletion: { ...this.earlyCompletion } }),
       ...(this.termination === undefined
         ? {}
         : { termination: { ...this.termination } }),
@@ -279,6 +303,7 @@ export function createTracedProductSearchIndex(
       trace.recordProductSearch(
         input,
         results.map((result) => result.id),
+        policy.appliedIncompatibleIngredientIds(context),
       )
       return results
     },

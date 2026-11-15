@@ -31,8 +31,11 @@ Notas anteriores e atuais continuam visíveis como snapshots diagnósticos, mas
 de relatório, escopo e cobertura são equivalentes e não há falha técnica que
 invalide a comparação. Caso contrário, `comparable` é `false`; nota ausente nunca
 vira zero. Escopos `selected_scenarios` podem ter deltas somente quando a mesma
-seleção está completa nos dois relatórios. Notas parciais por evidência
-insuficiente não são comparadas numericamente.
+seleção está completa nos dois relatórios, todos os cenários selecionados possuem
+nota e não há assertions objetivas pendentes. A parcialidade causada apenas pela
+seleção intencional é comparável; parcialidade por evidência objetiva insuficiente
+não é. Critérios humanos `not_evaluated` permanecem separados e não impedem essa
+comparação. Notas de cenário nunca usam a nota agregada como fallback.
 
 O comparador também valida unicidade de cenário, turno e da identidade
 `scenarioId + turn + assertionId`. Duplicações produzem `incompatible`, antes da

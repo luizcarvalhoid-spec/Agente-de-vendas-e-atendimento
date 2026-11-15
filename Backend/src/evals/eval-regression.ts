@@ -134,32 +134,35 @@ function round(value: number) {
   return Math.round((value + Number.EPSILON) * 100) / 100
 }
 
-function scoreSnapshot(
-  report: EvalReport,
-  scenario?: EvalReport['scenarios'][number],
-) {
-  const score = scenario?.objectiveScore ?? report.summary.objectiveScore
-  const criticalFailures =
-    scenario?.criticalFailures ?? report.summary.criticalFailures
+function datasetScoreSnapshot(report: EvalReport) {
+  const score = report.summary.objectiveScore
   return score === undefined
     ? undefined
     : {
         raw: score.raw,
         final: score.final,
         partial: score.partial,
-        criticalFailures,
+        criticalFailures: report.summary.criticalFailures,
       }
 }
 
-function compareScore(
-  baselineReport: EvalReport,
-  currentReport: EvalReport,
-  comparisonAllowed: boolean,
-  baselineScenario?: EvalReport['scenarios'][number],
-  currentScenario?: EvalReport['scenarios'][number],
+function scenarioScoreSnapshot(
+  scenario: EvalReport['scenarios'][number] | undefined,
 ) {
-  const baseline = scoreSnapshot(baselineReport, baselineScenario)
-  const current = scoreSnapshot(currentReport, currentScenario)
+  if (scenario?.objectiveScore === undefined) return undefined
+  return {
+    raw: scenario.objectiveScore.raw,
+    final: scenario.objectiveScore.final,
+    partial: scenario.objectiveScore.partial,
+    criticalFailures: scenario.criticalFailures,
+  }
+}
+
+function compareScore(
+  baseline: ReturnType<typeof datasetScoreSnapshot>,
+  current: ReturnType<typeof datasetScoreSnapshot>,
+  comparisonAllowed: boolean,
+) {
   const comparable =
     comparisonAllowed && baseline !== undefined && current !== undefined
   return {
@@ -189,24 +192,65 @@ function scoringIssue(
   }
 }
 
-function scoreComparisonAllowed(
-  comparisonBaseAllowed: boolean,
-  scope: EvalReport['coverage']['scope'],
-  baselineScore: EvalReport['summary']['objectiveScore'] | undefined,
-  currentScore: EvalReport['summary']['objectiveScore'] | undefined,
+function hasCompleteScenarioObjectiveEvidence(
+  scenario: EvalReport['scenarios'][number],
 ) {
+  return (
+    scenario.objectiveScore !== undefined &&
+    !scenario.objectiveScore.partial &&
+    scenario.turns.every((turn) =>
+      turn.assertions.every((assertion) => assertion.status !== 'not_evaluated'),
+    ) &&
+    scenario.criteria.every(
+      (criterion) =>
+        criterion.kind !== 'objective' ||
+        criterion.applicability === 'not_applicable' ||
+        (criterion.status !== 'not_evaluated' && !criterion.partial),
+    )
+  )
+}
+
+function hasCompleteObjectiveEvidence(report: EvalReport) {
+  return (
+    report.summary.assertions.notEvaluated === 0 &&
+    report.scenarios.every(hasCompleteScenarioObjectiveEvidence)
+  )
+}
+
+function datasetScoreComparisonAllowed(
+  comparisonBaseAllowed: boolean,
+  baseline: EvalReport,
+  current: EvalReport,
+) {
+  const baselineScore = baseline.summary.objectiveScore
+  const currentScore = current.summary.objectiveScore
   if (
     !comparisonBaseAllowed ||
     baselineScore === undefined ||
-    currentScore === undefined
+    currentScore === undefined ||
+    !hasCompleteObjectiveEvidence(baseline) ||
+    !hasCompleteObjectiveEvidence(current)
   ) {
     return false
   }
   if (!baselineScore.partial && !currentScore.partial) return true
   return (
-    scope === 'selected_scenarios' &&
+    baseline.coverage.scope === 'selected_scenarios' &&
+    current.coverage.scope === 'selected_scenarios' &&
     baselineScore.partial &&
     currentScore.partial
+  )
+}
+
+function scenarioScoreComparisonAllowed(
+  comparisonBaseAllowed: boolean,
+  baseline: EvalReport['scenarios'][number],
+  current: EvalReport['scenarios'][number],
+) {
+  return (
+    comparisonBaseAllowed &&
+    hasCompleteScenarioObjectiveEvidence(baseline) &&
+    hasCompleteScenarioObjectiveEvidence(current)
   )
 }
 
@@ -593,11 +637,10 @@ export function compareEvalBaseline(
     }
   }
 
-  const aggregateScoreAllowed = scoreComparisonAllowed(
+  const aggregateScoreAllowed = datasetScoreComparisonAllowed(
     compatible && coverageEquivalent && technicalProblems.length === 0,
-    reference.coverage.scope,
-    reference.summary.objectiveScore,
-    current.summary.objectiveScore,
+    reference,
+    current,
   )
 
   const scenarios = reference.scenarios.map((baselineScenario) => {
@@ -612,10 +655,9 @@ export function compareEvalBaseline(
             baselineCriticalFailures: baselineScenario.criticalFailures,
             currentCriticalFailures: 0,
             score: compareScore(
-              reference,
-              current,
+              scenarioScoreSnapshot(baselineScenario),
+              undefined,
               false,
-              baselineScenario,
             ),
             assertions: [],
           }
@@ -655,21 +697,18 @@ export function compareEvalBaseline(
           baselineCriticalFailures: baselineScenario.criticalFailures,
           currentCriticalFailures: currentScenario.criticalFailures,
           score: compareScore(
-            reference,
-            current,
-            scoreComparisonAllowed(
+            scenarioScoreSnapshot(baselineScenario),
+            scenarioScoreSnapshot(currentScenario),
+            scenarioScoreComparisonAllowed(
               coverageEquivalent &&
                 baselineScenario.technicalStatus === 'completed' &&
                 currentScenario.technicalStatus === 'completed' &&
                 currentScenario.turns.every(
                   (turn) => turn.technicalStatus === 'completed',
                 ),
-              'full_dataset',
-              baselineScenario.objectiveScore,
-              currentScenario.objectiveScore,
+              baselineScenario,
+              currentScenario,
             ),
-            baselineScenario,
-            currentScenario,
           ),
           assertions: scenarioAssertions,
         }
@@ -679,8 +718,8 @@ export function compareEvalBaseline(
     (scenario) => scenario.assertions,
   )
   const aggregateScore = compareScore(
-    reference,
-    current,
+    datasetScoreSnapshot(reference),
+    datasetScoreSnapshot(current),
     aggregateScoreAllowed,
   )
   const scoringIssues = [

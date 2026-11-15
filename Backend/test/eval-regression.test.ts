@@ -425,6 +425,7 @@ test('escopo parcial intencional e equivalente permite deltas', async () => {
   const { loaded, report, baseline, referenceData } = await selectedPromise
   assert.equal(report.coverage.scope, 'selected_scenarios')
   assert.equal(report.summary.objectiveScore?.partial, true)
+  assert(report.summary.criteria.notEvaluated > 0)
   const comparison = compareEvalBaseline(
     baseline,
     loaded,
@@ -435,6 +436,106 @@ test('escopo parcial intencional e equivalente permite deltas', async () => {
   assert.equal(comparison.score.comparable, true)
   assert.equal(comparison.score.rawDelta, 0)
   assert.equal(comparison.score.finalDelta, 0)
+})
+
+test('cenário sem nota não herda a nota agregada do dataset', async () => {
+  const { loaded, report, baseline, referenceData } = await corePromise
+  const current = structuredClone(report)
+  const scenarioWithoutScore = current.scenarios[0]
+  const intactScenario = current.scenarios[1]
+  assert(scenarioWithoutScore && intactScenario?.objectiveScore)
+  assert(current.summary.objectiveScore)
+  delete scenarioWithoutScore.objectiveScore
+
+  const comparison = compareEvalBaseline(
+    baseline,
+    loaded,
+    evalReportSchema.parse(current),
+    referenceData,
+  )
+  const missing = comparison.scenarios.find(
+    (scenario) => scenario.scenarioId === scenarioWithoutScore.id,
+  )
+  const intact = comparison.scenarios.find(
+    (scenario) => scenario.scenarioId === intactScenario.id,
+  )
+  assert(missing && intact)
+  assert.equal(
+    comparison.score.current?.final,
+    current.summary.objectiveScore.final,
+  )
+  assert.equal(comparison.score.comparable, false)
+  assert.equal(comparison.score.finalDelta, undefined)
+  assert.equal(missing.score.baseline?.final, 10)
+  assert.equal(missing.score.current, undefined)
+  assert.equal(missing.score.comparable, false)
+  assert.equal(missing.score.rawDelta, undefined)
+  assert.equal(missing.score.finalDelta, undefined)
+  assert.equal(intact.score.current?.final, intactScenario.objectiveScore.final)
+  assert.equal(intact.score.comparable, true)
+})
+
+test('falha técnica ou cenário não executado sem nota não usa fallback agregado', async () => {
+  const { loaded, report, baseline, referenceData } = await corePromise
+  for (const status of ['technical_failure', 'not_executed'] as const) {
+    const current = structuredClone(report)
+    const scenario = current.scenarios[0]
+    assert(scenario && current.summary.objectiveScore)
+    scenario.technicalStatus = status
+    delete scenario.objectiveScore
+    for (const turn of scenario.turns) turn.technicalStatus = status
+    current.summary.scenarios.completed -= 1
+    if (status === 'technical_failure') {
+      current.summary.scenarios.technicalFailures = 1
+    } else {
+      current.summary.scenarios.notExecuted = 1
+    }
+
+    const comparison = compareEvalBaseline(
+      baseline,
+      loaded,
+      evalReportSchema.parse(current),
+      referenceData,
+    )
+    const scenarioComparison = comparison.scenarios.find(
+      (item) => item.scenarioId === scenario.id,
+    )
+    assert(scenarioComparison)
+    assert.equal(comparison.result, 'technical_failure')
+    assert.equal(comparison.score.comparable, false)
+    assert.equal(scenarioComparison.score.current, undefined)
+    assert.equal(scenarioComparison.score.comparable, false)
+    assert.equal(scenarioComparison.score.rawDelta, undefined)
+    assert.equal(scenarioComparison.score.finalDelta, undefined)
+  }
+})
+
+test('seleção parcial com evidência objetiva insuficiente não produz deltas', async () => {
+  const { loaded, report, baseline, referenceData } = await selectedPromise
+  const current = structuredClone(report)
+  const assertion = firstAssertion(current)
+  assertion.status = 'not_evaluated'
+  current.summary.assertions.passed -= 1
+  current.summary.assertions.notEvaluated += 1
+  current.summary.objectiveStatus = 'not_evaluated'
+  const scenario = current.scenarios[0]
+  assert(scenario?.objectiveScore && current.summary.objectiveScore)
+  scenario.objectiveStatus = 'not_evaluated'
+  scenario.objectiveScore.partial = true
+
+  const comparison = compareEvalBaseline(
+    baseline,
+    loaded,
+    evalReportSchema.parse(current),
+    referenceData,
+  )
+  assert.equal(comparison.score.baseline?.final, 10)
+  assert.equal(comparison.score.current?.final, 10)
+  assert.equal(comparison.score.comparable, false)
+  assert.equal(comparison.score.rawDelta, undefined)
+  assert.equal(comparison.score.finalDelta, undefined)
+  assert.equal(comparison.scenarios[0]?.score.comparable, false)
+  assert.equal(comparison.scenarios[0]?.score.finalDelta, undefined)
 })
 
 test('mudança de nota sem transição objetiva bloqueia no dataset e no cenário', async () => {

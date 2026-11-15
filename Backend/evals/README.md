@@ -252,3 +252,9 @@ notas. Fingerprints detectam mudanças silenciosas no dataset, catálogo e FAQs;
 falhas conhecidas, melhorias, perdas de evidência, novas falhas críticas e
 problemas técnicos permanecem separados. A política de atualização, os códigos
 de saída e os quatro baselines iniciais estão em `BASELINES.md`.
+
+## Preparação de avaliações externas (EVAL-07A)
+
+O preflight e o executor exclusivamente mock da EVAL-07A estão documentados em
+`EXTERNAL_EVAL.md`. A modalidade real permanece desabilitada, não há chamadas à
+OpenRouter e os resultados simulados não são apresentados como desempenho real.

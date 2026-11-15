@@ -1,0 +1,397 @@
+{
+  "baselineVersion": 1,
+  "baselineId": "hidrasplash-conversations.1.0.0.full.9833554ad286",
+  "dataset": {
+    "id": "hidrasplash-conversations",
+    "version": "1.0.0",
+    "fingerprint": "sha256:ecd21f83f039f0c81debddd8cfdb286843559639ed72c06d33489833554ad286"
+  },
+  "execution": {
+    "mode": "offline",
+    "reportVersion": 1,
+    "evaluationEngine": "deterministic-assertion-engine-v1",
+    "captureTool": "eval-regression-v1"
+  },
+  "referenceData": {
+    "catalogFingerprint": "sha256:2be5d531e8027f94ab471711bb930e856ea0125d4eeaca39252b0cf024eff1d0",
+    "faqFingerprint": "sha256:1e480d1897bc244b303275171a0ac422d9dafb129dc0d1e7a0f45ec277ac1d51"
+  },
+  "scope": {
+    "kind": "full_dataset",
+    "completeForScope": true,
+    "datasetCoverage": "complete",
+    "expectedScenarioIds": [
+      "hidrasplash.conversation.budget-change.001",
+      "hidrasplash.conversation.shipping-boundary.001"
+    ]
+  },
+  "reference": {
+    "reportVersion": 1,
+    "dataset": {
+      "id": "hidrasplash-conversations",
+      "version": "1.0.0"
+    },
+    "execution": {
+      "mode": "offline",
+      "evaluationEngine": "deterministic-assertion-engine-v1"
+    },
+    "coverage": {
+      "scope": "full_dataset",
+      "completeForScope": true,
+      "datasetCoverage": "complete",
+      "expectedScenarioIds": [
+        "hidrasplash.conversation.budget-change.001",
+        "hidrasplash.conversation.shipping-boundary.001"
+      ],
+      "evaluatedScenarioIds": [
+        "hidrasplash.conversation.budget-change.001",
+        "hidrasplash.conversation.shipping-boundary.001"
+      ],
+      "missingScenarioIds": [],
+      "excludedScenarioIds": []
+    },
+    "summary": {
+      "scenarios": {
+        "expected": 2,
+        "evaluated": 2,
+        "completed": 2,
+        "technicalFailures": 0,
+        "notExecuted": 0
+      },
+      "assertions": {
+        "passed": 13,
+        "failed": 0,
+        "notEvaluated": 0
+      },
+      "criteria": {
+        "passed": 2,
+        "failed": 0,
+        "notEvaluated": 5,
+        "notApplicable": 0
+      },
+      "criticalFailures": 0,
+      "requiredHumanCriteriaPending": 3,
+      "objectiveStatus": "passed",
+      "overallStatus": "needs_review",
+      "objectiveScore": {
+        "raw": 10,
+        "final": 10,
+        "partial": false
+      }
+    },
+    "scenarios": [
+      {
+        "id": "hidrasplash.conversation.budget-change.001",
+        "category": "multi-turn-preference-change",
+        "difficulty": "hard",
+        "severity": "high",
+        "technicalStatus": "completed",
+        "objectiveStatus": "passed",
+        "overallStatus": "needs_review",
+        "criticalFailures": 0,
+        "requiredHumanCriteriaPending": 1,
+        "objectiveScore": {
+          "raw": 10,
+          "final": 10,
+          "partial": false
+        },
+        "criteria": [
+          {
+            "criterionId": "objective-context-change",
+            "criterion": "context_continuity",
+            "kind": "objective",
+            "applicability": "required",
+            "status": "passed",
+            "humanReviewPending": false,
+            "assertionIds": [
+              "turn-0-recommendation",
+              "turn-0-product-13",
+              "turn-0-canonical-card",
+              "turn-0-grounding",
+              "turn-1-recommendation",
+              "turn-1-product-9",
+              "turn-1-canonical-card",
+              "turn-1-grounding"
+            ],
+            "weight": 3,
+            "score": 10,
+            "partial": false
+          },
+          {
+            "criterionId": "naturalness-review",
+            "criterion": "naturalness",
+            "kind": "subjective",
+            "applicability": "required",
+            "status": "not_evaluated",
+            "humanReviewPending": true,
+            "assertionIds": [],
+            "weight": 1,
+            "partial": false
+          },
+          {
+            "criterionId": "continuity-review",
+            "criterion": "context_continuity",
+            "kind": "subjective",
+            "applicability": "optional",
+            "status": "not_evaluated",
+            "humanReviewPending": false,
+            "assertionIds": [],
+            "weight": 1,
+            "partial": false
+          }
+        ],
+        "turns": [
+          {
+            "index": 0,
+            "scenarioId": "hidrasplash.conversation.budget-change.001",
+            "technicalStatus": "completed",
+            "responseType": "recommendation",
+            "assertions": [
+              {
+                "assertionId": "turn-0-recommendation",
+                "criterionId": "objective-context-change",
+                "type": "response_type_allowed",
+                "severity": "high",
+                "status": "passed",
+                "reason": "O tipo e o motivo estruturado da resposta são permitidos.",
+                "evidenceReferences": [
+                  "scenarios.hidrasplash.conversation.budget-change.001.turns.0.response.type",
+                  "scenarios.hidrasplash.conversation.budget-change.001.turns.0.response.reason"
+                ]
+              },
+              {
+                "assertionId": "turn-0-product-13",
+                "criterionId": "objective-context-change",
+                "type": "product_ids_exact",
+                "severity": "critical",
+                "status": "passed",
+                "reason": "Os identificadores observados atendem à relação de conjuntos declarada.",
+                "evidenceReferences": [
+                  "scenarios.hidrasplash.conversation.budget-change.001.turns.0.response.productIds"
+                ]
+              },
+              {
+                "assertionId": "turn-0-canonical-card",
+                "criterionId": "objective-context-change",
+                "type": "canonical_product_cards",
+                "severity": "critical",
+                "status": "passed",
+                "reason": "Todos os campos dos cartões correspondem às projeções canônicas.",
+                "evidenceReferences": [
+                  "scenarios.hidrasplash.conversation.budget-change.001.turns.0.response.products",
+                  "canonical.products"
+                ]
+              },
+              {
+                "assertionId": "turn-0-grounding",
+                "criterionId": "objective-context-change",
+                "type": "grounding_domains",
+                "severity": "critical",
+                "status": "passed",
+                "reason": "Os domínios de grounding comprovados atendem à expectativa.",
+                "evidenceReferences": [
+                  "scenarios.hidrasplash.conversation.budget-change.001.turns.0.trace.grounding"
+                ]
+              }
+            ]
+          },
+          {
+            "index": 1,
+            "scenarioId": "hidrasplash.conversation.budget-change.001",
+            "technicalStatus": "completed",
+            "responseType": "recommendation",
+            "assertions": [
+              {
+                "assertionId": "turn-1-recommendation",
+                "criterionId": "objective-context-change",
+                "type": "response_type_allowed",
+                "severity": "high",
+                "status": "passed",
+                "reason": "O tipo e o motivo estruturado da resposta são permitidos.",
+                "evidenceReferences": [
+                  "scenarios.hidrasplash.conversation.budget-change.001.turns.1.response.type",
+                  "scenarios.hidrasplash.conversation.budget-change.001.turns.1.response.reason"
+                ]
+              },
+              {
+                "assertionId": "turn-1-product-9",
+                "criterionId": "objective-context-change",
+                "type": "product_ids_exact",
+                "severity": "critical",
+                "status": "passed",
+                "reason": "Os identificadores observados atendem à relação de conjuntos declarada.",
+                "evidenceReferences": [
+                  "scenarios.hidrasplash.conversation.budget-change.001.turns.1.response.productIds"
+                ]
+              },
+              {
+                "assertionId": "turn-1-canonical-card",
+                "criterionId": "objective-context-change",
+                "type": "canonical_product_cards",
+                "severity": "critical",
+                "status": "passed",
+                "reason": "Todos os campos dos cartões correspondem às projeções canônicas.",
+                "evidenceReferences": [
+                  "scenarios.hidrasplash.conversation.budget-change.001.turns.1.response.products",
+                  "canonical.products"
+                ]
+              },
+              {
+                "assertionId": "turn-1-grounding",
+                "criterionId": "objective-context-change",
+                "type": "grounding_domains",
+                "severity": "critical",
+                "status": "passed",
+                "reason": "Os domínios de grounding comprovados atendem à expectativa.",
+                "evidenceReferences": [
+                  "scenarios.hidrasplash.conversation.budget-change.001.turns.1.trace.grounding"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "hidrasplash.conversation.shipping-boundary.001",
+        "category": "grounded-commercial-policy",
+        "difficulty": "medium",
+        "severity": "high",
+        "technicalStatus": "completed",
+        "objectiveStatus": "passed",
+        "overallStatus": "needs_review",
+        "criticalFailures": 0,
+        "requiredHumanCriteriaPending": 2,
+        "objectiveScore": {
+          "raw": 10,
+          "final": 10,
+          "partial": false
+        },
+        "criteria": [
+          {
+            "criterionId": "objective-shipping-policy",
+            "criterion": "factual_accuracy",
+            "kind": "objective",
+            "applicability": "required",
+            "status": "passed",
+            "humanReviewPending": false,
+            "assertionIds": [
+              "shipping-text-response",
+              "shipping-boundary-source",
+              "allowed-shipping-sources",
+              "faq-grounding",
+              "no-product-card"
+            ],
+            "weight": 3,
+            "score": 10,
+            "partial": false
+          },
+          {
+            "criterionId": "shipping-facts-review",
+            "criterion": "factual_accuracy",
+            "kind": "subjective",
+            "applicability": "required",
+            "status": "not_evaluated",
+            "humanReviewPending": true,
+            "assertionIds": [],
+            "weight": 2,
+            "partial": false
+          },
+          {
+            "criterionId": "naturalness-review",
+            "criterion": "naturalness",
+            "kind": "subjective",
+            "applicability": "required",
+            "status": "not_evaluated",
+            "humanReviewPending": true,
+            "assertionIds": [],
+            "weight": 1,
+            "partial": false
+          },
+          {
+            "criterionId": "clarity-review",
+            "criterion": "clarity_utility",
+            "kind": "subjective",
+            "applicability": "optional",
+            "status": "not_evaluated",
+            "humanReviewPending": false,
+            "assertionIds": [],
+            "weight": 1,
+            "partial": false
+          }
+        ],
+        "turns": [
+          {
+            "index": 0,
+            "scenarioId": "hidrasplash.conversation.shipping-boundary.001",
+            "technicalStatus": "completed",
+            "responseType": "text",
+            "assertions": [
+              {
+                "assertionId": "shipping-text-response",
+                "criterionId": "objective-shipping-policy",
+                "type": "response_type_allowed",
+                "severity": "high",
+                "status": "passed",
+                "reason": "O tipo e o motivo estruturado da resposta são permitidos.",
+                "evidenceReferences": [
+                  "scenarios.hidrasplash.conversation.shipping-boundary.001.turns.0.response.type",
+                  "scenarios.hidrasplash.conversation.shipping-boundary.001.turns.0.response.reason"
+                ]
+              },
+              {
+                "assertionId": "shipping-boundary-source",
+                "criterionId": "objective-shipping-policy",
+                "type": "source_ids_include",
+                "severity": "critical",
+                "status": "passed",
+                "reason": "Os identificadores observados atendem à relação de conjuntos declarada.",
+                "evidenceReferences": [
+                  "scenarios.hidrasplash.conversation.shipping-boundary.001.turns.0.response.sourceIds"
+                ]
+              },
+              {
+                "assertionId": "allowed-shipping-sources",
+                "criterionId": "objective-shipping-policy",
+                "type": "source_ids_allowed",
+                "severity": "high",
+                "status": "passed",
+                "reason": "Os identificadores observados atendem à relação de conjuntos declarada.",
+                "evidenceReferences": [
+                  "scenarios.hidrasplash.conversation.shipping-boundary.001.turns.0.response.sourceIds"
+                ]
+              },
+              {
+                "assertionId": "faq-grounding",
+                "criterionId": "objective-shipping-policy",
+                "type": "grounding_domains",
+                "severity": "critical",
+                "status": "passed",
+                "reason": "Os domínios de grounding comprovados atendem à expectativa.",
+                "evidenceReferences": [
+                  "scenarios.hidrasplash.conversation.shipping-boundary.001.turns.0.trace.grounding"
+                ]
+              },
+              {
+                "assertionId": "no-product-card",
+                "criterionId": "objective-shipping-policy",
+                "type": "product_ids_exact",
+                "severity": "medium",
+                "status": "passed",
+                "reason": "Os identificadores observados atendem à relação de conjuntos declarada.",
+                "evidenceReferences": [
+                  "scenarios.hidrasplash.conversation.shipping-boundary.001.turns.0.response.productIds"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "limitations": [
+      "A execução offline usa um modelo determinístico e não comprova o comportamento de modelos externos.",
+      "Critérios subjetivos obrigatórios permanecem pendentes de avaliação humana.",
+      "Assertions determinísticas não comprovam, isoladamente, naturalidade, empatia ou correção semântica geral.",
+      "Mensagens completas, argumentos e resultados brutos de ferramentas são omitidos por minimização de dados."
+    ]
+  }
+}

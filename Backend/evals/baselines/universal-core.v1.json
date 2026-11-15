@@ -1,0 +1,268 @@
+{
+  "baselineVersion": 1,
+  "baselineId": "universal-core.1.0.0.full.d95a094e4b93",
+  "dataset": {
+    "id": "universal-core",
+    "version": "1.0.0",
+    "fingerprint": "sha256:170eb1cbfd57f35b979c61688d8ab56490ed964c3a327323dc3bd95a094e4b93"
+  },
+  "execution": {
+    "mode": "offline",
+    "reportVersion": 1,
+    "evaluationEngine": "deterministic-assertion-engine-v1",
+    "captureTool": "eval-regression-v1"
+  },
+  "referenceData": {
+    "catalogFingerprint": "sha256:2be5d531e8027f94ab471711bb930e856ea0125d4eeaca39252b0cf024eff1d0",
+    "faqFingerprint": "sha256:1e480d1897bc244b303275171a0ac422d9dafb129dc0d1e7a0f45ec277ac1d51"
+  },
+  "scope": {
+    "kind": "full_dataset",
+    "completeForScope": true,
+    "datasetCoverage": "complete",
+    "expectedScenarioIds": [
+      "universal.core.incomplete-need.001",
+      "universal.core.informational-no-pressure.001"
+    ]
+  },
+  "reference": {
+    "reportVersion": 1,
+    "dataset": {
+      "id": "universal-core",
+      "version": "1.0.0"
+    },
+    "execution": {
+      "mode": "offline",
+      "evaluationEngine": "deterministic-assertion-engine-v1"
+    },
+    "coverage": {
+      "scope": "full_dataset",
+      "completeForScope": true,
+      "datasetCoverage": "complete",
+      "expectedScenarioIds": [
+        "universal.core.incomplete-need.001",
+        "universal.core.informational-no-pressure.001"
+      ],
+      "evaluatedScenarioIds": [
+        "universal.core.incomplete-need.001",
+        "universal.core.informational-no-pressure.001"
+      ],
+      "missingScenarioIds": [],
+      "excludedScenarioIds": []
+    },
+    "summary": {
+      "scenarios": {
+        "expected": 2,
+        "evaluated": 2,
+        "completed": 2,
+        "technicalFailures": 0,
+        "notExecuted": 0
+      },
+      "assertions": {
+        "passed": 5,
+        "failed": 0,
+        "notEvaluated": 0
+      },
+      "criteria": {
+        "passed": 2,
+        "failed": 0,
+        "notEvaluated": 3,
+        "notApplicable": 0
+      },
+      "criticalFailures": 0,
+      "requiredHumanCriteriaPending": 2,
+      "objectiveStatus": "passed",
+      "overallStatus": "needs_review",
+      "objectiveScore": {
+        "raw": 10,
+        "final": 10,
+        "partial": false
+      }
+    },
+    "scenarios": [
+      {
+        "id": "universal.core.incomplete-need.001",
+        "category": "consultative-dialogue",
+        "difficulty": "easy",
+        "severity": "medium",
+        "technicalStatus": "completed",
+        "objectiveStatus": "passed",
+        "overallStatus": "needs_review",
+        "criticalFailures": 0,
+        "requiredHumanCriteriaPending": 1,
+        "objectiveScore": {
+          "raw": 10,
+          "final": 10,
+          "partial": false
+        },
+        "criteria": [
+          {
+            "criterionId": "objective-dialogue",
+            "criterion": "consultative_quality",
+            "kind": "objective",
+            "applicability": "required",
+            "status": "passed",
+            "humanReviewPending": false,
+            "assertionIds": [
+              "clarification-response",
+              "single-useful-question"
+            ],
+            "weight": 2,
+            "score": 10,
+            "partial": false
+          },
+          {
+            "criterionId": "naturalness-review",
+            "criterion": "naturalness",
+            "kind": "subjective",
+            "applicability": "required",
+            "status": "not_evaluated",
+            "humanReviewPending": true,
+            "assertionIds": [],
+            "weight": 1,
+            "partial": false
+          },
+          {
+            "criterionId": "clarity-review",
+            "criterion": "clarity_utility",
+            "kind": "subjective",
+            "applicability": "optional",
+            "status": "not_evaluated",
+            "humanReviewPending": false,
+            "assertionIds": [],
+            "weight": 1,
+            "partial": false
+          }
+        ],
+        "turns": [
+          {
+            "index": 0,
+            "scenarioId": "universal.core.incomplete-need.001",
+            "technicalStatus": "completed",
+            "responseType": "text",
+            "assertions": [
+              {
+                "assertionId": "clarification-response",
+                "criterionId": "objective-dialogue",
+                "type": "response_type_allowed",
+                "severity": "high",
+                "status": "passed",
+                "reason": "O tipo e o motivo estruturado da resposta são permitidos.",
+                "evidenceReferences": [
+                  "scenarios.universal.core.incomplete-need.001.turns.0.response.type",
+                  "scenarios.universal.core.incomplete-need.001.turns.0.response.reason"
+                ]
+              },
+              {
+                "assertionId": "single-useful-question",
+                "criterionId": "objective-dialogue",
+                "type": "max_questions",
+                "severity": "high",
+                "status": "passed",
+                "reason": "A quantidade de perguntas respeita o limite.",
+                "evidenceReferences": [
+                  "scenarios.universal.core.incomplete-need.001.turns.0.response.message"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "universal.core.informational-no-pressure.001",
+        "category": "informational-answer",
+        "difficulty": "easy",
+        "severity": "low",
+        "technicalStatus": "completed",
+        "objectiveStatus": "passed",
+        "overallStatus": "needs_review",
+        "criticalFailures": 0,
+        "requiredHumanCriteriaPending": 1,
+        "objectiveScore": {
+          "raw": 10,
+          "final": 10,
+          "partial": false
+        },
+        "criteria": [
+          {
+            "criterionId": "objective-information",
+            "criterion": "clarity_utility",
+            "kind": "objective",
+            "applicability": "required",
+            "status": "passed",
+            "humanReviewPending": false,
+            "assertionIds": [
+              "informational-text",
+              "no-follow-up-question",
+              "no-purchase-pressure"
+            ],
+            "weight": 2,
+            "score": 10,
+            "partial": false
+          },
+          {
+            "criterionId": "naturalness-review",
+            "criterion": "naturalness",
+            "kind": "subjective",
+            "applicability": "required",
+            "status": "not_evaluated",
+            "humanReviewPending": true,
+            "assertionIds": [],
+            "weight": 1,
+            "partial": false
+          }
+        ],
+        "turns": [
+          {
+            "index": 0,
+            "scenarioId": "universal.core.informational-no-pressure.001",
+            "technicalStatus": "completed",
+            "responseType": "text",
+            "assertions": [
+              {
+                "assertionId": "informational-text",
+                "criterionId": "objective-information",
+                "type": "response_type_allowed",
+                "severity": "medium",
+                "status": "passed",
+                "reason": "O tipo e o motivo estruturado da resposta são permitidos.",
+                "evidenceReferences": [
+                  "scenarios.universal.core.informational-no-pressure.001.turns.0.response.type",
+                  "scenarios.universal.core.informational-no-pressure.001.turns.0.response.reason"
+                ]
+              },
+              {
+                "assertionId": "no-follow-up-question",
+                "criterionId": "objective-information",
+                "type": "max_questions",
+                "severity": "medium",
+                "status": "passed",
+                "reason": "A quantidade de perguntas respeita o limite.",
+                "evidenceReferences": [
+                  "scenarios.universal.core.informational-no-pressure.001.turns.0.response.message"
+                ]
+              },
+              {
+                "assertionId": "no-purchase-pressure",
+                "criterionId": "objective-information",
+                "type": "text_excludes",
+                "severity": "high",
+                "status": "passed",
+                "reason": "A mensagem exclui todos os trechos proibidos.",
+                "evidenceReferences": [
+                  "scenarios.universal.core.informational-no-pressure.001.turns.0.response.message"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "limitations": [
+      "A execução offline usa um modelo determinístico e não comprova o comportamento de modelos externos.",
+      "Critérios subjetivos obrigatórios permanecem pendentes de avaliação humana.",
+      "Assertions determinísticas não comprovam, isoladamente, naturalidade, empatia ou correção semântica geral.",
+      "Mensagens completas, argumentos e resultados brutos de ferramentas são omitidos por minimização de dados."
+    ]
+  }
+}

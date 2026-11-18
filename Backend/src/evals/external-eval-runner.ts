@@ -1,5 +1,18 @@
-import type { AgentModelPort } from '../agent/agent-model-port.js'
+import { createHash } from 'node:crypto'
+
+import {
+  AgentModelError,
+  type AgentModelPort,
+} from '../agent/agent-model-port.js'
 import { isRegisteredExternalAgentModel } from '../agent/agent-model-origin.js'
+import {
+  createOpenRouterAgentModel,
+  type OpenRouterAgentModelObservation,
+} from '../agent/openrouter/openrouter-agent-model.js'
+import {
+  createOpenRouterClient,
+  type OpenRouterTransport,
+} from '../agent/openrouter/openrouter-client.js'
 import { TOOL_ORCHESTRATOR_MAX_MODEL_CALLS } from '../agent/tool-orchestrator.js'
 import { loadCatalogRepository } from '../catalog/catalog-repository.js'
 import { createEvalCanonicalData } from './eval-assertion-engine.js'
@@ -25,7 +38,7 @@ import {
 export const EXTERNAL_EVAL_LIMITATIONS = [
   'A modalidade mock_external usa transporte simulado e não mede desempenho real de um modelo externo.',
   'O isolamento mock exige uma factory registrada e rejeita adaptadores externos conhecidos, mas não transforma código arbitrário injetado em uma sandbox de rede.',
-  'A EVAL-07A bloqueia live_external e não autoriza chamadas de rede ou potencialmente pagas.',
+  'A EVAL-07B.1 mantém live_external bloqueado e testa a integração OpenRouter somente com transporte em memória.',
   'O custo é uma estimativa preventiva; a cobrança final futura poderá diferir e deverá ter limites também na conta do provedor.',
   'Chamadas sem usage completo conservam a reserva com a margem configurada.',
   'Assertions determinísticas não substituem a avaliação humana dos critérios subjetivos.',
@@ -81,6 +94,45 @@ export interface RunMockExternalEvalOptions {
   readonly providerModelId?: string
 }
 
+declare const inMemoryOpenRouterTransportBrand: unique symbol
+
+export type InMemoryOpenRouterTransport = OpenRouterTransport & {
+  readonly [inMemoryOpenRouterTransportBrand]: true
+}
+
+const registeredInMemoryTransports = new WeakSet<OpenRouterTransport>()
+
+export function createInMemoryOpenRouterTransport(
+  handler: OpenRouterTransport,
+): InMemoryOpenRouterTransport {
+  if (handler === globalThis.fetch) {
+    throw new ExternalEvalExecutionError('LIVE_EXTERNAL_DISABLED')
+  }
+  const transport: OpenRouterTransport = (input, init) =>
+    handler(input, init)
+  registeredInMemoryTransports.add(transport)
+  return transport as InMemoryOpenRouterTransport
+}
+
+export interface RunSimulatedOpenRouterExternalEvalOptions {
+  readonly transport: InMemoryOpenRouterTransport
+}
+
+interface RunControlledExternalEvalOptions {
+  readonly createModel: (
+    context: MockExternalEvalModelContext & {
+      readonly modelId: string
+      readonly routing: NonNullable<ExternalEvalReport['routing']> | undefined
+    },
+  ) => AgentModelPort
+  readonly validateModel?: (model: AgentModelPort) => void
+  readonly providerModelId?: string
+  readonly observations: Array<
+    ExternalEvalReport['model']['observations'][number]
+  >
+  readonly requireRouting?: boolean
+}
+
 function tracedModel(
   model: AgentModelPort,
   trace: OfflineEvalTraceCollector,
@@ -124,9 +176,9 @@ function turnEvidence(
   }
 }
 
-export async function runMockExternalEval(
+async function runControlledExternalEval(
   request: ExternalEvalPlanRequest,
-  options: RunMockExternalEvalOptions,
+  options: RunControlledExternalEvalOptions,
 ): Promise<ExternalEvalReport> {
   const planned = await planExternalEval(request)
   const { plan, loaded } = planned
@@ -140,6 +192,7 @@ export async function runMockExternalEval(
     plan.pricing === undefined ||
     plan.maxBudgetUsd === undefined ||
     plan.unreportedUsageMultiplier === undefined
+    || (options.requireRouting === true && plan.routing === undefined)
   ) {
     throw new ExternalEvalExecutionError('PLAN_BLOCKED')
   }
@@ -169,17 +222,13 @@ export async function runMockExternalEval(
     ),
     maxOutputTokens: plan.limits.maxOutputTokensPerCall,
     createModel(trace, scenario) {
-      const raw = options.createModel({ scenario, trace })
-      if (
-        !registeredMockModels.has(raw) ||
-        isRegisteredExternalAgentModel(raw)
-      ) {
-        throw new ExternalEvalExecutionError(
-          isRegisteredExternalAgentModel(raw)
-            ? 'EXTERNAL_MODEL_FORBIDDEN'
-            : 'MOCK_MODEL_REQUIRED',
-        )
-      }
+      const raw = options.createModel({
+        scenario,
+        trace,
+        modelId: plan.modelId!,
+        routing: plan.routing,
+      })
+      options.validateModel?.(raw)
       return costs.wrap(tracedModel(raw, trace))
     },
   })
@@ -228,11 +277,42 @@ export async function runMockExternalEval(
       ),
     ),
   ]
+  const providerIds = [
+    ...new Set(
+      options.observations.flatMap((observation) =>
+        observation.providerId === undefined
+          ? []
+          : [observation.providerId],
+      ),
+    ),
+  ]
+  const returnedIds = [
+    ...new Set(
+      options.observations.length === 0
+        ? providerReportedIds
+        : options.observations.map(
+            (observation) => observation.returnedModelId,
+          ),
+    ),
+  ]
+  const executionId = `external-${createHash('sha256')
+    .update(JSON.stringify({
+      dataset: loaded.data.dataset,
+      scenarios: plan.selectedScenarioIds,
+      modelId: sanitizedRequestedModelId,
+      routing: plan.routing,
+      generations: options.observations.map(
+        (observation) => observation.generationId,
+      ),
+    }))
+    .digest('hex')
+    .slice(0, 20)}`
   return externalEvalReportSchema.parse({
     reportVersion: EXTERNAL_EVAL_REPORT_VERSION,
     modality: 'mock_external',
     provenance: 'simulated_external_transport',
     performanceEvidence: 'not_real_model_performance',
+    executionId,
     dataset: {
       id: loaded.data.dataset.id,
       version: loaded.data.dataset.version,
@@ -241,7 +321,11 @@ export async function runMockExternalEval(
     model: {
       requestedId: sanitizedRequestedModelId,
       providerReportedIds,
+      providerIds,
+      returnedIds,
+      observations: options.observations,
     },
+    ...(plan.routing === undefined ? {} : { routing: plan.routing }),
     limits: plan.limits,
     execution: {
       technicalStatus: execution.technicalStatus,
@@ -283,6 +367,8 @@ export async function runMockExternalEval(
       chargedCostUsd: costSnapshot.chargedCostUsd,
       maxBudgetUsd: plan.maxBudgetUsd,
       costIsEstimate: true,
+      overReservedTokens: costSnapshot.overReservedTokens,
+      overReservedCostUsd: costSnapshot.overReservedCostUsd,
     },
     modelCalls: costSnapshot.calls,
     scenarios,
@@ -296,6 +382,124 @@ export async function runMockExternalEval(
       exportPrepared: false,
     },
     limitations: [...EXTERNAL_EVAL_LIMITATIONS],
+  })
+}
+
+export async function runMockExternalEval(
+  request: ExternalEvalPlanRequest,
+  options: RunMockExternalEvalOptions,
+) {
+  return runControlledExternalEval(request, {
+    observations: [],
+    ...(options.providerModelId === undefined
+      ? {}
+      : { providerModelId: options.providerModelId }),
+    createModel: ({ scenario, trace }) =>
+      options.createModel({ scenario, trace }),
+    validateModel(raw) {
+      if (
+        !registeredMockModels.has(raw) ||
+        isRegisteredExternalAgentModel(raw)
+      ) {
+        throw new ExternalEvalExecutionError(
+          isRegisteredExternalAgentModel(raw)
+            ? 'EXTERNAL_MODEL_FORBIDDEN'
+            : 'MOCK_MODEL_REQUIRED',
+        )
+      }
+    },
+  })
+}
+
+function reportObservation(
+  observation: OpenRouterAgentModelObservation,
+  ordinal: number,
+): ExternalEvalReport['model']['observations'][number] {
+  return {
+    ordinal,
+    generationId: sanitizeEvalReportText(observation.generationId),
+    returnedModelId: sanitizeEvalReportText(
+      observation.returnedModelId,
+    ),
+    ...(observation.providerId === undefined
+      ? {}
+      : {
+          providerId: sanitizeEvalReportText(observation.providerId),
+        }),
+    finishReason:
+      observation.finishReason === null ||
+      observation.finishReason.trim().length === 0
+        ? null
+        : sanitizeEvalReportText(observation.finishReason),
+    usageStatus: observation.usageStatus,
+    ...(observation.reportedUsage === undefined
+      ? {}
+      : {
+          reportedInputTokens: observation.reportedUsage.inputTokens,
+          reportedOutputTokens: observation.reportedUsage.outputTokens,
+          reportedTotalTokens: observation.reportedUsage.totalTokens,
+        }),
+    modelIdentityMatches: observation.modelIdentityMatches === true,
+    ...(observation.providerIdentityMatches === undefined
+      ? {}
+      : {
+          providerIdentityMatches:
+            observation.providerIdentityMatches,
+        }),
+  }
+}
+
+export async function runSimulatedOpenRouterExternalEval(
+  request: ExternalEvalPlanRequest,
+  options: RunSimulatedOpenRouterExternalEvalOptions,
+) {
+  if (
+    !registeredInMemoryTransports.has(options.transport) ||
+    options.transport === globalThis.fetch
+  ) {
+    throw new ExternalEvalExecutionError('LIVE_EXTERNAL_DISABLED')
+  }
+  const observations: ExternalEvalReport['model']['observations'] = []
+  let identityDiverged = false
+  return runControlledExternalEval(request, {
+    requireRouting: true,
+    observations,
+    createModel({ modelId, routing }) {
+      if (routing === undefined) {
+        throw new ExternalEvalExecutionError('PLAN_BLOCKED')
+      }
+      const client = createOpenRouterClient({
+        apiKey: 'EVAL_07B_SIMULATED_KEY',
+        model: modelId,
+        transport: options.transport,
+        timeoutMs: request.limits?.timeoutMs,
+        maxOutputTokens: request.limits?.maxOutputTokensPerCall,
+        evaluationRouting: routing,
+      })
+      const externalModel = createOpenRouterAgentModel(client, {
+        expectedModelId: modelId,
+        expectedProviderId: routing.providerId,
+        onObservation(observation) {
+          observations.push(
+            reportObservation(observation, observations.length + 1),
+          )
+          if (
+            observation.modelIdentityMatches === false ||
+            observation.providerIdentityMatches === false
+          ) {
+            identityDiverged = true
+          }
+        },
+      })
+      return {
+        complete(input) {
+          if (identityDiverged) {
+            throw new AgentModelError('INVALID_MODEL_RESPONSE', false)
+          }
+          return externalModel.complete(input)
+        },
+      }
+    },
   })
 }
 

@@ -1,9 +1,10 @@
 import { z } from 'zod'
 
+import { openRouterEvaluationRoutingSchema } from '../agent/openrouter/openrouter-client.js'
 import { evalReportSchema } from './eval-report-schema.js'
 
-export const EXTERNAL_EVAL_PLAN_VERSION = 1 as const
-export const EXTERNAL_EVAL_REPORT_VERSION = 1 as const
+export const EXTERNAL_EVAL_PLAN_VERSION = 2 as const
+export const EXTERNAL_EVAL_REPORT_VERSION = 2 as const
 
 const identifierSchema = z.string().trim().min(1).max(200)
 const positiveIntegerSchema = z.number().int().positive().max(10_000_000)
@@ -22,6 +23,7 @@ export const externalEvalPlanRequestSchema = z
     datasetId: identifierSchema,
     scenarioIds: z.array(identifierSchema).min(1).max(100).optional(),
     modelId: identifierSchema.optional(),
+    routing: openRouterEvaluationRoutingSchema.optional(),
     outputDirectory: z.string().trim().min(1).max(1_000).optional(),
     limits: z
       .object({
@@ -40,6 +42,8 @@ export const externalEvalPlanRequestSchema = z
         inputUsdPerMillionTokens: moneySchema,
         outputUsdPerMillionTokens: moneySchema,
         confirmedAt: z.string().datetime({ offset: true }),
+        providerId: identifierSchema.optional(),
+        source: z.string().trim().min(1).max(500).optional(),
       })
       .strict()
       .optional(),
@@ -69,6 +73,9 @@ export const externalEvalBlockerCodeSchema = z.enum([
   'TOKEN_LIMIT_INCONSISTENT',
   'PRICING_REQUIRED',
   'PRICING_MODEL_MISMATCH',
+  'ROUTING_REQUIRED',
+  'PRICING_PROVIDER_REQUIRED',
+  'PRICING_PROVIDER_MISMATCH',
   'BUDGET_REQUIRED',
   'USAGE_MARGIN_REQUIRED',
   'OUTPUT_DIRECTORY_REQUIRED',
@@ -101,6 +108,7 @@ export const externalEvalPlanSchema = z
     scenarioCount: z.number().int().nonnegative(),
     turnCount: z.number().int().nonnegative(),
     modelId: identifierSchema.optional(),
+    routing: openRouterEvaluationRoutingSchema.optional(),
     outputDirectory: z.string().trim().min(1).max(1_000).optional(),
     limits: externalEvalPlanRequestSchema.shape.limits.optional(),
     pricing: externalEvalPlanRequestSchema.shape.pricing.optional(),
@@ -132,6 +140,24 @@ const modelCallSchema = z
     usageComplete: z.boolean(),
     estimatedCostUsd: nonnegativeMoneySchema,
     chargedCostUsd: nonnegativeMoneySchema,
+    overReservedTokens: z.number().int().nonnegative(),
+    overReservedCostUsd: nonnegativeMoneySchema,
+  })
+  .strict()
+
+const modelObservationSchema = z
+  .object({
+    ordinal: z.number().int().positive(),
+    generationId: identifierSchema,
+    returnedModelId: identifierSchema,
+    providerId: identifierSchema.optional(),
+    finishReason: z.string().trim().min(1).max(100).nullable(),
+    usageStatus: z.enum(['complete', 'missing', 'inconsistent']),
+    reportedInputTokens: z.number().int().nonnegative().optional(),
+    reportedOutputTokens: z.number().int().nonnegative().optional(),
+    reportedTotalTokens: z.number().int().nonnegative().optional(),
+    modelIdentityMatches: z.boolean(),
+    providerIdentityMatches: z.boolean().optional(),
   })
   .strict()
 
@@ -185,6 +211,7 @@ export const externalEvalReportSchema = z
       'not_real_model_performance',
       'declared_external_execution',
     ]),
+    executionId: identifierSchema,
     dataset: z
       .object({
         id: identifierSchema,
@@ -196,8 +223,12 @@ export const externalEvalReportSchema = z
       .object({
         requestedId: identifierSchema,
         providerReportedIds: z.array(identifierSchema).max(20),
+        providerIds: z.array(identifierSchema).max(20),
+        returnedIds: z.array(identifierSchema).max(20),
+        observations: z.array(modelObservationSchema).max(1_000),
       })
       .strict(),
+    routing: openRouterEvaluationRoutingSchema.optional(),
     limits: externalEvalPlanRequestSchema.shape.limits.unwrap(),
     execution: z
       .object({
@@ -226,6 +257,8 @@ export const externalEvalReportSchema = z
         chargedCostUsd: nonnegativeMoneySchema,
         maxBudgetUsd: moneySchema,
         costIsEstimate: z.literal(true),
+        overReservedTokens: z.number().int().nonnegative(),
+        overReservedCostUsd: nonnegativeMoneySchema,
       })
       .strict(),
     modelCalls: z.array(modelCallSchema).max(1_000),

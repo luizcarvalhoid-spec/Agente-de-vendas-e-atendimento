@@ -40,8 +40,20 @@ export function renderExternalEvalReportMarkdown(
     `- Modalidade: ${escapeMarkdown(report.modality)}`,
     `- Proveniência: ${escapeMarkdown(report.provenance)}`,
     `- Evidência de desempenho: ${escapeMarkdown(report.performanceEvidence)}`,
+    `- Execução técnica: ${escapeMarkdown(report.executionId)}`,
     `- Modelo solicitado: ${escapeMarkdown(report.model.requestedId)}`,
     `- Modelos informados pelo transporte: ${report.model.providerReportedIds.length === 0 ? 'não informado' : report.model.providerReportedIds.map(escapeMarkdown).join(', ')}`,
+    `- Modelos retornados: ${report.model.returnedIds.length === 0 ? 'não informado' : report.model.returnedIds.map(escapeMarkdown).join(', ')}`,
+    `- Provedores identificados: ${report.model.providerIds.length === 0 ? 'não informado' : report.model.providerIds.map(escapeMarkdown).join(', ')}`,
+    ...(report.routing === undefined
+      ? []
+      : [
+          `- Provedor selecionado: ${escapeMarkdown(report.routing.providerId)}`,
+          `- Fallback entre provedores: ${report.routing.allowFallbacks ? 'habilitado' : 'desabilitado'}`,
+          `- Parâmetros obrigatórios: ${report.routing.requireParameters ? 'sim' : 'não'}`,
+          `- Coleta de dados: ${escapeMarkdown(report.routing.dataCollection)}`,
+          `- ZDR: ${report.routing.zeroDataRetention === undefined ? 'não informado' : report.routing.zeroDataRetention ? 'exigido' : 'não exigido'}`,
+        ]),
     '',
     '## Execução',
     '',
@@ -52,6 +64,8 @@ export function renderExternalEvalReportMarkdown(
     `| Falhas técnicas | ${report.execution.technicalFailures} |`,
     `| Turnos concluídos | ${report.execution.completedTurns} |`,
     `| Chamadas ao modelo | ${report.execution.modelCalls} |`,
+    `| Chamadas concluídas | ${report.modelCalls.filter((call) => call.status === 'completed').length} |`,
+    `| Chamadas recusadas | ${report.modelCalls.filter((call) => call.status === 'rejected').length} |`,
     `| Ferramentas solicitadas | ${report.execution.toolCallsRequested} |`,
     `| Ferramentas executadas | ${report.execution.toolsExecuted} |`,
     `| Solicitações rejeitadas | ${report.execution.toolRejections} |`,
@@ -66,7 +80,18 @@ export function renderExternalEvalReportMarkdown(
     `- Custo estimado: USD ${report.consumption.estimatedCostUsd}`,
     `- Custo preventivamente contabilizado: USD ${report.consumption.chargedCostUsd}`,
     `- Orçamento: USD ${report.consumption.maxBudgetUsd}`,
+    `- Tokens reportados acima da reserva: ${report.consumption.overReservedTokens}`,
+    `- Custo reportado acima da reserva: USD ${report.consumption.overReservedCostUsd}`,
     '- O custo é estimado e poderá diferir da cobrança futura do provedor.',
+    '',
+    '## Metadados observados',
+    '',
+    ...(report.model.observations.length === 0
+      ? ['- Nenhuma resposta de transporte observada.']
+      : report.model.observations.map(
+          (observation) =>
+            `- Chamada ${observation.ordinal}: geração ${escapeMarkdown(observation.generationId)}, modelo ${escapeMarkdown(observation.returnedModelId)}, provedor ${observation.providerId === undefined ? 'não informado' : escapeMarkdown(observation.providerId)}, término ${observation.finishReason === null ? 'não informado' : escapeMarkdown(observation.finishReason)}, usage ${escapeMarkdown(observation.usageStatus)}, identidade ${observation.modelIdentityMatches ? 'compatível' : 'divergente'}.`,
+        )),
     '',
     '## Avaliação objetiva',
     '',

@@ -268,6 +268,69 @@ test('model and output limit are configurable without a hardcoded model', async 
   assert.equal(body.max_completion_tokens, 64)
 })
 
+test('evaluation routing fixes one provider without fallbacks or alternative models', async () => {
+  const payload = {
+    ...createProviderPayload(),
+    provider: 'mock-provider',
+  }
+  const { calls, transport } = createRecordingTransport(
+    jsonResponse(payload),
+  )
+  const client = createOpenRouterClient({
+    apiKey: testApiKey,
+    model: testModel,
+    transport,
+    evaluationRouting: {
+      providerId: 'mock-provider',
+      allowFallbacks: false,
+      requireParameters: true,
+      dataCollection: 'deny',
+      zeroDataRetention: true,
+    },
+  })
+
+  const response = await client.createChatCompletion(validInput)
+  const body = JSON.parse(String(calls[0]?.init?.body))
+  assert.equal(body.model, testModel)
+  assert.equal('models' in body, false)
+  assert.deepEqual(body.provider, {
+    order: ['mock-provider'],
+    only: ['mock-provider'],
+    allow_fallbacks: false,
+    require_parameters: true,
+    data_collection: 'deny',
+    zdr: true,
+  })
+  assert.equal(
+    new Headers(calls[0]?.init?.headers).get('X-OpenRouter-Metadata'),
+    'enabled',
+  )
+  assert.equal(response.providerId, 'mock-provider')
+})
+
+test('provider remains absent unless the response or selected metadata identifies it', async () => {
+  const direct = await createClient(
+    createRecordingTransport(jsonResponse(createProviderPayload())).transport,
+  ).createChatCompletion(validInput)
+  assert.equal(direct.providerId, undefined)
+
+  const metadataPayload = {
+    ...createProviderPayload(),
+    openrouter_metadata: {
+      endpoints: {
+        available: [
+          { provider: 'other-provider', selected: false },
+          { provider: 'selected-provider', selected: true },
+        ],
+      },
+    },
+  }
+  const selected = await createClient(
+    createRecordingTransport(jsonResponse(metadataPayload)).transport,
+  ).createChatCompletion(validInput)
+  assert.equal(selected.providerId, 'selected-provider')
+})
+
 test('preserves multiple untrusted tool calls without parsing arguments', async () => {
   const toolCalls = [
     {
@@ -445,6 +508,87 @@ test('provider adapter validates definitions and preserves tool messages', async
   assert.equal(recorded?.signal, signal)
   assert.equal(recorded?.maxOutputTokens, 128)
   assert.equal(result.message.content, 'Final.')
+})
+
+test('adapter observes identity and omits inconsistent usage', async () => {
+  const observations: Array<{
+    usageStatus: string
+    modelIdentityMatches?: boolean
+    providerIdentityMatches?: boolean
+  }> = []
+  const model = createOpenRouterAgentModel(
+    {
+      async createChatCompletion() {
+        return {
+          id: 'generation-observed',
+          model: testModel,
+          providerId: 'mock-provider',
+          created: 1,
+          message: { role: 'assistant', content: 'Final.' },
+          finishReason: 'stop',
+          usage: { inputTokens: 10, outputTokens: 2, totalTokens: 99 },
+        }
+      },
+    },
+    {
+      expectedModelId: testModel,
+      expectedProviderId: 'mock-provider',
+      onObservation: (observation) => observations.push(observation),
+    },
+  )
+  const completed = await model.complete({
+    messages: [{ role: 'user', content: 'Teste.' }],
+    tools: [],
+    signal: new AbortController().signal,
+  })
+  assert.equal(completed.usage, undefined)
+  assert.deepEqual(observations, [
+    {
+      requestedModelId: testModel,
+      returnedModelId: testModel,
+      generationId: 'generation-observed',
+      providerId: 'mock-provider',
+      finishReason: 'stop',
+      usageStatus: 'inconsistent',
+      modelIdentityMatches: true,
+      providerIdentityMatches: true,
+    },
+  ])
+})
+
+test('adapter blocks subsequent calls after returned model divergence', async () => {
+  let calls = 0
+  const model = createOpenRouterAgentModel(
+    {
+      async createChatCompletion() {
+        calls += 1
+        return {
+          id: 'generation-mismatch',
+          model: 'other/model',
+          created: 1,
+          message: { role: 'assistant', content: 'Resposta divergente.' },
+          finishReason: 'stop',
+        }
+      },
+    },
+    { expectedModelId: testModel },
+  )
+  const modelInput = {
+    messages: [{ role: 'user' as const, content: 'Teste.' }],
+    tools: [],
+    signal: new AbortController().signal,
+  }
+  await assert.rejects(
+    model.complete(modelInput),
+    (error: unknown) =>
+      error instanceof AgentModelError && error.transportStarted,
+  )
+  await assert.rejects(
+    model.complete(modelInput),
+    (error: unknown) =>
+      error instanceof AgentModelError && !error.transportStarted,
+  )
+  assert.equal(calls, 1)
 })
 
 test('accepts ordinary text when tool choice is automatic', async () => {

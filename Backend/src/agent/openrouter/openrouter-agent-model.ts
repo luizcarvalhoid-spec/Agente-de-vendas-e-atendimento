@@ -4,6 +4,7 @@ import {
   type AgentModelErrorCode,
   type AgentModelPort,
 } from '../agent-model-port.js'
+import { registerExternalAgentModel } from '../agent-model-origin.js'
 import {
   OpenRouterClientError,
   openRouterFunctionToolSchema,
@@ -45,7 +46,7 @@ function mapErrorCode(error: OpenRouterClientError): AgentModelErrorCode {
 export function createOpenRouterAgentModel(
   client: Pick<OpenRouterClient, 'createChatCompletion'>,
 ): AgentModelPort {
-  return {
+  return registerExternalAgentModel({
     async complete(input) {
       let tools
       try {
@@ -80,5 +81,5 @@ export function createOpenRouterAgentModel(
         ...(result.usage ? { usage: result.usage } : {}),
       }
     },
-  }
+  })
 }

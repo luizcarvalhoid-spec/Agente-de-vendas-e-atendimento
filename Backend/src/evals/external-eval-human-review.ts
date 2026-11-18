@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import type { LoadedEvalDataset } from './eval-loader.js'
 import type { HumanEvalRubric } from './human-eval-rubric-schema.js'
 import { buildHumanReviewPackage } from './human-review-package.js'
+import { sanitizeEvalReportText } from './eval-report-builder.js'
 import {
   HUMAN_CONVERSATION_SAMPLE_VERSION,
   humanConversationSampleSchema,
@@ -31,9 +32,23 @@ export function prepareExternalEvalHumanReview(input: {
   const scenario = input.loaded.data.cases.find(
     (candidate) => candidate.id === input.scenarioId,
   )
+  const reportScenarios = report.scenarios.filter(
+    (candidate) => candidate.id === input.scenarioId,
+  )
+  const objectiveScenarios = report.objectiveEvaluation.scenarios.filter(
+    (candidate) => candidate.id === input.scenarioId,
+  )
   if (
     scenario === undefined ||
-    !report.selectedScenarioIds.includes(input.scenarioId) ||
+    report.dataset.id !== input.loaded.data.dataset.id ||
+    report.dataset.version !== input.loaded.data.dataset.version ||
+    report.selectedScenarioIds.filter(
+      (candidate) => candidate === input.scenarioId,
+    ).length !== 1 ||
+    reportScenarios.length !== 1 ||
+    reportScenarios[0]?.turns.length !== scenario.input.turns.length ||
+    objectiveScenarios.length !== 1 ||
+    objectiveScenarios[0]?.turns.length !== scenario.input.turns.length ||
     input.assistantTurns.length !== scenario.input.turns.length ||
     report.modality === 'dry_run'
   ) {
@@ -57,10 +72,27 @@ export function prepareExternalEvalHumanReview(input: {
           attestation: 'origin_not_proven' as const,
           performanceEvidence: 'not_real_performance' as const,
         }
+  const sanitizedAssistantTurns = input.assistantTurns.map(
+    sanitizeEvalReportText,
+  )
+  const transcriptFingerprint = scenario.input.turns.map((turn, index) => ({
+    index,
+    user: sanitizeEvalReportText(turn.message),
+    assistant: sanitizedAssistantTurns[index] ?? '',
+  }))
   const sampleId = `external-${createHash('sha256')
-    .update(
-      `${report.dataset.id}:${input.scenarioId}:${report.modality}:${report.model.requestedId}`,
-    )
+    .update(JSON.stringify({
+      sampleVersion: HUMAN_CONVERSATION_SAMPLE_VERSION,
+      reportVersion: report.reportVersion,
+      datasetId: report.dataset.id,
+      datasetVersion: report.dataset.version,
+      scenarioId: input.scenarioId,
+      modality: report.modality,
+      modelId: sanitizeEvalReportText(report.model.requestedId),
+      rubricId: input.rubric.rubric.id,
+      rubricVersion: input.rubric.rubric.version,
+      turns: transcriptFingerprint,
+    }))
     .digest('hex')
     .slice(0, 20)}`
   const sample = humanConversationSampleSchema.parse({
@@ -77,7 +109,7 @@ export function prepareExternalEvalHumanReview(input: {
     turns: scenario.input.turns.map((turn, index) => ({
       index,
       user: turn.message,
-      assistant: input.assistantTurns[index],
+      assistant: sanitizedAssistantTurns[index],
     })),
   })
   return buildHumanReviewPackage(input.loaded, input.rubric, sample)

@@ -66,9 +66,60 @@ function errorCode(error: unknown) {
     : 'UNEXPECTED_MODEL_FAILURE'
 }
 
-function abortedError(signal: AbortSignal) {
-  if (signal.reason instanceof AgentModelError) return signal.reason
-  return new AgentModelError('MODEL_CANCELLED', false)
+function abortedError(signal: AbortSignal, transportStarted: boolean) {
+  if (signal.reason instanceof AgentModelError) {
+    if (!transportStarted || signal.reason.transportStarted) {
+      return signal.reason
+    }
+    return new AgentModelError(signal.reason.code, true)
+  }
+  return new AgentModelError('MODEL_CANCELLED', transportStarted)
+}
+
+function raceModelWithAbort(
+  promise: Promise<AgentModelResult>,
+  signal: AbortSignal,
+) {
+  if (signal.aborted) return Promise.reject(abortedError(signal, true))
+  return new Promise<AgentModelResult>((resolve, reject) => {
+    const abort = () => {
+      signal.removeEventListener('abort', abort)
+      reject(abortedError(signal, true))
+    }
+    signal.addEventListener('abort', abort, { once: true })
+    promise.then(
+      (result) => {
+        signal.removeEventListener('abort', abort)
+        resolve(result)
+      },
+      (error: unknown) => {
+        signal.removeEventListener('abort', abort)
+        reject(error)
+      },
+    )
+  })
+}
+
+function completeUsage(
+  usage: AgentModelResult['usage'],
+): NonNullable<AgentModelResult['usage']> | undefined {
+  if (
+    usage === undefined ||
+    !Number.isSafeInteger(usage.inputTokens) ||
+    !Number.isSafeInteger(usage.outputTokens) ||
+    !Number.isSafeInteger(usage.totalTokens) ||
+    usage.inputTokens < 0 ||
+    usage.outputTokens < 0 ||
+    usage.totalTokens !== usage.inputTokens + usage.outputTokens
+  ) {
+    return undefined
+  }
+  return usage
+}
+
+interface ActiveReservation {
+  readonly tokens: number
+  readonly costUsd: number
 }
 
 export interface ExternalEvalCostControllerOptions {
@@ -83,12 +134,29 @@ export interface ExternalEvalCostControllerOptions {
 export class ExternalEvalCostController {
   private readonly events: ExternalEvalModelCall[] = []
   private readonly reached = new Set<string>()
+  private readonly activeReservations = new Map<number, ActiveReservation>()
   private chargedTokens = 0
   private chargedCostUsd = 0
   private transportedCalls = 0
   private ordinal = 0
 
   constructor(private readonly options: ExternalEvalCostControllerOptions) {}
+
+  private activeReservedTokens() {
+    return [...this.activeReservations.values()].reduce(
+      (total, reservation) => total + reservation.tokens,
+      0,
+    )
+  }
+
+  private activeReservedCostUsd() {
+    return roundMoney(
+      [...this.activeReservations.values()].reduce(
+        (total, reservation) => total + reservation.costUsd,
+        0,
+      ),
+    )
+  }
 
   private markReachedLimits() {
     if (this.transportedCalls >= this.options.limits.maxModelCalls) {
@@ -112,6 +180,27 @@ export class ExternalEvalCostController {
         this.options.pricing.outputUsdPerMillionTokens,
       multiplier: this.options.unreportedUsageMultiplier,
     })
+  }
+
+  private reconcile(
+    ordinal: number,
+    input: {
+      readonly transportStarted: boolean
+      readonly chargedTokens: number
+      readonly chargedCostUsd: number
+    },
+  ) {
+    if (!this.activeReservations.delete(ordinal)) {
+      throw new TypeError('A reserva da avaliação externa já foi reconciliada.')
+    }
+    if (input.transportStarted) {
+      this.transportedCalls += 1
+      this.chargedTokens += input.chargedTokens
+      this.chargedCostUsd = roundMoney(
+        this.chargedCostUsd + input.chargedCostUsd,
+      )
+    }
+    this.markReachedLimits()
   }
 
   private rejectedEvent(
@@ -146,12 +235,13 @@ export class ExternalEvalCostController {
           estimateModelInputTokens(input),
         )
         if (input.signal.aborted) {
+          const error = abortedError(input.signal, false)
           this.rejectedEvent(
-            'MODEL_CANCELLED',
+            error.code,
             estimatedInputTokens,
             requestedOutputTokens,
           )
-          throw abortedError(input.signal)
+          throw error
         }
         if (
           requestedOutputTokens >
@@ -165,7 +255,10 @@ export class ExternalEvalCostController {
           )
           throw new AgentModelError('LOCAL_BUDGET_EXHAUSTED', false)
         }
-        if (this.transportedCalls >= this.options.limits.maxModelCalls) {
+        if (
+          this.transportedCalls + this.activeReservations.size >=
+          this.options.limits.maxModelCalls
+        ) {
           this.reached.add('max_model_calls')
           this.rejectedEvent(
             'LOCAL_BUDGET_EXHAUSTED',
@@ -178,7 +271,9 @@ export class ExternalEvalCostController {
         const reservedTokens =
           estimatedInputTokens + requestedOutputTokens
         if (
-          this.chargedTokens + reservedTokens >
+          this.chargedTokens +
+            this.activeReservedTokens() +
+            reservedTokens >
           this.options.limits.maxExecutionTokens
         ) {
           this.reached.add('max_execution_tokens')
@@ -194,7 +289,11 @@ export class ExternalEvalCostController {
           requestedOutputTokens,
         )
         if (
-          roundMoney(this.chargedCostUsd + reservedCost) >
+          roundMoney(
+            this.chargedCostUsd +
+              this.activeReservedCostUsd() +
+              reservedCost,
+          ) >
           this.options.maxBudgetUsd
         ) {
           this.reached.add('max_budget_usd')
@@ -206,63 +305,32 @@ export class ExternalEvalCostController {
           throw new AgentModelError('LOCAL_BUDGET_EXHAUSTED', false)
         }
 
-        this.transportedCalls += 1
         this.ordinal += 1
         const ordinal = this.ordinal
+        this.activeReservations.set(ordinal, {
+          tokens: reservedTokens,
+          costUsd: reservedCost,
+        })
+        let result: AgentModelResult
         try {
-          const result = await model.complete({
-            ...input,
-            maxOutputTokens: requestedOutputTokens,
-          })
-          const reported = result.usage
-          const chargedTokens = reported?.totalTokens ?? reservedTokens
-          const chargedCost = reported
-            ? estimateExternalEvalCost({
-                inputTokens: reported.inputTokens,
-                outputTokens: reported.outputTokens,
-                inputUsdPerMillionTokens:
-                  this.options.pricing.inputUsdPerMillionTokens,
-                outputUsdPerMillionTokens:
-                  this.options.pricing.outputUsdPerMillionTokens,
-              })
-            : reservedCost
-          this.chargedTokens += chargedTokens
-          this.chargedCostUsd = roundMoney(
-            this.chargedCostUsd + chargedCost,
+          result = await raceModelWithAbort(
+            model.complete({
+              ...input,
+              maxOutputTokens: requestedOutputTokens,
+            }),
+            input.signal,
           )
-          this.markReachedLimits()
-          this.events.push({
-            ordinal,
-            requestedModelId: this.options.requestedModelId,
-            ...(this.options.providerModelId === undefined
-              ? {}
-              : { providerModelId: this.options.providerModelId }),
-            status: 'completed',
-            estimatedInputTokens,
-            requestedOutputTokens,
-            ...(reported === undefined
-              ? {}
-              : {
-                  reportedInputTokens: reported.inputTokens,
-                  reportedOutputTokens: reported.outputTokens,
-                  reportedTotalTokens: reported.totalTokens,
-                }),
-            usageComplete: reported !== undefined,
-            estimatedCostUsd: reservedCost,
-            chargedCostUsd: chargedCost,
-          })
-          return result
         } catch (error) {
           const status = errorStatus(error)
           const transportStarted =
             !(error instanceof AgentModelError) || error.transportStarted
           const chargedCost = transportStarted ? reservedCost : 0
           const chargedTokens = transportStarted ? reservedTokens : 0
-          this.chargedCostUsd = roundMoney(
-            this.chargedCostUsd + chargedCost,
-          )
-          this.chargedTokens += chargedTokens
-          this.markReachedLimits()
+          this.reconcile(ordinal, {
+            transportStarted,
+            chargedTokens,
+            chargedCostUsd: chargedCost,
+          })
           this.events.push({
             ordinal,
             requestedModelId: this.options.requestedModelId,
@@ -279,17 +347,82 @@ export class ExternalEvalCostController {
           })
           throw error
         }
+        const reported = completeUsage(result.usage)
+        const chargedTokens = reported?.totalTokens ?? reservedTokens
+        const chargedCost = reported
+          ? estimateExternalEvalCost({
+              inputTokens: reported.inputTokens,
+              outputTokens: reported.outputTokens,
+              inputUsdPerMillionTokens:
+                this.options.pricing.inputUsdPerMillionTokens,
+              outputUsdPerMillionTokens:
+                this.options.pricing.outputUsdPerMillionTokens,
+            })
+          : reservedCost
+        this.reconcile(ordinal, {
+          transportStarted: true,
+          chargedTokens,
+          chargedCostUsd: chargedCost,
+        })
+        this.events.push({
+          ordinal,
+          requestedModelId: this.options.requestedModelId,
+          ...(this.options.providerModelId === undefined
+            ? {}
+            : { providerModelId: this.options.providerModelId }),
+          status: 'completed',
+          estimatedInputTokens,
+          requestedOutputTokens,
+          ...(reported === undefined
+            ? {}
+            : {
+                reportedInputTokens: reported.inputTokens,
+                reportedOutputTokens: reported.outputTokens,
+                reportedTotalTokens: reported.totalTokens,
+              }),
+          usageComplete: reported !== undefined,
+          estimatedCostUsd: reservedCost,
+          chargedCostUsd: chargedCost,
+        })
+        return result
       },
     }
   }
 
   snapshot() {
+    const activeReservedTokens = this.activeReservedTokens()
+    const activeReservedCostUsd = this.activeReservedCostUsd()
     return {
-      calls: this.events.map((event) => ({ ...event })),
+      calls: this.events
+        .map((event) => ({ ...event }))
+        .sort((left, right) => left.ordinal - right.ordinal),
       limitsReached: [...this.reached].sort(),
       chargedCostUsd: this.chargedCostUsd,
       chargedTokens: this.chargedTokens,
       transportedCalls: this.transportedCalls,
+      activeReservations: this.activeReservations.size,
+      activeReservedTokens,
+      activeReservedCostUsd,
+      preventiveAvailableCalls: Math.max(
+        0,
+        this.options.limits.maxModelCalls -
+          this.transportedCalls -
+          this.activeReservations.size,
+      ),
+      preventiveAvailableTokens: Math.max(
+        0,
+        this.options.limits.maxExecutionTokens -
+          this.chargedTokens -
+          activeReservedTokens,
+      ),
+      preventiveAvailableCostUsd: Math.max(
+        0,
+        roundMoney(
+          this.options.maxBudgetUsd -
+            this.chargedCostUsd -
+            activeReservedCostUsd,
+        ),
+      ),
     }
   }
 }

@@ -10,7 +10,7 @@ e na CLI.
 - `dry_run`: valida dataset, cenários, modelo, limites, preços, orçamento e
   destino sem executar o agente;
 - `mock_external`: executa o `ChatService`, ferramentas, assertions e relatórios
-  com um `AgentModelPort` injetado e simulado;
+  com um modelo registrado explicitamente pela factory mock;
 - `live_external`: reservada para a EVAL-07B e sempre bloqueada nesta etapa.
 
 Uma execução mock declara `simulated_external_transport` e
@@ -53,15 +53,34 @@ bloqueado antes da execução.
 ## Execução mock
 
 O runner reutiliza o mesmo `ChatService`, catálogo, FAQ, ferramentas, histórico,
-preferências, carrinho, contexto de recomendação, trace e motor de assertions. O
-modelo simulado é injetado por `AgentModelPort`; os testes nunca dependem de
-credenciais ou disponibilidade externa.
+preferências, carrinho, contexto de recomendação, trace e motor de assertions.
+Um modelo simulado deve passar por `createMockExternalEvalModel`: a factory cria
+uma instância registrada, e o runner recusa objetos não registrados. Adaptadores
+externos conhecidos, incluindo o adaptador OpenRouter, são marcados em sua
+criação e não podem ser registrados como mock. A existência de
+`OPENROUTER_API_KEY` não altera essa decisão.
 
-O controle financeiro reserva custo antes de cada chamada. Com `usage` completo,
-o consumo reportado é usado no diagnóstico. Sem `usage`, a reserva conservadora
-é mantida com o multiplicador configurado. Chamadas futuras são recusadas quando
-ultrapassariam chamadas, tokens ou orçamento. Esse controle é preventivo e não é
-garantia da cobrança final de um provedor.
+Essa fronteira evita a injeção acidental dos adaptadores externos conhecidos;
+ela não é uma sandbox para JavaScript arbitrário. Uma factory mock é código
+confiável do processo e não deve executar I/O por conta própria nem encapsular
+um transporte externo desconhecido. Metadados como `networkAllowed: false`
+descrevem a política e o fluxo implementado, mas isoladamente não conseguem
+impedir operações externas realizadas por código arbitrário injetado.
+
+O controle financeiro registra chamadas, tokens e custo reservado antes de
+invocar `model.complete()`. A admissão seguinte considera, em conjunto, consumo
+já contabilizado e todas as reservas ativas. Cada reserva é reconciliada uma
+única vez: com `usage` completo e válido, contabiliza-se o uso reportado e o
+excedente reservado volta a ficar disponível; sem `usage`, mantém-se a reserva
+conservadora com o multiplicador configurado. Falhas após início do transporte,
+timeouts e cancelamentos conservam a reserva; rejeições comprovadamente
+anteriores ao transporte a liberam sem cobrança estimada.
+
+O snapshot distingue consumo confirmado/contabilizado, reserva ativa e saldo
+preventivamente disponível. Chamadas futuras são recusadas quando a soma
+ultrapassaria chamadas, tokens ou orçamento, inclusive sob concorrência. Valores
+de `estimatedCostUsd` e `chargedCostUsd` continuam sendo estimativas de controle,
+não garantia da cobrança final de um provedor.
 
 ## Relatórios
 
@@ -80,7 +99,12 @@ modelos diferentes não são comparados automaticamente aos baselines EVAL-08.
 A integração com a EVAL-06 exige exportação explícita de uma transcrição já
 sanitizada. Amostras mock usam origem `unverified` e
 `not_real_performance`. Nenhuma nota humana é atribuída automaticamente e nenhuma
-transcrição é persistida por padrão.
+transcrição é persistida por padrão. A identidade da amostra inclui um
+fingerprint SHA-256 dos turnos sanitizados, além de dataset, cenário, modalidade,
+modelo e versões aplicáveis. Transcrições equivalentes geram o mesmo ID;
+respostas sanitizadas diferentes geram IDs distintos, sem incluir texto bruto no
+identificador. A preparação também rejeita divergências entre dataset, cenário,
+quantidade de turnos e o relatório informado.
 
 ## Condições futuras da EVAL-07B
 

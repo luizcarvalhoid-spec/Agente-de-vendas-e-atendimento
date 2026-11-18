@@ -1,4 +1,5 @@
 import type { AgentModelPort } from '../agent/agent-model-port.js'
+import { isRegisteredExternalAgentModel } from '../agent/agent-model-origin.js'
 import { TOOL_ORCHESTRATOR_MAX_MODEL_CALLS } from '../agent/tool-orchestrator.js'
 import { loadCatalogRepository } from '../catalog/catalog-repository.js'
 import { createEvalCanonicalData } from './eval-assertion-engine.js'
@@ -23,6 +24,7 @@ import {
 
 export const EXTERNAL_EVAL_LIMITATIONS = [
   'A modalidade mock_external usa transporte simulado e não mede desempenho real de um modelo externo.',
+  'O isolamento mock exige uma factory registrada e rejeita adaptadores externos conhecidos, mas não transforma código arbitrário injetado em uma sandbox de rede.',
   'A EVAL-07A bloqueia live_external e não autoriza chamadas de rede ou potencialmente pagas.',
   'O custo é uma estimativa preventiva; a cobrança final futura poderá diferir e deverá ter limites também na conta do provedor.',
   'Chamadas sem usage completo conservam a reserva com a margem configurada.',
@@ -33,6 +35,7 @@ export const EXTERNAL_EVAL_LIMITATIONS = [
 export type ExternalEvalExecutionErrorCode =
   | 'PLAN_BLOCKED'
   | 'MOCK_MODEL_REQUIRED'
+  | 'EXTERNAL_MODEL_FORBIDDEN'
   | 'LIVE_EXTERNAL_DISABLED'
 
 export class ExternalEvalExecutionError extends Error {
@@ -50,10 +53,31 @@ export interface MockExternalEvalModelContext {
   readonly trace: OfflineEvalTraceCollector
 }
 
+declare const mockExternalEvalModelBrand: unique symbol
+
+export interface MockExternalEvalModel extends AgentModelPort {
+  readonly [mockExternalEvalModelBrand]: true
+}
+
+const registeredMockModels = new WeakSet<AgentModelPort>()
+
+export function createMockExternalEvalModel(
+  model: AgentModelPort,
+): MockExternalEvalModel {
+  if (isRegisteredExternalAgentModel(model)) {
+    throw new ExternalEvalExecutionError('EXTERNAL_MODEL_FORBIDDEN')
+  }
+  const mock: AgentModelPort = {
+    complete: (input) => model.complete(input),
+  }
+  registeredMockModels.add(mock)
+  return mock as MockExternalEvalModel
+}
+
 export interface RunMockExternalEvalOptions {
   readonly createModel: (
     context: MockExternalEvalModelContext,
-  ) => AgentModelPort
+  ) => MockExternalEvalModel
   readonly providerModelId?: string
 }
 
@@ -146,6 +170,16 @@ export async function runMockExternalEval(
     maxOutputTokens: plan.limits.maxOutputTokensPerCall,
     createModel(trace, scenario) {
       const raw = options.createModel({ scenario, trace })
+      if (
+        !registeredMockModels.has(raw) ||
+        isRegisteredExternalAgentModel(raw)
+      ) {
+        throw new ExternalEvalExecutionError(
+          isRegisteredExternalAgentModel(raw)
+            ? 'EXTERNAL_MODEL_FORBIDDEN'
+            : 'MOCK_MODEL_REQUIRED',
+        )
+      }
       return costs.wrap(tracedModel(raw, trace))
     },
   })

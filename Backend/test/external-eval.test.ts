@@ -16,7 +16,10 @@ import {
 import { createOpenRouterAgentModel } from '../src/agent/openrouter/openrouter-agent-model.js'
 import { createOpenRouterClient } from '../src/agent/openrouter/openrouter-client.js'
 import { ExternalEvalCostController } from '../src/evals/external-eval-cost.js'
-import { prepareExternalEvalHumanReview } from '../src/evals/external-eval-human-review.js'
+import {
+  ExternalEvalHumanReviewError,
+  prepareExternalEvalHumanReview,
+} from '../src/evals/external-eval-human-review.js'
 import { loadHumanEvalRubric } from '../src/evals/human-eval-rubric.js'
 import { loadEvalDataset } from '../src/evals/eval-loader.js'
 import { planExternalEval } from '../src/evals/external-eval-plan.js'
@@ -27,6 +30,7 @@ import {
   writeExternalEvalReports,
 } from '../src/evals/external-eval-report.js'
 import {
+  createMockExternalEvalModel,
   ExternalEvalExecutionError,
   runLiveExternalEval,
   runMockExternalEval,
@@ -100,11 +104,14 @@ function result(
   }
 }
 
-function input(maxOutputTokens = 100): AgentModelInput {
+function input(
+  maxOutputTokens = 100,
+  signal = new AbortController().signal,
+): AgentModelInput {
   return {
     messages: [{ role: 'user', content: 'teste controlado' }],
     tools: [],
-    signal: new AbortController().signal,
+    signal,
     maxOutputTokens,
   }
 }
@@ -123,6 +130,20 @@ function faqNotFoundModel(): AgentModelPort {
       ])
     },
   }
+}
+
+function mockModel(model: AgentModelPort) {
+  return createMockExternalEvalModel(model)
+}
+
+function controlledPromise<T>() {
+  let resolvePromise!: (value: T | PromiseLike<T>) => void
+  let rejectPromise!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolve, reject) => {
+    resolvePromise = resolve
+    rejectPromise = reject
+  })
+  return { promise, resolve: resolvePromise, reject: rejectPromise }
 }
 
 test('preflight completo funciona sem rede, credencial ou execução', async () => {
@@ -182,6 +203,35 @@ test('live_external permanece bloqueado mesmo com chave e confirmação', async 
     if (originalKey === undefined) delete process.env.OPENROUTER_API_KEY
     else process.env.OPENROUTER_API_KEY = originalKey
   }
+})
+
+test('mock_external rejeita adaptador OpenRouter conhecido antes do transporte', async () => {
+  let transports = 0
+  const client = createOpenRouterClient({
+    apiKey: 'mock-key-that-must-not-be-used',
+    model: 'connected/provider-model',
+    transport: async () => {
+      transports += 1
+      throw new Error('transport must not start')
+    },
+  })
+  const connected = createOpenRouterAgentModel(client)
+  await assert.rejects(
+    runMockExternalEval(validRequest(), {
+      createModel: () =>
+        connected as ReturnType<typeof createMockExternalEvalModel>,
+    }),
+    (error: unknown) =>
+      error instanceof ExternalEvalExecutionError &&
+      error.code === 'EXTERNAL_MODEL_FORBIDDEN',
+  )
+  assert.equal(transports, 0)
+  assert.throws(
+    () => createMockExternalEvalModel(connected),
+    (error: unknown) =>
+      error instanceof ExternalEvalExecutionError &&
+      error.code === 'EXTERNAL_MODEL_FORBIDDEN',
+  )
 })
 
 test('preflight localiza dataset, cenários inválidos e duplicados', async () => {
@@ -272,7 +322,7 @@ test('execução mock multi-turno usa ChatService, ferramentas e assertions reai
       scenarioIds: ['hidrasplash.conversation.budget-change.001'],
     }),
     {
-      createModel: () => createMvpDeterministicModel(),
+      createModel: () => mockModel(createMvpDeterministicModel()),
       providerModelId: 'mock/provider-reported-v1',
     },
   )
@@ -303,7 +353,7 @@ test('cada cenário recebe instância isolada do modelo', async () => {
     {
       createModel: () => {
         factories += 1
-        return createMvpDeterministicModel()
+        return mockModel(createMvpDeterministicModel())
       },
     },
   )
@@ -320,12 +370,12 @@ test('uso ausente preserva medição incompleta e reserva conservadora', async (
     {
       createModel: () => {
         const delegate = createMvpDeterministicModel()
-        return {
+        return mockModel({
           async complete(modelInput) {
             const completed = await delegate.complete(modelInput)
             return { message: completed.message }
           },
-        }
+        })
       },
     },
   )
@@ -437,9 +487,146 @@ test('guard aplica tetos globais de chamadas e tokens', async () => {
   assert.equal(calls, 2)
 })
 
+test('reservas ativas impedem estouro concorrente e liberam excedente reportado', async () => {
+  const pending = controlledPromise<AgentModelResult>()
+  let transports = 0
+  const controller = new ExternalEvalCostController({
+    requestedModelId: 'mock/concurrent-model',
+    limits: {
+      maxModelCalls: 3,
+      maxOutputTokensPerCall: 100,
+      maxExecutionTokens: 10_000,
+      estimatedInputTokensPerCall: 1_000,
+      timeoutMs: 1_000,
+    },
+    pricing: {
+      modelId: 'mock/concurrent-model',
+      currency: 'USD',
+      inputUsdPerMillionTokens: 1,
+      outputUsdPerMillionTokens: 1,
+      confirmedAt,
+    },
+    maxBudgetUsd: 0.003,
+    unreportedUsageMultiplier: 1,
+  })
+  const wrapped = controller.wrap({
+    async complete() {
+      transports += 1
+      return pending.promise
+    },
+  })
+  const first = wrapped.complete(input(100))
+  assert.equal(controller.snapshot().activeReservations, 1)
+  assert(controller.snapshot().activeReservedCostUsd > 0.002)
+  assert(controller.snapshot().activeReservedCostUsd < 0.003)
+  await assert.rejects(
+    wrapped.complete(input(100)),
+    (error: unknown) =>
+      error instanceof AgentModelError &&
+      error.code === 'LOCAL_BUDGET_EXHAUSTED' &&
+      !error.transportStarted,
+  )
+  assert.equal(transports, 1)
+  pending.resolve(result('ok', undefined, {
+    inputTokens: 10,
+    outputTokens: 10,
+    totalTokens: 20,
+  }))
+  await first
+  const reconciled = controller.snapshot()
+  assert.equal(reconciled.activeReservations, 0)
+  assert.equal(reconciled.activeReservedCostUsd, 0)
+  assert.equal(reconciled.chargedCostUsd, 0.00002)
+  assert.equal(reconciled.preventiveAvailableCostUsd, 0.00298)
+  await wrapped.complete(input(100))
+  assert.equal(transports, 2)
+})
+
+test('usage ausente mantém reserva conservadora após reconciliação', async () => {
+  const controller = new ExternalEvalCostController({
+    requestedModelId: 'mock/unreported-model',
+    limits: {
+      maxModelCalls: 2,
+      maxOutputTokensPerCall: 100,
+      maxExecutionTokens: 10_000,
+      estimatedInputTokensPerCall: 1_000,
+      timeoutMs: 1_000,
+    },
+    pricing: {
+      modelId: 'mock/unreported-model',
+      currency: 'USD',
+      inputUsdPerMillionTokens: 1,
+      outputUsdPerMillionTokens: 1,
+      confirmedAt,
+    },
+    maxBudgetUsd: 0.003,
+    unreportedUsageMultiplier: 1,
+  })
+  const wrapped = controller.wrap({
+    async complete() {
+      return {
+        message: { role: 'assistant' as const, content: 'ok' },
+      }
+    },
+  })
+  await wrapped.complete(input(100))
+  const snapshot = controller.snapshot()
+  assert.equal(snapshot.activeReservations, 0)
+  assert(snapshot.chargedCostUsd > 0.002)
+  assert(snapshot.chargedCostUsd < 0.003)
+  assert.equal(snapshot.calls[0]?.usageComplete, false)
+  await assert.rejects(wrapped.complete(input(100)))
+})
+
+test('cancelamento e falha pré-transporte reconciliam a reserva uma única vez', async () => {
+  const controller = new ExternalEvalCostController({
+    requestedModelId: 'mock/reconciliation-model',
+    limits: {
+      ...validRequest().limits!,
+      maxModelCalls: 2,
+    },
+    pricing: validRequest().pricing!,
+    maxBudgetUsd: 1,
+    unreportedUsageMultiplier: 1,
+  })
+  const pending = controlledPromise<AgentModelResult>()
+  const cancellation = new AbortController()
+  const cancelled = controller.wrap({
+    async complete() {
+      return pending.promise
+    },
+  })
+  const cancelledCall = cancelled.complete(input(100, cancellation.signal))
+  cancellation.abort(new AgentModelError('MODEL_CANCELLED', true))
+  await assert.rejects(cancelledCall)
+  const afterCancellation = controller.snapshot()
+  assert.equal(afterCancellation.activeReservations, 0)
+  assert.equal(afterCancellation.transportedCalls, 1)
+  assert(afterCancellation.chargedCostUsd > 0)
+  pending.resolve(result('late result'))
+  await Promise.resolve()
+  assert.equal(controller.snapshot().calls.length, 1)
+  assert.equal(controller.snapshot().chargedCostUsd, afterCancellation.chargedCostUsd)
+
+  const rejected = controller.wrap({
+    async complete() {
+      throw new AgentModelError('TOOL_CALLING_INCOMPATIBLE', false)
+    },
+  })
+  await assert.rejects(rejected.complete(input()))
+  const afterRejection = controller.snapshot()
+  assert.equal(afterRejection.activeReservations, 0)
+  assert.equal(afterRejection.transportedCalls, 1)
+  assert.equal(
+    afterRejection.chargedCostUsd,
+    afterCancellation.chargedCostUsd,
+  )
+  assert.equal(afterRejection.calls[1]?.chargedCostUsd, 0)
+})
+
 test('timeout e cancelamento permanecem falhas técnicas, não comportamentais', async () => {
   const timeoutReport = await runMockExternalEval(validRequest(), {
-    createModel: () => ({
+    createModel: () => mockModel({
       async complete() {
         throw new AgentModelError('MODEL_TIMEOUT', true)
       },
@@ -467,7 +654,7 @@ test('timeout e cancelamento permanecem falhas técnicas, não comportamentais',
   assert.equal(controller.snapshot().calls[0]?.status, 'cancelled')
 
   const incompatible = await runMockExternalEval(validRequest(), {
-    createModel: () => ({
+    createModel: () => mockModel({
       async complete() {
         throw new AgentModelError('TOOL_CALLING_INCOMPATIBLE', false)
       },
@@ -525,7 +712,7 @@ test('ferramenta solicitada, executada, rejeitada e grounding não são confundi
       datasetId: 'hidrasplash-conversations',
       scenarioIds: ['hidrasplash.conversation.shipping-boundary.001'],
     }),
-    { createModel: () => createMvpDeterministicModel() },
+    { createModel: () => mockModel(createMvpDeterministicModel()) },
   )
   assert.equal(grounded.execution.toolCallsRequested, 1)
   assert.equal(grounded.execution.toolsExecuted, 1)
@@ -537,7 +724,7 @@ test('ferramenta solicitada, executada, rejeitada e grounding não são confundi
       scenarioIds: ['hidrasplash.conversation.shipping-boundary.001'],
     }),
     {
-      createModel: () => ({
+      createModel: () => mockModel({
         async complete() {
           return result(null, [
             toolCall('unknown-call', 'unknown_tool', {}),
@@ -561,7 +748,7 @@ test('falha crítica objetiva continua visível sem ajustar o scoring', async ()
       datasetId: 'hidrasplash-conversations',
       scenarioIds: ['hidrasplash.conversation.shipping-boundary.001'],
     }),
-    { createModel: () => faqNotFoundModel() },
+    { createModel: () => mockModel(faqNotFoundModel()) },
   )
   assert(report.objectiveEvaluation.summary.assertions.failed > 0)
   assert(report.objectiveEvaluation.summary.criticalFailures > 0)
@@ -581,7 +768,7 @@ test('JSON e Markdown são equivalentes, sanitizados e não sobrescrevem', async
       },
       outputDirectory: directory,
     }),
-    { createModel: () => createMvpDeterministicModel() },
+    { createModel: () => mockModel(createMvpDeterministicModel()) },
   )
   const json = serializeExternalEvalReport(report)
   const markdown = renderExternalEvalReportMarkdown(report)
@@ -607,7 +794,7 @@ test('amostra mock para EVAL-06 permanece não representativa de modelo real', a
     planExternalEval(request),
     loadHumanEvalRubric(),
     runMockExternalEval(request, {
-      createModel: () => createMvpDeterministicModel(),
+      createModel: () => mockModel(createMvpDeterministicModel()),
     }),
   ])
   assert(loaded)
@@ -629,6 +816,48 @@ test('amostra mock para EVAL-06 permanece não representativa de modelo real', a
       (item) => item.status === 'not_evaluated',
     ),
   )
+
+  const sameTranscript = prepareExternalEvalHumanReview({
+    report,
+    loaded,
+    rubric,
+    scenarioId: 'universal.core.incomplete-need.001',
+    assistantTurns: ['Qual necessidade você deseja priorizar?'],
+  })
+  const differentTranscript = prepareExternalEvalHumanReview({
+    report,
+    loaded,
+    rubric,
+    scenarioId: 'universal.core.incomplete-need.001',
+    assistantTurns: ['Qual resultado seria mais útil para você agora?'],
+  })
+  const sensitiveTranscript = prepareExternalEvalHumanReview({
+    report,
+    loaded,
+    rubric,
+    scenarioId: 'universal.core.incomplete-need.001',
+    assistantTurns: ['Token sk-or-example-sensitive-value'],
+  })
+  assert.equal(sameTranscript.sample.id, reviewPackage.sample.id)
+  assert.notEqual(differentTranscript.sample.id, reviewPackage.sample.id)
+  assert.doesNotMatch(sensitiveTranscript.sample.id, /sk-or|sensitive/i)
+  assert.doesNotMatch(
+    sensitiveTranscript.turns[0]?.assistant ?? '',
+    /sk-or-example-sensitive-value/,
+  )
+
+  const incompatibleReport = structuredClone(report)
+  incompatibleReport.dataset.version = '9.9.9'
+  assert.throws(
+    () => prepareExternalEvalHumanReview({
+      report: incompatibleReport,
+      loaded,
+      rubric,
+      scenarioId: 'universal.core.incomplete-need.001',
+      assistantTurns: ['Qual necessidade você deseja priorizar?'],
+    }),
+    ExternalEvalHumanReviewError,
+  )
 })
 
 test('contratos existentes permanecem utilizáveis e baselines não são tocados', async () => {
@@ -637,7 +866,7 @@ test('contratos existentes permanecem utilizáveis e baselines não são tocados
   )
   assert.equal(loaded.data.schemaVersion, 1)
   const report = await runMockExternalEval(validRequest(), {
-    createModel: () => createMvpDeterministicModel(),
+    createModel: () => mockModel(createMvpDeterministicModel()),
   })
   assert.equal(report.objectiveEvaluation.coverage.scope, 'selected_scenarios')
   assert.equal(report.humanReview.exportPrepared, false)
@@ -704,7 +933,7 @@ test('execução mock completa mantém zero chamadas reais à rede', async () =>
         datasetId: 'hidrasplash-conversations',
         scenarioIds: ['hidrasplash.conversation.budget-change.001'],
       }),
-      { createModel: () => createMvpDeterministicModel() },
+      { createModel: () => mockModel(createMvpDeterministicModel()) },
     )
     assert.equal(calls, 0)
   } finally {

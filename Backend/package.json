@@ -15,6 +15,7 @@
     "eval": "tsx src/scripts/run-eval.ts",
     "eval:regression": "tsx src/scripts/eval-regression.ts",
     "eval:human": "tsx src/scripts/human-eval.ts",
+    "eval:live": "tsx src/scripts/eval-live.ts",
     "test": "tsc -p tsconfig.json && tsx --test \"test/**/*.test.ts\"",
     "smoke:chat": "tsx src/scripts/smoke-chat.ts",
     "smoke:openrouter": "tsx src/scripts/smoke-openrouter.ts",

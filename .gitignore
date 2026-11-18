@@ -9,4 +9,5 @@ dist/
 Backend/content/catalog/editorial-review.local.md
 Backend/eval-reports/
 Backend/eval-regression-reports/
+Backend/external-eval-reports/
 Backend/human-eval-local/

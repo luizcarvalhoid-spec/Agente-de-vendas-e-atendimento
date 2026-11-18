@@ -7,6 +7,7 @@ import {
   type ChatService,
   ChatServiceError,
 } from '../agent/chat-service.js'
+import type { AgentModelPort } from '../agent/agent-model-port.js'
 import { createProductSearchIndex } from '../agent/tools/product-tools.js'
 import {
   loadCatalogRepository,
@@ -125,6 +126,7 @@ export type OfflineScenarioRuntimeFactory = (
 
 export interface RunOfflineEvalOptions {
   readonly scenarioId?: string
+  readonly scenarioIds?: readonly string[]
   readonly createScenarioRuntime?: OfflineScenarioRuntimeFactory
   readonly evaluateAssertions?: boolean
   readonly canonicalData?: EvalCanonicalData
@@ -274,15 +276,26 @@ function automaticContextFrom(
   return { productIds: [...response.productIds] }
 }
 
-async function createCanonicalRuntimeFactory(
-  providedCatalog?: CatalogRepository,
+export interface CreateEvalScenarioRuntimeFactoryOptions {
+  readonly catalog?: CatalogRepository
+  readonly timeoutMs?: number
+  readonly maxModelCalls?: number
+  readonly maxOutputTokens?: number
+  readonly createModel: (
+    trace: OfflineEvalTraceCollector,
+    scenario: EvalCase,
+  ) => AgentModelPort
+}
+
+export async function createEvalScenarioRuntimeFactory(
+  options: CreateEvalScenarioRuntimeFactoryOptions,
 ): Promise<OfflineScenarioRuntimeFactory> {
   const [catalog, faqDocuments] = await Promise.all([
-    providedCatalog ?? loadCatalogRepository(),
+    options.catalog ?? loadCatalogRepository(),
     loadFaqDocuments(),
   ])
 
-  return () => {
+  return (scenario) => {
     const trace = new OfflineEvalTraceCollector()
     const productIndex = createTracedProductSearchIndex(
       createProductSearchIndex(catalog.listAll()),
@@ -300,7 +313,16 @@ async function createCanonicalRuntimeFactory(
       productIndex,
       faqIndex,
       faqDocuments,
-      model: createOfflineEvalModel(trace),
+      model: options.createModel(trace, scenario),
+      ...(options.timeoutMs === undefined
+        ? {}
+        : { timeoutMs: options.timeoutMs }),
+      ...(options.maxModelCalls === undefined
+        ? {}
+        : { maxModelCalls: options.maxModelCalls }),
+      ...(options.maxOutputTokens === undefined
+        ? {}
+        : { maxOutputTokens: options.maxOutputTokens }),
     })
 
     return {
@@ -311,6 +333,15 @@ async function createCanonicalRuntimeFactory(
       },
     }
   }
+}
+
+async function createCanonicalRuntimeFactory(
+  providedCatalog?: CatalogRepository,
+) {
+  return createEvalScenarioRuntimeFactory({
+    ...(providedCatalog === undefined ? {} : { catalog: providedCatalog }),
+    createModel: (trace) => createOfflineEvalModel(trace),
+  })
 }
 
 async function executeScenario(
@@ -441,15 +472,36 @@ export async function runOfflineEvalDataset(
   loaded: LoadedEvalDataset,
   options: RunOfflineEvalOptions = {},
 ): Promise<OfflineEvalExecution> {
+  if (options.scenarioId !== undefined && options.scenarioIds !== undefined) {
+    throw new TypeError('Informe scenarioId ou scenarioIds, não ambos.')
+  }
+  const requestedScenarioIds =
+    options.scenarioIds ??
+    (options.scenarioId === undefined ? undefined : [options.scenarioId])
+  if (requestedScenarioIds !== undefined) {
+    if (requestedScenarioIds.length === 0) {
+      throw new TypeError('A seleção de cenários não pode ser vazia.')
+    }
+    if (new Set(requestedScenarioIds).size !== requestedScenarioIds.length) {
+      throw new TypeError('A seleção contém cenários duplicados.')
+    }
+  }
   const selected =
-    options.scenarioId === undefined
+    requestedScenarioIds === undefined
       ? loaded.data.cases
-      : loaded.data.cases.filter((item) => item.id === options.scenarioId)
-  if (selected.length === 0) {
+      : requestedScenarioIds.map((scenarioId) =>
+          loaded.data.cases.find((item) => item.id === scenarioId),
+        )
+  if (selected.some((scenario) => scenario === undefined)) {
+    const missing = requestedScenarioIds?.find(
+      (scenarioId) =>
+        !loaded.data.cases.some((item) => item.id === scenarioId),
+    )
     throw new TypeError(
-      `Cenário não encontrado no dataset: ${options.scenarioId}.`,
+      `Cenário não encontrado no dataset: ${missing}.`,
     )
   }
+  const selectedCases = selected as EvalCase[]
   const evaluationCatalog =
     options.evaluateAssertions === true && options.canonicalData === undefined
       ? await loadCatalogRepository()
@@ -458,7 +510,7 @@ export async function runOfflineEvalDataset(
     options.createScenarioRuntime ??
     (await createCanonicalRuntimeFactory(evaluationCatalog))
   const scenarios: EvalScenarioExecution[] = []
-  for (const scenario of selected) {
+  for (const scenario of selectedCases) {
     scenarios.push(
       await executeScenario(
         loaded.data.dataset.id,
@@ -503,11 +555,11 @@ export async function runOfflineEvalDataset(
     loaded,
     execution,
     canonicalData,
-    options.scenarioId === undefined
+    requestedScenarioIds === undefined
       ? { kind: 'full_dataset' }
       : {
           kind: 'selected_scenarios',
-          scenarioIds: [options.scenarioId],
+          scenarioIds: [...requestedScenarioIds],
         },
   )
   return {

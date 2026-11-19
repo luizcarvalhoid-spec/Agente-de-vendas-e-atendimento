@@ -22,6 +22,8 @@ import {
 } from './external-eval-runner.js'
 import type { ExternalEvalPlanRequest, ExternalEvalReport } from './external-eval-schema.js'
 
+export const externalCanaryModuleUrl = import.meta.url
+
 const checklist = [
   'Usar ambiente e conta isolados de produção, com teto financeiro verificado na conta.',
   'Conferir o commit, o fingerprint, o escopo, o preço vigente e a política de dados.',

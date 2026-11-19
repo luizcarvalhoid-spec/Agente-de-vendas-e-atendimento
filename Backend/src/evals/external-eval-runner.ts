@@ -39,6 +39,8 @@ import {
   runOfflineEvalDataset,
 } from './offline-eval-runner.js'
 
+export const externalEvalRunnerModuleUrl = import.meta.url
+
 export const EXTERNAL_EVAL_LIMITATIONS = [
   'A modalidade mock_external usa transporte simulado e não mede desempenho real de um modelo externo.',
   'O isolamento mock exige uma factory registrada e rejeita adaptadores externos conhecidos, mas não transforma código arbitrário injetado em uma sandbox de rede.',
@@ -225,7 +227,10 @@ async function runControlledExternalEval(
     maxBudgetUsd: plan.maxBudgetUsd,
     unreportedUsageMultiplier: plan.unreportedUsageMultiplier,
     ...(options.enforceInputLimit === true
-      ? { maxInputTokensPerCall: limits.estimatedInputTokensPerCall }
+      ? {
+          maxInputTokensPerCall: limits.estimatedInputTokensPerCall,
+          cancellableBeforeTransport: true,
+        }
       : {}),
   })
   const runtimeFactory = await createEvalScenarioRuntimeFactory({

@@ -1,6 +1,10 @@
 import { open } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 
+import { configuredCanaryAuthorities } from '../evals/external-canary-authorities.js'
+import { writeCanaryOperationalReports } from '../evals/external-canary-operational-report.js'
+import { verifyCanaryOperations } from '../evals/external-canary-operations.js'
 import { writeExternalCanaryPreparationReports } from '../evals/external-canary-report.js'
 import {
   EXTERNAL_CANARY_DEFAULT_DATASET,
@@ -8,6 +12,7 @@ import {
   externalCanaryManifestSchema,
 } from '../evals/external-canary-schema.js'
 import { prepareExternalCanary, rehearseExternalCanary } from '../evals/external-canary.js'
+import { CanaryAuthorizationUseStore } from '../evals/external-canary-use-store.js'
 import { createInMemoryOpenRouterTransport } from '../evals/external-eval-runner.js'
 
 async function readJson(path: string): Promise<unknown> {
@@ -35,19 +40,40 @@ async function main() {
       action: { type: 'string', default: 'prepare' },
       manifest: { type: 'string' },
       review: { type: 'string' },
+      approval: { type: 'string' },
       'output-dir': { type: 'string' },
       help: { type: 'boolean' },
     },
   })
   if (values.help) {
-    console.log('pnpm eval:canary --action prepare|rehearse --manifest <json> --output-dir <diretório> [--review <json>]')
+    console.log('pnpm eval:canary --action prepare|rehearse|verify --manifest <json> --output-dir <diretório> [--review <json>] [--approval <json> apenas em verify]')
     return
   }
   const action = values.action
-  if ((action !== 'prepare' && action !== 'rehearse') || !values.manifest || !values['output-dir']) {
+  if ((action !== 'prepare' && action !== 'rehearse' && action !== 'verify') ||
+      !values.manifest || !values['output-dir'] || (action !== 'verify' && values.approval)) {
     throw new TypeError('Comando de preparação inválido.')
   }
   const input = await readJson(values.manifest)
+  if (action === 'verify') {
+    if (!import.meta.url.endsWith('/src/scripts/eval-canary.ts')) {
+      throw new TypeError('Execute a verificação a partir do código-fonte rastreado.')
+    }
+    const report = await verifyCanaryOperations({
+      manifest: input,
+      review: values.review === undefined ? undefined : await readJson(values.review),
+      approval: values.approval === undefined ? undefined : await readJson(values.approval),
+    }, {
+      authorities: configuredCanaryAuthorities,
+      useStore: new CanaryAuthorizationUseStore(
+        fileURLToPath(new URL('../../external-eval-reports/canary-control/', import.meta.url)),
+      ),
+    })
+    await writeCanaryOperationalReports(report, values['output-dir'])
+    console.log(JSON.stringify({ blockers: report.blockers, networkAllowed: report.networkAllowed }))
+    process.exitCode = 1
+    return
+  }
   let report
   if (action === 'prepare') {
     const review = values.review === undefined ? undefined : await readJson(values.review)

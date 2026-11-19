@@ -59,7 +59,7 @@ export type CanaryAuthorityRegistry = ReadonlyMap<string, CanaryAuthority>
 
 export function canaryApprovalSigningBytes(payload: unknown) {
   const validated = canaryApprovalPayloadSchema.parse(payload)
-  return Buffer.from(`hidrasplash/canary-approval/v1\n${fingerprintEvalValue(validated)}\n`)
+  return Buffer.from(`agent-evals/canary-approval/v1\n${fingerprintEvalValue(validated)}\n`)
 }
 
 export function authenticateCanaryApproval(input: unknown, authorities: CanaryAuthorityRegistry) {

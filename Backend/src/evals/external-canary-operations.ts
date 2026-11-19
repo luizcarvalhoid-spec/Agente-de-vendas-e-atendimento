@@ -2,7 +2,12 @@ import {
   authenticateCanaryApproval,
   type CanaryAuthorityRegistry,
 } from './external-canary-approval.js'
-import { inspectCanarySource, type CanarySourceIntegrity, type CanarySourceIssue } from './external-canary-integrity.js'
+import {
+  inspectCanaryRuntimeSource,
+  inspectCanarySource,
+  type CanarySourceIntegrity,
+  type CanarySourceIssue,
+} from './external-canary-integrity.js'
 import { externalCanaryManifestSchema, externalCanaryReviewItems } from './external-canary-schema.js'
 import type { CanaryAuthorizationUseStore } from './external-canary-use-store.js'
 import { prepareExternalCanary, rehearseExternalCanary } from './external-canary.js'
@@ -19,12 +24,17 @@ export function createSyntheticCanaryCredentialSource(available: boolean): Canar
 }
 
 export interface CanaryOperationDependencies {
-  readonly repositoryRoot: string
   readonly authorities: CanaryAuthorityRegistry
   readonly useStore: CanaryAuthorizationUseStore
   readonly credentials?: CanaryCredentialSource
   readonly now?: () => number
 }
+
+export interface CanaryFixtureDependencies extends CanaryOperationDependencies {
+  readonly fixtureRoot: string
+}
+
+type SourceContext = { kind: 'loaded_runtime' } | { kind: 'synthetic_fixture'; root: string }
 
 export type CanaryOperationalBlocker = CanarySourceIssue
   | 'MANIFEST_INVALID'
@@ -61,12 +71,14 @@ export interface CanaryOperationalReport {
   readonly plan: Pick<Preparation, 'manifestFingerprint' | 'status' | 'issues' | 'requirements'>
     & { experimentId?: string; datasetId?: string; scenarioId?: string; modelId?: string; providerId?: string; approvedCodeRevision?: string }
   readonly source?: CanarySourceIntegrity
+  readonly sourceKind: SourceContext['kind']
   readonly approval?: { authorizationId: string; authorityId: string; scope: string; expiresAt: string }
   readonly checks: {
     manifestValid: boolean
     preflightPassed: boolean
     attestationsComplete: boolean
     sourceMatches: boolean
+    fixtureSourceMatches?: boolean
     approvalAuthenticated: boolean
     approvalMatchesPlan: boolean
     approvalCurrent: boolean
@@ -98,7 +110,11 @@ export interface CanaryOperationalInput {
   readonly approval?: unknown
 }
 
-async function inspectOperations(input: CanaryOperationalInput, deps: CanaryOperationDependencies) {
+async function inspectOperations(
+  input: CanaryOperationalInput,
+  deps: CanaryOperationDependencies,
+  sourceContext: SourceContext,
+) {
   const blockers = new Set<CanaryOperationalBlocker>()
   const approval = authenticateCanaryApproval(input.approval, deps.authorities)
   const prep = await prepareExternalCanary(input.manifest, input.review)
@@ -106,6 +122,9 @@ async function inspectOperations(input: CanaryOperationalInput, deps: CanaryOper
   const manifest = validated.success ? validated.data : undefined
   const attestationsComplete = externalCanaryReviewItems.every((item) => prep.requirements[item] === 'attested')
   if (!manifest) blockers.add('MANIFEST_INVALID')
+  if (sourceContext.kind === 'synthetic_fixture' && manifest?.purpose !== 'synthetic_rehearsal') {
+    blockers.add('CANARY_SCOPE_MISMATCH')
+  }
   if (!attestationsComplete || !prep.technicalPreparationComplete) blockers.add('MANIFEST_NOT_APPROVED')
   if (!approval) blockers.add(deps.authorities.size ? 'APPROVAL_INVALID' : 'APPROVAL_AUTHORITY_UNCONFIGURED')
 
@@ -161,7 +180,8 @@ async function inspectOperations(input: CanaryOperationalInput, deps: CanaryOper
   }
   if (!providerAccountLimitVerified) blockers.add('PROVIDER_ACCOUNT_LIMIT_UNVERIFIED')
 
-  if (manifest !== undefined) {
+  if (manifest !== undefined &&
+      (sourceContext.kind === 'loaded_runtime' || manifest.purpose === 'synthetic_rehearsal')) {
     if (manifest.purpose === 'synthetic_rehearsal') {
       try {
         credentialAvailable = await deps.credentials?.resolve({
@@ -173,7 +193,9 @@ async function inspectOperations(input: CanaryOperationalInput, deps: CanaryOper
         // O mecanismo de segredo nunca fornece texto de diagnóstico.
       }
     }
-    source = await inspectCanarySource(deps.repositoryRoot, manifest.sourceRevision)
+    source = sourceContext.kind === 'loaded_runtime'
+      ? await inspectCanaryRuntimeSource(manifest.sourceRevision)
+      : await inspectCanarySource(sourceContext.root, manifest.sourceRevision)
     for (const issue of source.issues) blockers.add(issue)
     if (approval !== undefined && source.worktreeFingerprint !== approval.worktreeFingerprint) {
       blockers.add('APPROVAL_WORKTREE_MISMATCH')
@@ -184,6 +206,10 @@ async function inspectOperations(input: CanaryOperationalInput, deps: CanaryOper
   }
   if (!credentialAvailable) blockers.add('CREDENTIAL_UNAVAILABLE')
 
+  const verifiedSourceMatches = source !== undefined && source.issues.length === 0 &&
+    (approval === undefined || (source.commit === approval.sourceRevision &&
+      source.worktreeFingerprint === approval.worktreeFingerprint &&
+      source.dependenciesFingerprint === approval.dependenciesFingerprint))
   const rehearsalEligible = blockers.size === 0 && manifest?.purpose === 'synthetic_rehearsal'
   const report: CanaryOperationalReport = {
     reportVersion: 1,
@@ -200,6 +226,7 @@ async function inspectOperations(input: CanaryOperationalInput, deps: CanaryOper
       approvedCodeRevision: approval?.sourceRevision,
     },
     source,
+    sourceKind: sourceContext.kind,
     approval: approval && {
       authorizationId: approval.authorizationId,
       authorityId: approval.authorityId,
@@ -210,10 +237,8 @@ async function inspectOperations(input: CanaryOperationalInput, deps: CanaryOper
       manifestValid: manifest !== undefined,
       preflightPassed: prep.technicalPreparationComplete,
       attestationsComplete,
-      sourceMatches: source !== undefined && source.issues.length === 0 &&
-        (approval === undefined || (source.commit === approval.sourceRevision &&
-          source.worktreeFingerprint === approval.worktreeFingerprint &&
-          source.dependenciesFingerprint === approval.dependenciesFingerprint)),
+      sourceMatches: sourceContext.kind === 'loaded_runtime' && verifiedSourceMatches,
+      ...(sourceContext.kind === 'synthetic_fixture' ? { fixtureSourceMatches: verifiedSourceMatches } : {}),
       approvalAuthenticated: approval !== undefined,
       approvalMatchesPlan,
       approvalCurrent,
@@ -241,15 +266,37 @@ async function inspectOperations(input: CanaryOperationalInput, deps: CanaryOper
 }
 
 export async function verifyCanaryOperations(input: CanaryOperationalInput, deps: CanaryOperationDependencies) {
-  return (await inspectOperations(input, deps)).report
+  return (await inspectOperations(input, deps, { kind: 'loaded_runtime' })).report
 }
+
+type RehearsalOptions = { transport: InMemoryOpenRouterTransport; signal?: AbortSignal }
 
 export async function rehearseCanaryActivation(
   input: CanaryOperationalInput,
   deps: CanaryOperationDependencies,
-  options: { transport: InMemoryOpenRouterTransport; signal?: AbortSignal },
+  options: RehearsalOptions,
 ): Promise<CanaryOperationalReport> {
-  const { report, manifest, approval } = await inspectOperations(input, deps)
+  return runRehearsal(await inspectOperations(input, deps, { kind: 'loaded_runtime' }), deps, options)
+}
+
+// As fixtures exercitam o fluxo sintético. Seu checkout nunca comprova integridade operacional.
+export async function verifyCanaryFixtureOperations(input: CanaryOperationalInput, deps: CanaryFixtureDependencies) {
+  return (await inspectOperations(input, deps, { kind: 'synthetic_fixture', root: deps.fixtureRoot })).report
+}
+
+export async function rehearseCanaryFixtureActivation(
+  input: CanaryOperationalInput,
+  deps: CanaryFixtureDependencies,
+  options: RehearsalOptions,
+): Promise<CanaryOperationalReport> {
+  return runRehearsal(await inspectOperations(input, deps, { kind: 'synthetic_fixture', root: deps.fixtureRoot }), deps, options)
+}
+
+async function runRehearsal(
+  { report, manifest, approval }: Awaited<ReturnType<typeof inspectOperations>>,
+  deps: CanaryOperationDependencies,
+  options: RehearsalOptions,
+): Promise<CanaryOperationalReport> {
   if (!report.rehearsalEligible || !manifest || !approval) return report
   if (options.signal?.aborted) {
     return { ...report, rehearsalEligible: false, blockers: [...report.blockers, 'OPERATOR_CANCELLED'] }

@@ -1,14 +1,16 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { generateKeyPairSync, randomBytes, sign } from 'node:crypto'
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { after, before, test } from 'node:test'
+import { pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
 
 import { AgentModelError } from '../src/agent/agent-model-port.js'
 import { canaryApprovalSigningBytes, type CanaryApprovalPayload } from '../src/evals/external-canary-approval.js'
+import { fingerprintEvalValue } from '../src/evals/eval-baseline.js'
 import { inspectCanarySource } from '../src/evals/external-canary-integrity.js'
 import {
   renderCanaryOperationalMarkdown,
@@ -18,6 +20,8 @@ import {
 import {
   createSyntheticCanaryCredentialSource,
   rehearseCanaryActivation,
+  rehearseCanaryFixtureActivation,
+  verifyCanaryFixtureOperations,
   verifyCanaryOperations,
 } from '../src/evals/external-canary-operations.js'
 import { externalCanaryManifestSchema, externalCanaryReviewItems } from '../src/evals/external-canary-schema.js'
@@ -137,13 +141,19 @@ async function fixture(t: { after(callback: () => Promise<void>): void }, timeou
   const storeDirectory = join(directory, 'control')
   await mkdir(storeDirectory)
   const deps = {
-    repositoryRoot,
+    fixtureRoot: repositoryRoot,
     authorities: new Map([[payload.authorityId, { publicKey, approverId: payload.approverId, scope: payload.scope }]]),
     useStore: new CanaryAuthorizationUseStore(storeDirectory),
     credentials: createSyntheticCanaryCredentialSource(true),
     now: () => now,
   }
-  return { directory, storeDirectory, input: { manifest, review, approval: signed() }, deps, signed, payload }
+  const legacyApproval = {
+    payload,
+    signature: sign(null, Buffer.from(
+      `hidrasplash/canary-approval/v1\n${fingerprintEvalValue(payload)}\n`,
+    ), privateKey).toString('base64url'),
+  }
+  return { directory, storeDirectory, input: { manifest, review, approval: signed() }, deps, signed, payload, legacyApproval }
 }
 
 function syntheticTransport(options: { returnedModel?: string; provider?: string | null; highUsage?: boolean; status?: number } = {}) {
@@ -174,8 +184,12 @@ function syntheticTransport(options: { returnedModel?: string; provider?: string
 
 test('aprovação de teste autenticada permanece bloqueada para rede e verify não consome', async (t) => {
   const { input, deps, storeDirectory } = await fixture(t)
-  const report = await verifyCanaryOperations(input, deps)
-  assert(Object.values(report.checks).every(Boolean))
+  const report = await verifyCanaryFixtureOperations(input, deps)
+  const { sourceMatches, ...fixtureChecks } = report.checks
+  assert.equal(sourceMatches, false)
+  assert.equal(report.sourceKind, 'synthetic_fixture')
+  assert.equal(report.source?.runtimeCommit, undefined)
+  assert(Object.values(fixtureChecks).every(Boolean))
   assert.equal(report.source?.commit, input.manifest.sourceRevision)
   assert.equal(report.approval?.authorityId, 'synthetic-authority')
   assert.equal(report.authorizationUse, 'available')
@@ -190,8 +204,10 @@ test('aprovação de teste autenticada permanece bloqueada para rede e verify n�
 })
 
 test('assinatura, autoridade, validade, plano e orçamento são verificados separadamente', async (t) => {
-  const { input, deps, signed } = await fixture(t)
+  const { input, deps, signed, legacyApproval } = await fixture(t)
+  assert.match(canaryApprovalSigningBytes(input.approval.payload).toString(), /^agent-evals\/canary-approval\/v1\nsha256:/)
   for (const [approval, code] of [
+    [legacyApproval, 'APPROVAL_INVALID'],
     [{ ...input.approval, payload: { ...input.approval.payload, approvedBudgetUsd: 2 } }, 'APPROVAL_INVALID'],
     [{ ...input.approval, signature: 'A'.repeat(86) }, 'APPROVAL_INVALID'],
     [signed({ authorityId: 'untrusted-authority' }), 'APPROVAL_INVALID'],
@@ -202,11 +218,11 @@ test('assinatura, autoridade, validade, plano e orçamento são verificados sepa
     [signed({ modelId: 'mock/different' }), 'CANARY_SCOPE_MISMATCH'],
     [signed({ approvedBudgetUsd: 2 }), 'APPROVAL_BUDGET_MISMATCH'],
   ] as const) {
-    const report = await verifyCanaryOperations({ ...input, approval }, deps)
+    const report = await verifyCanaryFixtureOperations({ ...input, approval }, deps)
     assert(report.blockers.includes(code), code)
     assert.equal(report.rehearsalEligible, false)
   }
-  const changed = await verifyCanaryOperations({
+  const changed = await verifyCanaryFixtureOperations({
     ...input,
     manifest: {
       ...input.manifest,
@@ -218,6 +234,76 @@ test('assinatura, autoridade, validade, plano e orçamento são verificados sepa
   assert(changed.blockers.includes('MANIFEST_NOT_APPROVED'))
 })
 
+test('gate operacional rejeita checkout de fixture e não consome sua aprovação', async (t) => {
+  const { input, deps, signed, storeDirectory } = await fixture(t)
+  const root = resolve(backend, '..')
+  const runtimeCommit = await git(root, 'rev-parse', 'HEAD')
+  const expected = await inspectCanarySource(root, runtimeCommit)
+  const controlled = syntheticTransport()
+  // O chamador pode ter um objeto legado com repositoryRoot. Ele não escolhe a origem operacional.
+  const legacyDeps = { ...deps, repositoryRoot: deps.fixtureRoot }
+  const report = await rehearseCanaryActivation(input, legacyDeps, controlled)
+  assert.equal(report.sourceKind, 'loaded_runtime')
+  assert.equal(report.source?.runtimeCommit, runtimeCommit)
+  assert.equal(report.source?.commit, runtimeCommit)
+  assert.equal(report.source?.worktreeFingerprint, expected.worktreeFingerprint)
+  assert.equal(report.checks.sourceMatches, false)
+  assert.equal(report.checks.fixtureSourceMatches, undefined)
+  assert(report.blockers.includes('SOURCE_REVISION_MISMATCH'))
+  assert(report.blockers.includes('APPROVAL_WORKTREE_MISMATCH'))
+  assert(report.blockers.includes('LIVE_EXECUTION_DISABLED'))
+  assert.equal(controlled.calls, 0)
+  assert.deepEqual(await readdir(storeDirectory), [])
+
+  const manifest = { ...input.manifest, sourceRevision: runtimeCommit }
+  const manifestFingerprint = fingerprintExternalCanaryManifest(manifest)
+  const sameRevision = await verifyCanaryOperations({
+    manifest,
+    review: { ...input.review, manifestFingerprint },
+    approval: signed({ sourceRevision: runtimeCommit, manifestFingerprint }),
+  }, legacyDeps)
+  assert.equal(sameRevision.checks.approvalMatchesPlan, true)
+  assert.equal(sameRevision.checks.sourceMatches, false)
+  assert(sameRevision.blockers.includes('APPROVAL_WORKTREE_MISMATCH'))
+})
+
+test('runtime carregado de um checkout limpo detecta troca posterior de HEAD', async (t) => {
+  const { deps } = await fixture(t)
+  const root = deps.fixtureRoot
+  await cp(join(backend, 'src'), join(root, 'Backend/src'), { recursive: true })
+  await cp(await realpath(join(backend, 'node_modules/zod')),
+    join(root, 'Backend/node_modules/zod'), { recursive: true })
+  await writeFile(join(root, 'Backend/package.json'), '{"type":"module"}\n')
+  await git(root, 'add', 'Backend')
+  await git(root, '-c', 'user.name=Canary Fixture', '-c', 'user.email=canary@example.invalid',
+    '-c', 'commit.gpgsign=false', 'commit', '-qm', 'runtime used in the test')
+  const head = await git(root, 'rev-parse', 'HEAD')
+  const guard = 'data:text/javascript,globalThis.fetch%3Dasync()%3D%3E%7Bthrow%20Error(%22forbidden%22)%7D'
+  const entry = pathToFileURL(join(root, 'Backend/src/evals/external-canary-integrity.ts')).href
+  const outcome = await exec(process.execPath, [
+    '--import', guard, '--import', 'tsx', '--input-type=module', '-e', `
+      import { execFileSync } from 'node:child_process'
+      const [entry, root, head] = process.argv.slice(1)
+      const { inspectCanaryRuntimeSource } = await import(entry)
+      const original = await inspectCanaryRuntimeSource(head)
+      process.chdir(root)
+      const git = (...args) => execFileSync('git', args, { encoding: 'utf8' }).trim()
+      git('-c', 'user.name=Canary Fixture', '-c', 'user.email=canary@example.invalid',
+          '-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-qm', 'later HEAD')
+      const newHead = git('rev-parse', 'HEAD')
+      const changed = await inspectCanaryRuntimeSource(newHead)
+      console.log(JSON.stringify({ original, changed, newHead }))
+    `, entry, root, head,
+  ], { cwd: backend })
+  const { original, changed, newHead } = JSON.parse(outcome.stdout)
+  assert.deepEqual(original.issues, [], JSON.stringify(original))
+  assert.equal(original.runtimeCommit, head)
+  assert.equal(original.commit, head)
+  assert.equal(changed.runtimeCommit, head)
+  assert.equal(changed.commit, newHead)
+  assert.deepEqual(changed.issues, ['RUNTIME_SOURCE_MISMATCH'])
+})
+
 test('teto externo depende de evidência assinada, vigente e suficiente', async (t) => {
   const { input, deps, payload, signed } = await fixture(t)
   for (const providerSpendLimit of [
@@ -226,17 +312,17 @@ test('teto externo depende de evidência assinada, vigente e suficiente', async 
     { ...payload.providerSpendLimit!, providerId: 'mock-unrelated' },
     { ...payload.providerSpendLimit!, limitUsd: 0.000001 },
   ]) {
-    const report = await verifyCanaryOperations({ ...input, approval: signed({ providerSpendLimit }) }, deps)
+    const report = await verifyCanaryFixtureOperations({ ...input, approval: signed({ providerSpendLimit }) }, deps)
     assert(report.blockers.includes('PROVIDER_ACCOUNT_LIMIT_UNVERIFIED'))
     assert.equal(report.financial.providerAccountLimitUsd, undefined)
     assert.equal(report.checks.approvalAuthenticated, true)
   }
-  const report = await verifyCanaryOperations(input, {
+  const report = await verifyCanaryFixtureOperations(input, {
     ...deps, credentials: { async resolve() { throw new Error(fakeKey) } },
   })
   assert(report.blockers.includes('CREDENTIAL_UNAVAILABLE'))
   assert.doesNotMatch(serializeCanaryOperationalReport(report), /never-exposed/)
-  const withoutApproval = await verifyCanaryOperations({ ...input, approval: undefined }, deps)
+  const withoutApproval = await verifyCanaryFixtureOperations({ ...input, approval: undefined }, deps)
   assert.equal(withoutApproval.checks.credentialAvailable, true)
   assert.equal(withoutApproval.checks.approvalAuthenticated, false)
   assert.equal(withoutApproval.experimentAuthorized, false)
@@ -245,7 +331,7 @@ test('teto externo depende de evidência assinada, vigente e suficiente', async 
 
 test('HEAD, alterações rastreadas e arquivos não rastreados relevantes invalidam a revisão', async (t) => {
   const { input, deps } = await fixture(t)
-  const root = deps.repositoryRoot
+  const root = deps.fixtureRoot
   const expected = input.manifest.sourceRevision
   const tracked = join(root, 'Backend/src/index.ts')
   await writeFile(tracked, '// modified tracked source\n')
@@ -259,28 +345,28 @@ test('HEAD, alterações rastreadas e arquivos não rastreados relevantes invali
   await git(root, 'add', 'Backend/src/untracked.ts')
   await git(root, '-c', 'user.name=Canary Fixture', '-c', 'user.email=canary@example.invalid',
     '-c', 'commit.gpgsign=false', 'commit', '-qm', 'different revision')
-  const outcome = await verifyCanaryOperations(input, deps)
+  const outcome = await verifyCanaryFixtureOperations(input, deps)
   assert(outcome.blockers.includes('SOURCE_REVISION_MISMATCH'))
   assert.equal(outcome.checks.sourceMatches, false)
 })
 
 test('lockfile, bytes de dependências e outra worktree são verificados', async (t) => {
   const { input, deps, directory } = await fixture(t)
-  const root = deps.repositoryRoot
+  const root = deps.fixtureRoot
   const lockfile = join(root, 'Backend/pnpm-lock.yaml')
   const installed = join(root, 'Backend/node_modules')
   await writeFile(lockfile, '# divergência\n')
-  assert((await verifyCanaryOperations(input, deps)).blockers.includes('LOCKFILE_MISMATCH'))
+  assert((await verifyCanaryFixtureOperations(input, deps)).blockers.includes('LOCKFILE_MISMATCH'))
   await writeFile(lockfile, lock)
   await writeFile(join(installed, '.pnpm/lock.yaml'), '# divergência instalada\n')
-  assert((await verifyCanaryOperations(input, deps)).blockers.includes('DEPENDENCIES_UNVERIFIED'))
+  assert((await verifyCanaryFixtureOperations(input, deps)).blockers.includes('DEPENDENCIES_UNVERIFIED'))
   await writeFile(join(installed, '.pnpm/lock.yaml'), lock)
   await writeFile(join(installed, 'fixture/index.js'), '// dependency fixture v2\n')
-  assert((await verifyCanaryOperations(input, deps)).blockers.includes('APPROVAL_DEPENDENCIES_MISMATCH'))
+  assert((await verifyCanaryFixtureOperations(input, deps)).blockers.includes('APPROVAL_DEPENDENCIES_MISMATCH'))
   const other = join(directory, 'other-tree')
   await git(root, 'worktree', 'add', '--detach', other, input.manifest.sourceRevision)
   await installSyntheticFiles(other)
-  const report = await verifyCanaryOperations(input, { ...deps, repositoryRoot: other })
+  const report = await verifyCanaryFixtureOperations(input, { ...deps, fixtureRoot: other })
   assert(report.blockers.includes('APPROVAL_WORKTREE_MISMATCH'))
   assert.equal(report.source?.commit, input.manifest.sourceRevision)
 })
@@ -288,7 +374,7 @@ test('lockfile, bytes de dependências e outra worktree são verificados', async
 test('falha no registro persistente bloqueia o ensaio antes do transporte', async (t) => {
   const { input, deps, directory } = await fixture(t)
   const transport = syntheticTransport()
-  const report = await rehearseCanaryActivation(input, {
+  const report = await rehearseCanaryFixtureActivation(input, {
     ...deps, useStore: new CanaryAuthorizationUseStore(join(directory, 'missing-store')),
   }, transport)
   assert(report.blockers.includes('AUTHORIZATION_STORE_UNAVAILABLE'))
@@ -301,8 +387,8 @@ test('concorrência permite um único ensaio e outro processo vê o marcador per
   const first = syntheticTransport()
   const second = syntheticTransport()
   const results = await Promise.all([
-    rehearseCanaryActivation(input, deps, first),
-    rehearseCanaryActivation(input, { ...deps, useStore: new CanaryAuthorizationUseStore(storeDirectory) }, second),
+    rehearseCanaryFixtureActivation(input, deps, first),
+    rehearseCanaryFixtureActivation(input, { ...deps, useStore: new CanaryAuthorizationUseStore(storeDirectory) }, second),
   ])
   assert.equal(first.calls + second.calls, 1)
   const completed = results.find((item) => item.rehearsal !== undefined)
@@ -313,7 +399,7 @@ test('concorrência permite um único ensaio e outro processo vê o marcador per
   assert.equal(completed.experimentExecuted, false)
   assert.equal(completed.financial.effectiveCharge, 'not_verified')
   assert(results.some((item) => item.blockers.includes('AUTHORIZATION_ALREADY_CONSUMED')))
-  const resumed = await verifyCanaryOperations(input, { ...deps, useStore: new CanaryAuthorizationUseStore(storeDirectory) })
+  const resumed = await verifyCanaryFixtureOperations(input, { ...deps, useStore: new CanaryAuthorizationUseStore(storeDirectory) })
   assert.equal(resumed.authorizationUse, 'consumed')
   const restarted = await exec(process.execPath, [
     '--import', 'tsx', '--input-type=module', '-e',
@@ -358,7 +444,7 @@ test('cancelamento durante transporte conserva custo e consome a autorização',
   const { input, deps } = await fixture(t)
   const signal = new AbortController()
   const preCancelled = syntheticTransport()
-  const before = await rehearseCanaryActivation(input, deps, { ...preCancelled, signal: AbortSignal.abort() })
+  const before = await rehearseCanaryFixtureActivation(input, deps, { ...preCancelled, signal: AbortSignal.abort() })
   assert(before.blockers.includes('OPERATOR_CANCELLED'))
   assert.equal(before.authorizationUse, 'available')
   assert.equal(preCancelled.calls, 0)
@@ -370,7 +456,7 @@ test('cancelamento durante transporte conserva custo e consome a autorização',
       signal.abort()
     })
   })
-  const during = await rehearseCanaryActivation(input, deps, { transport, signal: signal.signal })
+  const during = await rehearseCanaryFixtureActivation(input, deps, { transport, signal: signal.signal })
   assert.equal(sent, 1)
   assert.equal(during.authorizationUse, 'consumed')
   assert(during.blockers.includes('OPERATOR_CANCELLED'))
@@ -387,7 +473,7 @@ test('timeout, erro técnico e identidade inválida preservam o estado de consum
     { status: 503 },
   ]) {
     const controlled = syntheticTransport(options)
-    const report = await rehearseCanaryActivation({
+    const report = await rehearseCanaryFixtureActivation({
       ...input, approval: signed({ useId: randomBytes(16).toString('hex') }),
     }, deps, controlled)
     assert.equal(controlled.calls, 1)
@@ -402,7 +488,7 @@ test('timeout, erro técnico e identidade inválida preservam o estado de consum
   const transport = createInMemoryOpenRouterTransport(async (_, init) => new Promise<Response>((_resolve, reject) => {
     init?.signal?.addEventListener('abort', () => reject(new Error('synthetic timeout')), { once: true })
   }))
-  const report = await rehearseCanaryActivation(limited.input, limited.deps, { transport })
+  const report = await rehearseCanaryFixtureActivation(limited.input, limited.deps, { transport })
   assert.equal(report.rehearsal?.technicalStatus, 'technical_failure')
   assert(report.rehearsal.technicalErrorCodes.some((code) => code.includes('TIMEOUT')))
   assert(report.rehearsal.consumption.chargedCostUsd > 0)
@@ -412,7 +498,7 @@ test('timeout, erro técnico e identidade inválida preservam o estado de consum
 test('excesso de uso é reportado e os artefatos minimizam dados e protegem a escrita', async (t) => {
   const { input, deps, directory } = await fixture(t)
   const controlled = syntheticTransport({ highUsage: true })
-  const report = await rehearseCanaryActivation(input, deps, controlled)
+  const report = await rehearseCanaryFixtureActivation(input, deps, controlled)
   assert.equal(controlled.calls, 1)
   assert(report.rehearsal!.limitsReached.includes('reported_usage_exceeded_reservation'))
   assert(report.rehearsal!.consumption.overReservedCostUsd > 0)
@@ -423,14 +509,14 @@ test('excesso de uso é reportado e os artefatos minimizam dados e protegem a es
   assert.equal(markdown, renderCanaryOperationalMarkdown(report))
   assert.match(markdown, /Execução externa autorizada: não/)
   for (const data of [json, markdown]) {
-    for (const secret of [fakeKey, fakePrompt, input.approval.signature, input.approval.payload.useId, deps.repositoryRoot]) {
+    for (const secret of [fakeKey, fakePrompt, input.approval.signature, input.approval.payload.useId, deps.fixtureRoot]) {
       assert.equal(data.includes(secret), false)
     }
   }
   const tooCheap = { ...input.manifest, maxBudgetUsd: 0.000001 }
   const fingerprint = fingerprintExternalCanaryManifest(tooCheap)
   const blockedTransport = syntheticTransport()
-  const blocked = await rehearseCanaryActivation({
+  const blocked = await rehearseCanaryFixtureActivation({
     manifest: tooCheap,
     review: { ...input.review, manifestFingerprint: fingerprint },
     approval: { ...input.approval },

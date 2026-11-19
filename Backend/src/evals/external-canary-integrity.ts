@@ -1,10 +1,14 @@
-import { execFile } from 'node:child_process'
+import { execFile, execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
+import { readFileSync, realpathSync } from 'node:fs'
 import { lstat, readFile, readdir, realpath } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 
 import { fingerprintEvalValue } from './eval-baseline.js'
+import { externalCanaryModuleUrl } from './external-canary.js'
+import { externalEvalRunnerModuleUrl } from './external-eval-runner.js'
 
 const exec = promisify(execFile)
 const lockfile = 'Backend/pnpm-lock.yaml'
@@ -18,12 +22,14 @@ const runtimePaths = [
 export type CanarySourceIssue =
   | 'SOURCE_UNVERIFIED'
   | 'SOURCE_REVISION_MISMATCH'
+  | 'RUNTIME_SOURCE_MISMATCH'
   | 'DIRTY_WORKTREE'
   | 'LOCKFILE_MISMATCH'
   | 'DEPENDENCIES_UNVERIFIED'
 
 export interface CanarySourceIntegrity {
   commit?: string
+  runtimeCommit?: string
   worktreeFingerprint?: string
   lockfileFingerprint?: string
   dependenciesFingerprint?: string
@@ -42,21 +48,92 @@ function gitEnvironment() {
   }
 }
 
-async function git(directory: string, ...args: string[]) {
-  const { stdout } = await exec('git', ['--no-optional-locks', '-c', 'core.fsmonitor=false', ...args], {
+function gitOptions(directory: string) {
+  return {
     cwd: directory,
     env: gitEnvironment(),
-    encoding: 'utf8',
+    encoding: 'utf8' as const,
     maxBuffer: 16 * 1024 * 1024,
     timeout: 15_000,
     windowsHide: true,
-  })
+  }
+}
+
+const gitLocalOptions = ['--no-optional-locks', '-c', 'core.fsmonitor=false']
+const headArgs = ['rev-parse', '--verify', 'HEAD^{commit}']
+
+async function git(directory: string, ...args: string[]) {
+  const { stdout } = await exec('git', ['-C', directory, ...gitLocalOptions, ...args], gitOptions(directory))
   return stdout
 }
 
 function inside(root: string, path: string) {
   const location = relative(root, path)
   return !isAbsolute(location) && location !== '..' && !location.startsWith(`..${sep}`)
+}
+
+// Captura a revisão no carregamento para detectar troca de HEAD com módulos ainda em memória.
+function captureRuntimeSource() {
+  try {
+    const canonicalPath = realpathSync.native
+    const root = canonicalPath(fileURLToPath(new URL('../../../', import.meta.url)))
+    const anchors = ([
+      [import.meta.url, 'external-canary-integrity.ts'],
+      [externalCanaryModuleUrl, 'external-canary.ts'],
+      [externalEvalRunnerModuleUrl, 'external-eval-runner.ts'],
+    ] as const).map(([url, name]) => {
+      const path = fileURLToPath(url)
+      const resolved = canonicalPath(path)
+      if (relative(resolved, join(root, 'Backend', 'src', 'evals', name)) !== '') throw new Error()
+      return { path, resolved, digest: createHash('sha256').update(readFileSync(resolved)).digest('hex') }
+    })
+    const gitAtLoad = (...args: string[]) => execFileSync(
+      'git', ['-C', root, ...gitLocalOptions, ...args], gitOptions(root),
+    ).trim()
+    if (relative(canonicalPath(gitAtLoad('rev-parse', '--show-toplevel')), root) !== '') throw new Error()
+    const commit = gitAtLoad(...headArgs)
+    if (!/^[0-9a-f]{40}$/.test(commit)) throw new Error()
+    const gitDirectory = canonicalPath(resolve(root, gitAtLoad('rev-parse', '--git-dir')))
+    const zodPath = fileURLToPath(import.meta.resolve('zod'))
+    return {
+      root, commit, anchors, zodPath, zodResolved: canonicalPath(zodPath),
+      worktreeFingerprint: fingerprintEvalValue(['canary-worktree-v1', root, gitDirectory]),
+    }
+  } catch {
+    return undefined
+  }
+}
+
+const runtimeSource = captureRuntimeSource()
+
+export async function inspectCanaryRuntimeSource(expectedRevision: string): Promise<CanarySourceIntegrity> {
+  if (runtimeSource === undefined) return { issues: ['RUNTIME_SOURCE_MISMATCH'] }
+  const result = await inspectCanarySource(runtimeSource.root, expectedRevision)
+  result.runtimeCommit = runtimeSource.commit
+  try {
+    if (
+      result.commit !== runtimeSource.commit ||
+      result.worktreeFingerprint !== runtimeSource.worktreeFingerprint ||
+      (await git(runtimeSource.root, ...headArgs)).trim() !== runtimeSource.commit
+    ) throw new Error()
+    for (const anchor of runtimeSource.anchors) {
+      if (await realpath(anchor.path) !== anchor.resolved ||
+          createHash('sha256').update(await readFile(anchor.resolved)).digest('hex') !== anchor.digest) {
+        throw new Error()
+      }
+    }
+  } catch {
+    result.issues.push('RUNTIME_SOURCE_MISMATCH')
+  }
+  if (!result.issues.includes('DEPENDENCIES_UNVERIFIED')) {
+    try {
+      if (!inside(join(runtimeSource.root, 'Backend', 'node_modules'), runtimeSource.zodResolved) ||
+          await realpath(runtimeSource.zodPath) !== runtimeSource.zodResolved) throw new Error()
+    } catch {
+      result.issues.push('DEPENDENCIES_UNVERIFIED')
+    }
+  }
+  return result
 }
 
 async function fingerprintDependencies(backend: string, expectedLock: string) {
@@ -129,10 +206,10 @@ export async function inspectCanarySource(
   const result: CanarySourceIntegrity = { issues: [] }
   try {
     const root = await realpath(repositoryRoot)
-    if (await realpath((await git(root, 'rev-parse', '--show-toplevel')).trim()) !== root) {
+    if (relative(await realpath((await git(root, 'rev-parse', '--show-toplevel')).trim()), root) !== '') {
       throw new Error()
     }
-    const commit = (await git(root, 'rev-parse', '--verify', 'HEAD^{commit}')).trim()
+    const commit = (await git(root, ...headArgs)).trim()
     if (!/^[0-9a-f]{40}$/.test(commit)) throw new Error()
     result.commit = commit
     const gitDirectory = await realpath(resolve(root, (await git(root, 'rev-parse', '--git-dir')).trim()))
@@ -156,7 +233,7 @@ export async function inspectCanarySource(
     } catch {
       result.issues.push('DEPENDENCIES_UNVERIFIED')
     }
-    if ((await git(root, 'rev-parse', '--verify', 'HEAD^{commit}')).trim() !== commit ||
+    if ((await git(root, ...headArgs)).trim() !== commit ||
         (!result.issues.includes('DIRTY_WORKTREE') && await isDirty(root))) {
       result.issues.push('SOURCE_UNVERIFIED')
     }

@@ -64,7 +64,6 @@ async function main() {
       review: values.review === undefined ? undefined : await readJson(values.review),
       approval: values.approval === undefined ? undefined : await readJson(values.approval),
     }, {
-      repositoryRoot: fileURLToPath(new URL('../../../', import.meta.url)),
       authorities: configuredCanaryAuthorities,
       useStore: new CanaryAuthorizationUseStore(
         fileURLToPath(new URL('../../external-eval-reports/canary-control/', import.meta.url)),

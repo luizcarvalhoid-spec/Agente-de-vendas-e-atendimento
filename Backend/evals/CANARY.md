@@ -92,6 +92,15 @@ arquivos não rastreados. Arquivos ignorados nas árvores usadas pelo runtime
 também bloqueiam a verificação. O relatório registra separadamente a revisão
 aprovada e o commit verificado, sem expor caminhos locais.
 
+A raiz operacional vem dos caminhos reais dos módulos carregados do canário,
+do runner EVAL-07 e do verificador no código-fonte. O gate registra o HEAD no
+carregamento e confere novamente o commit, a identidade da worktree e o
+conteúdo dos módulos que ancoram essa verificação. Uma troca de HEAD exige
+reiniciar o processo no checkout aprovado. Raiz informada pelo chamador e
+diretório corrente não são usados como prova operacional. Os testes com
+repositórios sintéticos usam uma entrada exclusiva de ensaio. Seus relatórios
+indicam `synthetic_fixture` e mantêm `sourceMatches` falso.
+
 O lockfile em disco e o lock instalado do pnpm precisam corresponder à
 revisão. O fingerprint das dependências cobre os arquivos e os destinos dos
 links internos da instalação local, além de plataforma, arquitetura e versão
@@ -105,7 +114,8 @@ após integrar alterações que afetem a execução.
 
 O envelope de aprovação v1 contém um payload estrito e assinatura Ed25519.
 A assinatura cobre o fingerprint canônico do payload, com domínio próprio
-para este contrato. O payload vincula o manifesto completo, escopo de um uso,
+para este contrato: `agent-evals/canary-approval/v1`. Assinaturas do domínio
+anterior são rejeitadas. O payload vincula o manifesto completo, escopo de um uso,
 dataset, cenário, modelo, provedor, verba, revisão e instalação. O manifesto
 por sua vez vincula a política de dados, os limites e o destino dos
 relatórios. O identificador da autoridade, a identidade do aprovador e o

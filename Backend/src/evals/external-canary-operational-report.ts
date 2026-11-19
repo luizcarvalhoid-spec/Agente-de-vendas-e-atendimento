@@ -23,6 +23,8 @@ export function renderCanaryOperationalMarkdown(report: CanaryOperationalReport)
     `- Dataset e cenário: ${text(plan.datasetId)} / ${text(plan.scenarioId)}`,
     `- Modelo e provedor: ${text(plan.modelId)} / ${text(plan.providerId)}`,
     `- Commit aprovado: ${text(plan.approvedCodeRevision)}`,
+    `- Origem da verificação: ${text(report.sourceKind)}`,
+    `- Commit no carregamento do runtime: ${text(source?.runtimeCommit)}`,
     `- Commit verificado: ${text(source?.commit)}`,
     `- Fingerprint do checkout: ${text(source?.worktreeFingerprint)}`,
     `- Fingerprints do lockfile e das dependências: ${text(source?.lockfileFingerprint)} / ${text(source?.dependenciesFingerprint)}`,

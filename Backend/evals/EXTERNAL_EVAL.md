@@ -121,6 +121,10 @@ persistida por padrão.
 
 ## Condições para uma futura ativação real
 
+A EVAL-07B.2 disponibiliza o manifesto, o preflight e o ensaio em memória do
+primeiro canário. O procedimento e os estados de autorização estão em
+[CANARY.md](CANARY.md).
+
 Antes de implementar ou executar `live_external`, será necessária outra entrega,
 revisão e autorização explícita. Esta branch não contém a capacidade pública de
 ativação. A etapa futura deverá, no mínimo:

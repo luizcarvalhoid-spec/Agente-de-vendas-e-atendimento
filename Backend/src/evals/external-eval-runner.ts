@@ -19,6 +19,7 @@ import {
 } from '../agent/tool-orchestrator.js'
 import { loadCatalogRepository } from '../catalog/catalog-repository.js'
 import { createEvalCanonicalData } from './eval-assertion-engine.js'
+import { fingerprintEvalDataset } from './eval-baseline.js'
 import { ExternalEvalCostController } from './external-eval-cost.js'
 import { planExternalEval } from './external-eval-plan.js'
 import {
@@ -119,6 +120,7 @@ export function createInMemoryOpenRouterTransport(
 
 export interface RunSimulatedOpenRouterExternalEvalOptions {
   readonly transport: InMemoryOpenRouterTransport
+  readonly canary?: { readonly datasetFingerprint: string; readonly signal?: AbortSignal }
 }
 
 interface RunControlledExternalEvalOptions {
@@ -135,6 +137,9 @@ interface RunControlledExternalEvalOptions {
     ExternalEvalReport['model']['observations'][number]
   >
   readonly requireRouting?: boolean
+  readonly enforceInputLimit?: boolean
+  readonly datasetFingerprint?: string
+  readonly signal?: AbortSignal
 }
 
 function tracedModel(
@@ -191,6 +196,8 @@ async function runControlledExternalEval(
     plan.status !== 'ready' ||
     !plan.executionAllowed ||
     loaded === undefined ||
+    (options.datasetFingerprint !== undefined &&
+      fingerprintEvalDataset(loaded) !== options.datasetFingerprint) ||
     plan.modelId === undefined ||
     plan.limits === undefined ||
     plan.pricing === undefined ||
@@ -217,6 +224,9 @@ async function runControlledExternalEval(
     pricing: plan.pricing,
     maxBudgetUsd: plan.maxBudgetUsd,
     unreportedUsageMultiplier: plan.unreportedUsageMultiplier,
+    ...(options.enforceInputLimit === true
+      ? { maxInputTokensPerCall: limits.estimatedInputTokensPerCall }
+      : {}),
   })
   const runtimeFactory = await createEvalScenarioRuntimeFactory({
     catalog,
@@ -241,6 +251,7 @@ async function runControlledExternalEval(
   const execution = await runOfflineEvalDataset(loaded, {
     scenarioIds: plan.selectedScenarioIds,
     createScenarioRuntime: runtimeFactory,
+    signal: options.signal,
     evaluateAssertions: true,
     canonicalData: createEvalCanonicalData(catalog),
   })
@@ -465,6 +476,9 @@ export async function runSimulatedOpenRouterExternalEval(
   let identityDiverged = false
   return runControlledExternalEval(request, {
     requireRouting: true,
+    enforceInputLimit: options.canary !== undefined,
+    datasetFingerprint: options.canary?.datasetFingerprint,
+    signal: options.canary?.signal,
     observations,
     createModel({ modelId, routing, limits }) {
       if (routing === undefined) {
@@ -487,18 +501,23 @@ export async function runSimulatedOpenRouterExternalEval(
           )
           if (
             observation.modelIdentityMatches === false ||
-            observation.providerIdentityMatches === false
+            observation.providerIdentityMatches === false ||
+            (options.canary !== undefined && observation.providerId === undefined)
           ) {
             identityDiverged = true
           }
         },
       })
       return {
-        complete(input) {
+        async complete(input) {
           if (identityDiverged) {
             throw new AgentModelError('INVALID_MODEL_RESPONSE', false)
           }
-          return externalModel.complete(input)
+          const result = await externalModel.complete(input)
+          if (identityDiverged) {
+            throw new AgentModelError('INVALID_MODEL_RESPONSE', true)
+          }
+          return result
         },
       }
     },

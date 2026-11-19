@@ -154,26 +154,28 @@ export async function writeExternalEvalReports(
   reportInput: ExternalEvalReport,
   directoryInput: string,
 ) {
+  const report = externalEvalReportSchema.parse(reportInput)
+  return writeExclusiveExternalEvalReportPair(directoryInput, externalEvalReportFileNames(report), {
+    json: serializeExternalEvalReport(report),
+    markdown: renderExternalEvalReportMarkdown(report),
+  })
+}
+
+export async function writeExclusiveExternalEvalReportPair(
+  directoryInput: string,
+  names: { json: string; markdown: string },
+  contents: { json: string; markdown: string },
+) {
   if (directoryInput.trim().length === 0) {
     throw new ExternalEvalReportWriteError(
       'Informe explicitamente o diretório dos relatórios EVAL-07.',
     )
   }
-  const report = externalEvalReportSchema.parse(reportInput)
   const directory = resolve(directoryInput)
-  const names = externalEvalReportFileNames(report)
-  const targets = [
-    {
-      format: 'json' as const,
-      path: resolve(directory, names.json),
-      content: serializeExternalEvalReport(report),
-    },
-    {
-      format: 'markdown' as const,
-      path: resolve(directory, names.markdown),
-      content: renderExternalEvalReportMarkdown(report),
-    },
-  ]
+  const targets = (['json', 'markdown'] as const).map((format) => ({
+    path: resolve(directory, safeSegment(names[format])),
+    content: contents[format],
+  }))
   try {
     await mkdir(directory, { recursive: true })
     if (!(await lstat(directory)).isDirectory()) {

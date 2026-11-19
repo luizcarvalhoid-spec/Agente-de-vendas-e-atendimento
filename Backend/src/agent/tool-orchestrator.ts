@@ -227,6 +227,8 @@ function canonicalJson(value: unknown): string {
 
 function raceWithAbort<T>(promise: Promise<T>, signal: AbortSignal) {
   if (signal.aborted) {
+    // O trabalho iniciado pode rejeitar depois que o cancelamento foi observado.
+    void promise.catch(() => undefined)
     return Promise.reject(new DOMException('Aborted', 'AbortError'))
   }
 

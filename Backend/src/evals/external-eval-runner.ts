@@ -225,7 +225,10 @@ async function runControlledExternalEval(
     maxBudgetUsd: plan.maxBudgetUsd,
     unreportedUsageMultiplier: plan.unreportedUsageMultiplier,
     ...(options.enforceInputLimit === true
-      ? { maxInputTokensPerCall: limits.estimatedInputTokensPerCall }
+      ? {
+          maxInputTokensPerCall: limits.estimatedInputTokensPerCall,
+          cancellableBeforeTransport: true,
+        }
       : {}),
   })
   const runtimeFactory = await createEvalScenarioRuntimeFactory({

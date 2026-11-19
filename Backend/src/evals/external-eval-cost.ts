@@ -134,6 +134,7 @@ export interface ExternalEvalCostControllerOptions {
   readonly maxBudgetUsd: number
   readonly unreportedUsageMultiplier: number
   readonly maxInputTokensPerCall?: number
+  readonly cancellableBeforeTransport?: boolean
 }
 
 export class ExternalEvalCostController {
@@ -348,6 +349,12 @@ export class ExternalEvalCostController {
         })
         let result: AgentModelResult
         try {
+          if (this.options.cancellableBeforeTransport) {
+            await Promise.resolve()
+            if (input.signal.aborted) {
+              throw new AgentModelError(abortedError(input.signal, false).code, false)
+            }
+          }
           result = await raceModelWithAbort(
             model.complete({
               ...input,

@@ -69,6 +69,91 @@ ativação futura depende de implementação e revisão próprias e de autoriza�
 específica para o fingerprint e para a execução. Chave de ambiente, flags,
 confirmação textual e arquivo de atestação não concedem essa autorização.
 
+## Prontidão operacional (EVAL-07B.3)
+
+A ação `verify` gera o relatório operacional v1 em JSON e Markdown. Execute a
+CLI a partir do código-fonte em `Backend`:
+
+```sh
+pnpm eval:canary --action verify --manifest <arquivo> --review <arquivo> --approval <arquivo> --output-dir <diretório>
+```
+
+O relatório pode ser gerado sem aprovação para inventariar bloqueios. A
+verificação é somente leitura para o registro de uso único. O processo
+retorna código 1 e inclui `LIVE_EXECUTION_DISABLED` porque a execução
+externa continua indisponível, inclusive com uma aprovação sintética válida.
+`prepare` e o ensaio local da EVAL-07B.2 continuam disponíveis.
+
+### Revisão, checkout e dependências
+
+O gate consulta o HEAD do Git no checkout do código, compara o commit com
+`sourceRevision` e verifica arquivos rastreados, alterações no índice e
+arquivos não rastreados. Arquivos ignorados nas árvores usadas pelo runtime
+também bloqueiam a verificação. O relatório registra separadamente a revisão
+aprovada e o commit verificado, sem expor caminhos locais.
+
+O lockfile em disco e o lock instalado do pnpm precisam corresponder à
+revisão. O fingerprint das dependências cobre os arquivos e os destinos dos
+links internos da instalação local, além de plataforma, arquitetura e versão
+do Node.js. Links para instalações compartilhadas fora do checkout bloqueiam
+a verificação. A aprovação vincula o fingerprint da instalação e a
+identidade do checkout. Mudança de código, checkout ou dependências exige
+revisar a configuração e obter outra assinatura. Atualize `sourceRevision`
+após integrar alterações que afetem a execução.
+
+### Aprovação independente e uso único
+
+O envelope de aprovação v1 contém um payload estrito e assinatura Ed25519.
+A assinatura cobre o fingerprint canônico do payload, com domínio próprio
+para este contrato. O payload vincula o manifesto completo, escopo de um uso,
+dataset, cenário, modelo, provedor, verba, revisão e instalação. O manifesto
+por sua vez vincula a política de dados, os limites e o destino dos
+relatórios. O identificador da autoridade, a identidade do aprovador e o
+escopo são confrontados com um registro confiável provisionado separadamente
+do envelope. A CLI não emite assinaturas e o registro distribuído está vazio.
+Os testes geram pares efêmeros em memória com escopo exclusivamente sintético.
+
+O teto externo é uma evidência assinada separada da verba interna no payload.
+O gate verifica origem, provedor, fingerprint, instante, validade e valor. O
+teto tem de cobrir a reserva prevista e caber na verba aprovada. Uma futura
+evidência precisa vir da conferência da conta pelo operador. Esta etapa não
+consulta o provedor. O relatório distingue reserva estimada, consumo
+reportado no ensaio, custo contabilizado localmente e cobrança ainda não
+verificada.
+
+A disponibilidade de credencial é verificada separadamente da aprovação. O
+provedor simulado retorna somente um marcador opaco, sem ler
+`OPENROUTER_API_KEY`, arquivos de aprovação ou argumentos. Uma futura
+integração precisa provisionar o mecanismo de segredos e a autoridade em
+ambiente controlado. Nenhum deles é provisionado nesta entrega.
+
+O registro de uso único exige um diretório local de controle preexistente. A
+CLI conhece o caminho fixo
+`external-eval-reports/canary-control` relativo a `Backend`. Ela não o cria nem
+aceita outro caminho pela linha de comando. O ensaio operacional reserva o
+`useId` em disco com criação exclusiva e sincroniza o marcador antes de
+prosseguir. Um marcador parcial ou uma tentativa reservada permanece
+bloqueante. A autorização nunca é reaberta automaticamente após falha ou
+possível envio. A operação futura deve proteger o registro contra remoção,
+rollback, substituição e uso de diretórios distintos por operadores.
+
+### Ensaio de operação e riscos residuais
+
+`pnpm exec tsx --test test/external-canary-operations.test.ts` percorre o
+gate, o registro e o ChatService usando transporte em memória. Antes de
+reservar a autorização, um cancelamento conhecido interrompe a tentativa.
+Entre a reserva financeira e o transporte, um cancelamento libera a reserva
+local. Depois de possível envio, o custo continua contabilizado de forma
+conservadora e a autorização continua consumida. Timeout, divergência de
+identidade e limites usam os diagnósticos técnicos existentes sem retry.
+
+A verificação de integridade é uma evidência local de um instante. A futura
+ativação exige checkout, dependências e ambiente de processo isolados e
+protegidos contra alterações concorrentes, autoridade provisionada por um
+administrador e registro persistente sob controle operacional. O preflight e
+o ensaio mantêm `networkAllowed`, `experimentAuthorized` e
+`experimentExecuted` como falsos.
+
 ## Ensaio de integração
 
 O ensaio automatizado usa um manifesto marcado `synthetic_rehearsal`, com

@@ -42,7 +42,7 @@ export function renderExternalEvalReportMarkdown(
     `- Evidência de desempenho: ${escapeMarkdown(report.performanceEvidence)}`,
     `- Execução técnica: ${escapeMarkdown(report.executionId)}`,
     `- Modelo solicitado: ${escapeMarkdown(report.model.requestedId)}`,
-    `- Modelos informados pelo transporte: ${report.model.providerReportedIds.length === 0 ? 'não informado' : report.model.providerReportedIds.map(escapeMarkdown).join(', ')}`,
+    `- Modelos declarados pelo mock (campo legado): ${report.model.providerReportedIds.length === 0 ? 'não informado' : report.model.providerReportedIds.map(escapeMarkdown).join(', ')}`,
     `- Modelos retornados: ${report.model.returnedIds.length === 0 ? 'não informado' : report.model.returnedIds.map(escapeMarkdown).join(', ')}`,
     `- Provedores identificados: ${report.model.providerIds.length === 0 ? 'não informado' : report.model.providerIds.map(escapeMarkdown).join(', ')}`,
     ...(report.routing === undefined

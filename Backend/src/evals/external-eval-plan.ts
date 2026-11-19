@@ -1,3 +1,4 @@
+import { OPENROUTER_MAX_TIMEOUT_MS } from '../agent/openrouter/openrouter-client.js'
 import { loadEvalDataset, type LoadedEvalDataset } from './eval-loader.js'
 import { sanitizeEvalReportText } from './eval-report-builder.js'
 import { resolveOfflineEvalDataset } from './offline-eval-runner.js'
@@ -107,6 +108,17 @@ export async function planExternalEval(
     )
   }
   if (request.routing !== undefined) {
+    if (
+      request.limits !== undefined &&
+      request.limits.timeoutMs > OPENROUTER_MAX_TIMEOUT_MS
+    ) {
+      blockers.push(
+        blocker(
+          'OPENROUTER_TIMEOUT_EXCEEDS_LIMIT',
+          `O timeout de ${request.limits.timeoutMs} ms excede o máximo de ${OPENROUTER_MAX_TIMEOUT_MS} ms do cliente OpenRouter.`,
+        ),
+      )
+    }
     if (request.pricing?.providerId === undefined) {
       blockers.push(
         blocker(

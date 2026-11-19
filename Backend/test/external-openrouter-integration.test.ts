@@ -6,6 +6,7 @@ import type {
   AgentMessage,
   AgentModelResult,
 } from '../src/agent/agent-model-port.js'
+import { OPENROUTER_MAX_TIMEOUT_MS } from '../src/agent/openrouter/openrouter-client.js'
 import { planExternalEval } from '../src/evals/external-eval-plan.js'
 import {
   createInMemoryOpenRouterTransport,
@@ -14,6 +15,7 @@ import {
   runSimulatedOpenRouterExternalEval,
 } from '../src/evals/external-eval-runner.js'
 import {
+  externalEvalPlanSchema,
   externalEvalReportSchema,
   type ExternalEvalPlanRequest,
 } from '../src/evals/external-eval-schema.js'
@@ -228,6 +230,57 @@ test('preflight vincula roteamento e preço ao mesmo provedor', async () => {
   ))
 })
 
+test('preflight aceita o timeout máximo do cliente OpenRouter', async () => {
+  const request = integrationRequest({
+    datasetId: 'hidrasplash-conversations',
+    scenarioIds: ['hidrasplash.conversation.budget-change.001'],
+  })
+  request.limits!.timeoutMs = OPENROUTER_MAX_TIMEOUT_MS
+  const { plan } = await planExternalEval(request)
+  assert.equal(plan.status, 'ready')
+  assert.equal(plan.executionAllowed, true)
+  assert.deepEqual(plan.blockers, [])
+
+  const controlled = deterministicHttpTransport()
+  const report = await runSimulatedOpenRouterExternalEval(request, {
+    transport: controlled.transport,
+  })
+  assert.equal(report.limits.timeoutMs, OPENROUTER_MAX_TIMEOUT_MS)
+  assert.equal(report.execution.technicalFailures, 0)
+  assert(controlled.calls > 0)
+})
+
+test('preflight bloqueia timeout acima do máximo do OpenRouter antes do transporte', async () => {
+  const request = integrationRequest()
+  const timeoutMs = OPENROUTER_MAX_TIMEOUT_MS + 1
+  request.limits!.timeoutMs = timeoutMs
+  const expectedBlocker = {
+    code: 'OPENROUTER_TIMEOUT_EXCEEDS_LIMIT',
+    detail: `O timeout de ${timeoutMs} ms excede o máximo de ${OPENROUTER_MAX_TIMEOUT_MS} ms do cliente OpenRouter.`,
+  }
+
+  for (const modality of ['dry_run', 'mock_external'] as const) {
+    const { plan } = await planExternalEval({ ...request, modality })
+    const serializedPlan = externalEvalPlanSchema.parse(
+      JSON.parse(JSON.stringify(plan)),
+    )
+    assert.equal(serializedPlan.status, 'blocked')
+    assert.equal(serializedPlan.executionAllowed, false)
+    assert.equal(serializedPlan.networkAllowed, false)
+    assert.deepEqual(serializedPlan.blockers, [expectedBlocker])
+  }
+
+  const controlled = deterministicHttpTransport()
+  await assert.rejects(
+    runSimulatedOpenRouterExternalEval(request, {
+      transport: controlled.transport,
+    }),
+    (error: unknown) =>
+      error instanceof ExternalEvalExecutionError && error.code === 'PLAN_BLOCKED',
+  )
+  assert.equal(controlled.calls, 0)
+})
+
 test('integração simulada multi-turno preserva ferramentas, scoring e proveniência', async () => {
   const controlled = deterministicHttpTransport()
   const originalFetch = globalThis.fetch
@@ -270,7 +323,12 @@ test('integração simulada multi-turno preserva ferramentas, scoring e proveni�
     assert(controlled.bodies.every((body) => !('models' in body)))
     const json = serializeExternalEvalReport(report)
     const markdown = renderExternalEvalReportMarkdown(report)
-    assert.deepEqual(externalEvalReportSchema.parse(JSON.parse(json)), report)
+    const serialized = externalEvalReportSchema.parse(JSON.parse(json))
+    assert.deepEqual(serialized, report)
+    assert.deepEqual(serialized.model.returnedIds, [modelId])
+    assert.deepEqual(serialized.model.providerReportedIds, [])
+    assert(markdown.includes('- Modelos retornados: mock/provider\\-model'))
+    assert(markdown.includes('- Provedores identificados: mock\\-provider'))
     assert(markdown.includes('simulated\\_external\\_transport'))
     assert(markdown.includes(report.executionId.replace('-', '\\-')))
   } finally {
@@ -291,6 +349,8 @@ test('modelo divergente interrompe transportes futuros', async () => {
   )
   assert.equal(controlled.calls, 1)
   assert.equal(report.model.observations.length, 1)
+  assert.equal(report.model.observations[0]?.returnedModelId, 'other/model')
+  assert.deepEqual(report.model.returnedIds, ['other/model'])
   assert.equal(report.model.observations[0]?.modelIdentityMatches, false)
   assert(report.execution.technicalFailures > 0)
   assert(report.objectiveEvaluation.summary.assertions.notEvaluated > 0)
@@ -303,6 +363,10 @@ test('provedor não identificado não é fabricado', async () => {
     { transport: controlled.transport },
   )
   assert.deepEqual(report.model.providerIds, [])
+  assert.deepEqual(report.model.returnedIds, [modelId])
+  assert(renderExternalEvalReportMarkdown(report).includes(
+    '- Provedores identificados: não informado',
+  ))
   assert.equal(report.model.observations[0]?.providerId, undefined)
   assert.equal(
     report.model.observations[0]?.providerIdentityMatches,

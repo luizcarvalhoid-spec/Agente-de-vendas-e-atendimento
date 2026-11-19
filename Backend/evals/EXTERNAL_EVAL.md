@@ -43,6 +43,12 @@ provedor, `allow_fallbacks=false`, `require_parameters=true`, política de colet
 de dados e, quando aplicável, ZDR. O provedor do preço deve ser o mesmo do
 roteamento. Não há lista de modelos alternativos.
 
+Com roteamento OpenRouter, o preflight aplica o limite de timeout do cliente
+(60.000 ms). Acima desse valor, o plano retorna o bloqueio
+`OPENROUTER_TIMEOUT_EXCEEDS_LIMIT`. Mocks genéricos sem roteamento continuam
+aceitando até 300.000 ms no preflight. Durante a avaliação, cada turno também
+respeita o teto de 45.000 ms do orquestrador.
+
 Preços não são embutidos no projeto. Se o pior caso exceder o orçamento, o plano
 é bloqueado antes da execução.
 
@@ -98,6 +104,11 @@ Cada relatório possui `executionId` determinístico e mantém separados o model
 solicitado, os modelos retornados e os provedores realmente observados. Também
 preserva IDs de geração sanitizados, motivo de término, integridade de uso e
 divergências de identidade.
+
+`returnedIds` contém apenas modelos observados pelo adaptador e fica vazio
+quando não há observações. O campo legado `providerReportedIds` registra IDs
+declarados pelo mock. `providerIds` contém somente os provedores identificados
+nas respostas do transporte.
 
 A avaliação objetiva reutiliza o motor EVAL-04, mas fica dentro do contrato
 EVAL-07. O relatório EVAL-05 continua restrito a `mode: offline`; resultados de

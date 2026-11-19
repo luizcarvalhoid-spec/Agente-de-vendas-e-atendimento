@@ -13,7 +13,10 @@ import {
   createOpenRouterClient,
   type OpenRouterTransport,
 } from '../agent/openrouter/openrouter-client.js'
-import { TOOL_ORCHESTRATOR_MAX_MODEL_CALLS } from '../agent/tool-orchestrator.js'
+import {
+  TOOL_ORCHESTRATOR_MAX_MODEL_CALLS,
+  TOOL_ORCHESTRATOR_TIMEOUT_MS,
+} from '../agent/tool-orchestrator.js'
 import { loadCatalogRepository } from '../catalog/catalog-repository.js'
 import { createEvalCanonicalData } from './eval-assertion-engine.js'
 import { ExternalEvalCostController } from './external-eval-cost.js'
@@ -123,6 +126,7 @@ interface RunControlledExternalEvalOptions {
     context: MockExternalEvalModelContext & {
       readonly modelId: string
       readonly routing: NonNullable<ExternalEvalReport['routing']> | undefined
+      readonly limits: ExternalEvalReport['limits']
     },
   ) => AgentModelPort
   readonly validateModel?: (model: AgentModelPort) => void
@@ -191,12 +195,13 @@ async function runControlledExternalEval(
     plan.limits === undefined ||
     plan.pricing === undefined ||
     plan.maxBudgetUsd === undefined ||
-    plan.unreportedUsageMultiplier === undefined
-    || (options.requireRouting === true && plan.routing === undefined)
+    plan.unreportedUsageMultiplier === undefined ||
+    (options.requireRouting === true && plan.routing === undefined)
   ) {
     throw new ExternalEvalExecutionError('PLAN_BLOCKED')
   }
 
+  const { limits } = plan
   const catalog = await loadCatalogRepository()
   const sanitizedRequestedModelId = sanitizeEvalReportText(plan.modelId)
   const sanitizedProviderModelId =
@@ -215,7 +220,7 @@ async function runControlledExternalEval(
   })
   const runtimeFactory = await createEvalScenarioRuntimeFactory({
     catalog,
-    timeoutMs: plan.limits.timeoutMs,
+    timeoutMs: Math.min(limits.timeoutMs, TOOL_ORCHESTRATOR_TIMEOUT_MS),
     maxModelCalls: Math.min(
       plan.limits.maxModelCalls,
       TOOL_ORCHESTRATOR_MAX_MODEL_CALLS,
@@ -227,6 +232,7 @@ async function runControlledExternalEval(
         trace,
         modelId: plan.modelId!,
         routing: plan.routing,
+        limits,
       })
       options.validateModel?.(raw)
       return costs.wrap(tracedModel(raw, trace))
@@ -288,11 +294,7 @@ async function runControlledExternalEval(
   ]
   const returnedIds = [
     ...new Set(
-      options.observations.length === 0
-        ? providerReportedIds
-        : options.observations.map(
-            (observation) => observation.returnedModelId,
-          ),
+      options.observations.map((observation) => observation.returnedModelId),
     ),
   ]
   const executionId = `external-${createHash('sha256')
@@ -464,7 +466,7 @@ export async function runSimulatedOpenRouterExternalEval(
   return runControlledExternalEval(request, {
     requireRouting: true,
     observations,
-    createModel({ modelId, routing }) {
+    createModel({ modelId, routing, limits }) {
       if (routing === undefined) {
         throw new ExternalEvalExecutionError('PLAN_BLOCKED')
       }
@@ -472,8 +474,8 @@ export async function runSimulatedOpenRouterExternalEval(
         apiKey: 'EVAL_07B_SIMULATED_KEY',
         model: modelId,
         transport: options.transport,
-        timeoutMs: request.limits?.timeoutMs,
-        maxOutputTokens: request.limits?.maxOutputTokensPerCall,
+        timeoutMs: limits.timeoutMs,
+        maxOutputTokens: limits.maxOutputTokensPerCall,
         evaluationRouting: routing,
       })
       const externalModel = createOpenRouterAgentModel(client, {

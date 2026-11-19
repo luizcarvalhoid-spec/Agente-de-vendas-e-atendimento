@@ -1,0 +1,54 @@
+{
+  "manifestVersion": 1,
+  "experimentId": "first-external-canary-gpt-4.1-mini-azure",
+  "purpose": "external_candidate",
+  "environment": "isolated_non_production",
+  "dataset": {
+    "id": "universal-core",
+    "version": "1.0.0",
+    "fingerprint": "sha256:170eb1cbfd57f35b979c61688d8ab56490ed964c3a327323dc3bd95a094e4b93"
+  },
+  "scenarioIds": [
+    "universal.core.incomplete-need.001"
+  ],
+  "generation": {
+    "stream": false,
+    "sampling": "provider_defaults",
+    "toolChoice": "chat_service"
+  },
+  "modelId": "openai/gpt-4.1-mini",
+  "routing": {
+    "providerId": "azure",
+    "allowFallbacks": false,
+    "requireParameters": true,
+    "dataCollection": "deny",
+    "zeroDataRetention": true
+  },
+  "limits": {
+    "maxModelCalls": 2,
+    "maxInputTokensPerCall": 20000,
+    "maxOutputTokensPerCall": 512,
+    "maxExecutionTokens": 41024,
+    "timeoutMs": 15000,
+    "effectiveTimeoutMs": 15000
+  },
+  "maxBudgetUsd": 1,
+  "unreportedUsageMultiplier": 1.25,
+  "outputDirectory": "external-eval-reports/first-external-canary-gpt-4.1-mini-azure",
+  "transcriptPersistence": "disabled",
+  "stopCriteria": [
+    "technical_failure",
+    "model_identity_mismatch",
+    "provider_identity_mismatch_or_unobserved",
+    "preventive_limit_reached",
+    "reported_usage_exceeded_reservation",
+    "operator_cancellation"
+  ],
+  "technicalVersions": {
+    "datasetSchema": 1,
+    "externalPlan": 2,
+    "externalReport": 2,
+    "objectiveReport": 1,
+    "objectiveEngine": "deterministic-assertion-engine-v1"
+  }
+}

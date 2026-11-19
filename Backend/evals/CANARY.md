@@ -51,6 +51,77 @@ e teto financeiro externo. Após o merge, preencha a revisão efetivamente
 carregada numa cópia operacional, gere um novo preflight e revise o
 fingerprint resultante antes de obter atestações ou assinatura.
 
+## Alternativa Azure para GPT-4.1 Mini (EVAL-07B.5)
+
+A variante [Azure](canary/gpt-4.1-mini-azure-candidate.v1.json) preserva
+modelo, cenário, limites, margem e orçamento do candidato OpenAI. `azure`
+designa a família de provedor pesquisada. Os GETs públicos e a documentação
+consultados em 19/11/2026 foram resumidos em
+[evidência versionada](canary/gpt-4.1-mini-endpoint-evidence.v1.json),
+com horários UTC e uma seleção de campos de catálogo.
+
+| Endpoint observado | Escopo | Evidência ZDR | Tarifas entrada/saída em USD por milhão | Reserva estimada em USD |
+| --- | --- | --- | ---: | ---: |
+| `openai` · `872eccb7-9c85-45fc-974a-ff7c8e2407e6` | Chat global | Excluído pelo ZDR para modelos OpenAI | 0,40 / 1,60 | 0,022048 |
+| `azure` · `1551aa56-4221-448a-b280-f862f73c27de` | Chat global | Indicador da página e lista pública ZDR, com `safety_retention: false` | 0,40 / 1,60 | 0,022048 |
+| `azure/swedencentral` · `fd1475c4-5864-42c0-bca0-d78568a069cb` | Chat regional | Indicador da página positivo. Ausente na lista ZDR global consultada. | 0,44 / 1,76 | 0,0242528 |
+| `openai` · `fe95eb82-a92a-4886-8492-7a138b2afc5f` | Batch | Sem evidência de ZDR para este fluxo | 0,20 / 0,80 | Fora do escopo |
+
+O maior valor observado para Azure é USD 0,0242528, abaixo do orçamento de
+USD 1,00. Ele compara as tarifas publicadas com os mesmos limites de duas
+chamadas e margem 1,25. A variante deixa `pricing` e `sourceRevision`
+pendentes até confirmar o endpoint, sua tarifa aplicável e o checkout. Seu
+preflight permanece `configuration_incomplete`, sem fingerprint definitivo
+ou reserva aprovada. O candidato OpenAI foi mantido como histórico.
+
+O [guia de roteamento](https://openrouter.ai/docs/guides/routing/provider-selection)
+explica que `order` e `only` com slug base podem alcançar todos os endpoints
+elegíveis da família. Desabilitar fallback não seleciona um UUID do catálogo.
+A página associa o UUID regional ao slug `azure/swedencentral` e descreve
+essa oferta no roteamento regional da UE. O cliente atual usa a URL global.
+A variante regional não foi adotada. O manifesto v1 aceita slugs base para
+este ensaio. Antes de propor um endpoint específico, valide o seletor e o
+contrato de roteamento aplicáveis.
+
+O Azure global anuncia `max_completion_tokens`, `tools`, `tool_choice` e
+escolha automática de ferramenta. O OpenAI direto anuncia `max_tokens`.
+A [API de chat](https://openrouter.ai/docs/api/api-reference/chat/send-chat-completion-request)
+documenta ambos e deprecia `max_tokens`, sem comprovar equivalência no
+filtro `require_parameters`. Mantemos `max_completion_tokens`,
+`stream: false` e `require_parameters: true`. O ensaio em memória verifica
+o formato enviado, sem tratar o resultado como teste de compatibilidade em
+produção.
+
+O [guia ZDR](https://openrouter.ai/docs/guides/features/zdr) exclui o OpenAI
+de primeira parte sob ZDR para o grupo OpenAI. A página descreve os endpoints
+Azure observados sem retenção de prompts, treinamento ou Safety Retention,
+mas as condições efetivas da conta não foram verificadas. `zdr: true` aplica
+a política da conta ou guardrail. Onde houver a opção de permitir Safety
+Retention, o canário exige `ZDR only`. Confira a configuração efetiva do
+grupo OpenAI, as opções de retenção aplicáveis, `data_collection: deny` e o
+teto financeiro da conta. Nenhuma configuração da conta foi consultada.
+
+A API documenta o opt-in `X-OpenRouter-Metadata`. Seu
+[exemplo de guardrail](https://openrouter.ai/docs/guides/features/guardrails/overview)
+mostra `provider` como nome de exibição. O cliente registra o campo
+`provider` retornado ou o provedor de uma única entrada marcada
+`selected` nos metadados. A comparação exige identidade literal. Uma
+resposta `Azure` ou sem provedor não comprova a identidade configurada
+`azure`. O endpoint efetivo também permanece desconhecido. Um UUID de
+catálogo e os campos enviados em `only` não são evidência de execução.
+
+Em `Backend`, o comando abaixo gera JSON e Markdown com as evidências e
+os preflights offline.
+
+```sh
+pnpm exec tsx src/scripts/eval-canary-compatibility.ts --output-dir external-eval-reports/gpt-4.1-mini-azure-compatibility
+```
+
+A alternativa segue documental e o gate mantém `LIVE_EXECUTION_DISABLED`.
+Uma futura mudança de provedor para execução depende de aprovação separada,
+confirmação da rota e da identidade observável, política ZDR efetiva
+sem Safety Retention não aprovada, tarifa e limite de conta confirmados.
+
 ## Preflight local
 
 A partir de `Backend`, gere os dois relatórios de preparação:

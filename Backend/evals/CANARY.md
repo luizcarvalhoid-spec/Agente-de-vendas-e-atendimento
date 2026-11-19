@@ -6,6 +6,51 @@ Ele seleciona `universal.core.incomplete-need.001` no dataset `universal-core`.
 pergunta de esclarecimento. Modelo, provedor e configuração financeira aguardam
 decisão humana.
 
+## Candidato GPT-4.1 Mini (EVAL-07B.4)
+
+O [candidato versionado](canary/gpt-4.1-mini-candidate.v1.json) fixa
+`openai/gpt-4.1-mini` no provedor `openai`, com `allowFallbacks: false`,
+`requireParameters: true`, `dataCollection: deny` e
+`zeroDataRetention: true`. Mantém o cenário universal do rascunho original,
+com persistência de transcrições desativada. O plano propõe duas chamadas de
+até 20.000 tokens estimados de entrada e 512 de saída, teto total de 41.024,
+timeout de 15.000 ms tanto no cliente quanto no turno e orçamento de USD 1,00.
+
+O preço de referência do endpoint OpenAI é USD 0,40 de entrada e USD 1,60 de
+saída por milhão de tokens. Os valores foram observados no GET público do
+catálogo em 19/11/2026 às 11:31:29 em São Paulo. O instante UTC observado foi
+registrado em `pricing.confirmedAt`. A confirmação humana do preço, da fonte
+e do teto na conta permanece pendente.
+[Página do modelo](https://openrouter.ai/openai/gpt-4.1-mini) ·
+[Catálogo de endpoints do modelo](https://openrouter.ai/api/v1/models/openai/gpt-4.1-mini/endpoints)
+
+Com margem 1,25, a estimativa é de USD 0,0088192 por chamada e USD 0,0176384
+para duas chamadas. A reserva preventiva é de USD 0,011024 por chamada e
+USD 0,022048 no total, deixando USD 0,977952 no orçamento proposto.
+
+A [lista pública de endpoints ZDR](https://openrouter.ai/api/v1/endpoints/zdr),
+consultada em 19/11/2026, mostrou uma entrada do modelo com tag `azure` e
+nenhuma com a combinação exata de modelo e tag `openai`. A elegibilidade do
+endpoint pretendido permanece pendente (`data_policy_review_pending`).
+O catálogo do endpoint OpenAI anuncia `max_tokens` em
+`supported_parameters`. Antes de uma eventual ativação, confirme como o
+filtro `requireParameters` trata `max_completion_tokens`, campo enviado
+pelo cliente atual. A rota segue vinculada ao provedor OpenAI e exige ZDR.
+
+Para gerar os relatórios offline a partir de `Backend`:
+
+```sh
+pnpm eval:canary --action prepare --manifest evals/canary/gpt-4.1-mini-candidate.v1.json --output-dir external-eval-reports/gpt-4.1-mini-prepare
+pnpm eval:canary --action verify --manifest evals/canary/gpt-4.1-mini-candidate.v1.json --output-dir external-eval-reports/gpt-4.1-mini-verify
+```
+
+O preparo calcula os custos do rascunho e permanece
+`configuration_incomplete` sem `sourceRevision` ou fingerprint do plano.
+O gate mantém `LIVE_EXECUTION_DISABLED`, junto com as pendências de autoridade
+e teto financeiro externo. Após o merge, preencha a revisão efetivamente
+carregada numa cópia operacional, gere um novo preflight e revise o
+fingerprint resultante antes de obter atestações ou assinatura.
+
 ## Preflight local
 
 A partir de `Backend`, gere os dois relatórios de preparação:

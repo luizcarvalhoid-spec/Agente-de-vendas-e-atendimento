@@ -249,7 +249,7 @@ async function inspectOperations(
     blockers: [...blockers, 'LIVE_EXECUTION_DISABLED'],
     rehearsalEligible,
     financial: {
-      manifestBudgetUsd: manifest?.maxBudgetUsd,
+      manifestBudgetUsd: prep.draft?.maxBudgetUsd,
       authorityBudgetUsd: approval?.approvedBudgetUsd,
       providerAccountLimitUsd: providerAccountLimitVerified ? approval?.providerSpendLimit?.limitUsd : undefined,
       estimatedReservationUsd: prep.budget?.reservedUsdTotal,

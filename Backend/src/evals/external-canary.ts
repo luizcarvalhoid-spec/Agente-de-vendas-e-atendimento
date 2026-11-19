@@ -128,7 +128,10 @@ export function fingerprintExternalCanaryManifest(input: unknown) {
   return fingerprintEvalValue(externalCanaryManifestSchema.parse(input))
 }
 
-function requestFor(manifest: ExternalCanaryManifest, modality: 'dry_run' | 'mock_external') {
+const canaryPreparationConfigurationSchema = externalCanaryManifestSchema.omit({ sourceRevision: true })
+type CanaryPreparationConfiguration = Omit<ExternalCanaryManifest, 'sourceRevision'>
+
+function requestFor(manifest: CanaryPreparationConfiguration, modality: 'dry_run' | 'mock_external') {
   const { effectiveTimeoutMs: _effectiveTimeoutMs, maxInputTokensPerCall, ...limits } = manifest.limits
   return {
     modality,
@@ -144,7 +147,7 @@ function requestFor(manifest: ExternalCanaryManifest, modality: 'dry_run' | 'moc
   } satisfies ExternalEvalPlanRequest
 }
 
-function budgetFor(manifest: ExternalCanaryManifest, locallyApproved: boolean): CanaryBudget {
+function budgetFor(manifest: CanaryPreparationConfiguration, locallyApproved: boolean): CanaryBudget {
   const request = requestFor(manifest, 'dry_run')
   const cost = {
     inputTokens: manifest.limits.maxInputTokensPerCall,
@@ -203,22 +206,29 @@ async function inspectCanary(input: unknown, reviewInput?: unknown) {
     } else {
       manifest = complete.data
       manifestFingerprint = fingerprintExternalCanaryManifest(manifest)
-      const request = requestFor(manifest, 'dry_run')
-      budget = budgetFor(manifest, false)
-      if (manifest.limits.effectiveTimeoutMs !== Math.min(
-        manifest.limits.timeoutMs,
+    }
+
+    // Um plano com parâmetros completos pode ser estimado enquanto aguarda a revisão Git.
+    const { sourceRevision: _sourceRevision, ...draftConfiguration } = draft.data
+    const configuration = complete.success ? complete : canaryPreparationConfigurationSchema.safeParse(draftConfiguration)
+    if (configuration.success) {
+      const candidate = configuration.data
+      const request = requestFor(candidate, 'dry_run')
+      budget = budgetFor(candidate, false)
+      if (candidate.limits.effectiveTimeoutMs !== Math.min(
+        candidate.limits.timeoutMs,
         TOOL_ORCHESTRATOR_TIMEOUT_MS,
       )) {
         issues.push({ code: 'EFFECTIVE_TIMEOUT_MISMATCH', field: 'limits.effectiveTimeoutMs' })
       }
-      if (manifest.limits.maxModelCalls > TOOL_ORCHESTRATOR_MAX_MODEL_CALLS) {
+      if (candidate.limits.maxModelCalls > TOOL_ORCHESTRATOR_MAX_MODEL_CALLS) {
         issues.push({ code: 'ORCHESTRATOR_CALL_LIMIT_EXCEEDED', field: 'limits.maxModelCalls' })
       }
-      const syntheticSource = new URL(manifest.pricing.source).hostname.endsWith('.invalid')
-      if (syntheticSource !== (manifest.purpose === 'synthetic_rehearsal')) {
+      const syntheticSource = new URL(candidate.pricing.source).hostname.endsWith('.invalid')
+      if (syntheticSource !== (candidate.purpose === 'synthetic_rehearsal')) {
         issues.push({ code: 'PRICE_SOURCE_PURPOSE_MISMATCH', field: 'pricing.source' })
       }
-      if (Date.parse(manifest.pricing.confirmedAt) > Date.now()) {
+      if (Date.parse(candidate.pricing.confirmedAt) > Date.now()) {
         issues.push({ code: 'PRICE_CONFIRMATION_IN_FUTURE', field: 'pricing.confirmedAt' })
       }
 
@@ -226,9 +236,9 @@ async function inspectCanary(input: unknown, reviewInput?: unknown) {
         const { plan, loaded } = await planExternalEval(request)
         issues.push(...plan.blockers.map(({ code }) => ({ code })))
         if (loaded !== undefined && (
-          fingerprintEvalDataset(loaded) !== manifest.dataset.fingerprint ||
-          loaded.data.dataset.id !== manifest.dataset.id ||
-          loaded.data.dataset.version !== manifest.dataset.version
+          fingerprintEvalDataset(loaded) !== candidate.dataset.fingerprint ||
+          loaded.data.dataset.id !== candidate.dataset.id ||
+          loaded.data.dataset.version !== candidate.dataset.version
         )) {
           issues.push({ code: 'DATASET_FINGERPRINT_OR_VERSION_MISMATCH', field: 'dataset' })
         }
@@ -236,7 +246,7 @@ async function inspectCanary(input: unknown, reviewInput?: unknown) {
         if (!(error instanceof ZodError)) throw error
         issues.push({ code: budget.sufficient ? 'PREFLIGHT_INVALID' : 'ESTIMATED_COST_EXCEEDS_BUDGET' })
       }
-      if (issues.length === 0) {
+      if (manifest !== undefined && issues.length === 0) {
         requirements.technical_configuration = 'passed'
         stages.push('technical_preflight_passed')
         status = 'ready_for_human_review'

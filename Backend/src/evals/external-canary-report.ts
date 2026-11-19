@@ -39,6 +39,9 @@ export function renderExternalCanaryPreparationMarkdown(report: ExternalCanaryPr
     `- Roteamento: provedor único, fallback desabilitado e parâmetros obrigatórios${draft?.routing === undefined ? ' (configuração pendente)' : ''}.`,
     `- Coleta de dados: ${text(draft?.routing?.dataCollection)}`,
     `- Retenção zero: ${draft?.routing?.zeroDataRetention === undefined ? 'pendente' : draft.routing.zeroDataRetention ? 'exigida' : 'não exigida'}`,
+    ...(draft?.routing?.zeroDataRetention === true && report.requirements.data_policy === 'pending'
+      ? ['- Elegibilidade ZDR do endpoint: pendente de verificação.']
+      : []),
     `- Amostragem: ${text(draft?.generation.sampling)}. Streaming desabilitado.`,
     `- Escolha de ferramentas: ${text(draft?.generation.toolChoice)}`,
     `- Persistência de transcrições: ${text(draft?.transcriptPersistence)}`,
@@ -54,6 +57,7 @@ export function renderExternalCanaryPreparationMarkdown(report: ExternalCanaryPr
     `- Margem de segurança: ${draft?.unreportedUsageMultiplier ?? 'pendente'}`,
     `- Orçamento configurado: ${money(draft?.maxBudgetUsd)}`,
     ...(budget === undefined ? [] : [
+      ...(report.status === 'configuration_incomplete' ? ['- Estimativa de rascunho para revisão.'] : []),
       `- Estimativa por chamada e total: ${money(budget.estimatedUsdPerCall)} / ${money(budget.estimatedUsdTotal)}`,
       `- Reserva por chamada e total: ${money(budget.reservedUsdPerCall)} / ${money(budget.reservedUsdTotal)}`,
       `- Orçamento atestado: ${money(budget.approvedMaxBudgetUsd)}`,

@@ -80,7 +80,11 @@ function raceModelWithAbort(
   promise: Promise<AgentModelResult>,
   signal: AbortSignal,
 ) {
-  if (signal.aborted) return Promise.reject(abortedError(signal, true))
+  if (signal.aborted) {
+    // A chamada assíncrona pode ter acionado o cancelamento antes de devolver a promessa.
+    void promise.catch(() => undefined)
+    return Promise.reject(abortedError(signal, true))
+  }
   return new Promise<AgentModelResult>((resolve, reject) => {
     const abort = () => {
       signal.removeEventListener('abort', abort)
@@ -129,6 +133,7 @@ export interface ExternalEvalCostControllerOptions {
   readonly pricing: NonNullable<ExternalEvalPlan['pricing']>
   readonly maxBudgetUsd: number
   readonly unreportedUsageMultiplier: number
+  readonly maxInputTokensPerCall?: number
 }
 
 export class ExternalEvalCostController {
@@ -254,6 +259,18 @@ export class ExternalEvalCostController {
           throw error
         }
         if (this.reached.has('reported_usage_exceeded_reservation')) {
+          this.rejectedEvent(
+            'LOCAL_BUDGET_EXHAUSTED',
+            estimatedInputTokens,
+            requestedOutputTokens,
+          )
+          throw new AgentModelError('LOCAL_BUDGET_EXHAUSTED', false)
+        }
+        if (
+          this.options.maxInputTokensPerCall !== undefined &&
+          estimatedInputTokens > this.options.maxInputTokensPerCall
+        ) {
+          this.reached.add('max_input_tokens_per_call')
           this.rejectedEvent(
             'LOCAL_BUDGET_EXHAUSTED',
             estimatedInputTokens,

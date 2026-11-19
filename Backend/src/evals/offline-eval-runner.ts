@@ -130,6 +130,7 @@ export interface RunOfflineEvalOptions {
   readonly createScenarioRuntime?: OfflineScenarioRuntimeFactory
   readonly evaluateAssertions?: boolean
   readonly canonicalData?: EvalCanonicalData
+  readonly signal?: AbortSignal
 }
 
 function resolveEvalRoot(moduleUrl: string = import.meta.url) {
@@ -348,6 +349,7 @@ async function executeScenario(
   datasetId: string,
   scenario: EvalCase,
   createScenarioRuntime: OfflineScenarioRuntimeFactory,
+  signal?: AbortSignal,
 ): Promise<EvalScenarioExecution> {
   const runtime = await createScenarioRuntime(scenario)
   let history = structuredClone(scenario.input.initialState.history)
@@ -419,7 +421,7 @@ async function executeScenario(
           scenario.id,
           turnIndex,
         ),
-        signal: new AbortController().signal,
+        signal: signal ?? new AbortController().signal,
       })
       turns.push({
         datasetId,
@@ -516,6 +518,7 @@ export async function runOfflineEvalDataset(
         loaded.data.dataset.id,
         scenario,
         createScenarioRuntime,
+        options.signal,
       ),
     )
   }

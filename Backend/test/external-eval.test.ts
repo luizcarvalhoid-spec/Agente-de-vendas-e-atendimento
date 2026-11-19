@@ -339,6 +339,39 @@ test('execução mock multi-turno usa ChatService, ferramentas e assertions reai
   assert.deepEqual(report.model.providerReportedIds, [
     'mock/provider-reported-v1',
   ])
+  const serialized = externalEvalReportSchema.parse(
+    JSON.parse(serializeExternalEvalReport(report)),
+  )
+  assert.deepEqual(serialized.model.returnedIds, [])
+  assert.deepEqual(serialized.model.providerIds, [])
+  assert.deepEqual(serialized.model.observations, [])
+  const markdown = renderExternalEvalReportMarkdown(report)
+  assert(markdown.includes(
+    '- Modelos declarados pelo mock (campo legado): mock/provider\\-reported\\-v1',
+  ))
+  assert(markdown.includes('- Modelos retornados: não informado'))
+  assert(markdown.includes('- Provedores identificados: não informado'))
+})
+
+test('mock genérico aceita seu timeout máximo sem inventar identidades', async () => {
+  const request = validRequest({
+    datasetId: 'hidrasplash-conversations',
+    scenarioIds: ['hidrasplash.conversation.budget-change.001'],
+  })
+  request.limits!.timeoutMs = 300_000
+  const { plan } = await planExternalEval(request)
+  assert.equal(plan.status, 'ready')
+  assert.deepEqual(plan.blockers, [])
+
+  const report = await runMockExternalEval(request, {
+    createModel: () => mockModel(createMvpDeterministicModel()),
+  })
+  assert.equal(report.execution.technicalFailures, 0)
+  assert(report.execution.modelCalls > 0)
+  assert.deepEqual(report.model.providerReportedIds, [])
+  assert.deepEqual(report.model.returnedIds, [])
+  assert.deepEqual(report.model.providerIds, [])
+  assert.deepEqual(report.model.observations, [])
 })
 
 test('cada cenário recebe instância isolada do modelo', async () => {

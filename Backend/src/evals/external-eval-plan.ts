@@ -1,3 +1,4 @@
+import { OPENROUTER_MAX_TIMEOUT_MS } from '../agent/openrouter/openrouter-client.js'
 import { loadEvalDataset, type LoadedEvalDataset } from './eval-loader.js'
 import { sanitizeEvalReportText } from './eval-report-builder.js'
 import { resolveOfflineEvalDataset } from './offline-eval-runner.js'
@@ -106,6 +107,34 @@ export async function planExternalEval(
       ),
     )
   }
+  if (request.routing !== undefined) {
+    if (
+      request.limits !== undefined &&
+      request.limits.timeoutMs > OPENROUTER_MAX_TIMEOUT_MS
+    ) {
+      blockers.push(
+        blocker(
+          'OPENROUTER_TIMEOUT_EXCEEDS_LIMIT',
+          `O timeout de ${request.limits.timeoutMs} ms excede o máximo de ${OPENROUTER_MAX_TIMEOUT_MS} ms do cliente OpenRouter.`,
+        ),
+      )
+    }
+    if (request.pricing?.providerId === undefined) {
+      blockers.push(
+        blocker(
+          'PRICING_PROVIDER_REQUIRED',
+          'Vincule explicitamente o preço ao provedor selecionado.',
+        ),
+      )
+    } else if (request.pricing.providerId !== request.routing.providerId) {
+      blockers.push(
+        blocker(
+          'PRICING_PROVIDER_MISMATCH',
+          'O provedor da tabela de preços difere do roteamento selecionado.',
+        ),
+      )
+    }
+  }
   if (request.pricing === undefined) {
     blockers.push(
       blocker(
@@ -166,6 +195,14 @@ export async function planExternalEval(
   }
 
   if (request.modality === 'live_external') {
+    if (request.routing === undefined) {
+      blockers.push(
+        blocker(
+          'ROUTING_REQUIRED',
+          'A integração externa exige roteamento reprodutível explícito.',
+        ),
+      )
+    }
     if (
       request.liveAuthorization?.enabled !== true ||
       request.liveAuthorization.confirmation !==
@@ -181,7 +218,7 @@ export async function planExternalEval(
     blockers.push(
       blocker(
         'LIVE_EXTERNAL_DISABLED',
-        'A EVAL-07A não implementa nem autoriza conexão externa real.',
+        'A EVAL-07B.1 prepara a integração, mas não autoriza conexão externa real.',
       ),
     )
   }
@@ -221,6 +258,16 @@ export async function planExternalEval(
     ...(request.modelId === undefined
       ? {}
       : { modelId: sanitizeEvalReportText(request.modelId) }),
+    ...(request.routing === undefined
+      ? {}
+      : {
+          routing: {
+            ...request.routing,
+            providerId: sanitizeEvalReportText(
+              request.routing.providerId,
+            ),
+          },
+        }),
     ...(request.outputDirectory === undefined
       ? {}
       : {
@@ -235,6 +282,20 @@ export async function planExternalEval(
           pricing: {
             ...request.pricing,
             modelId: sanitizeEvalReportText(request.pricing.modelId),
+            ...(request.pricing.providerId === undefined
+              ? {}
+              : {
+                  providerId: sanitizeEvalReportText(
+                    request.pricing.providerId,
+                  ),
+                }),
+            ...(request.pricing.source === undefined
+              ? {}
+              : {
+                  source: sanitizeEvalReportText(
+                    request.pricing.source,
+                  ),
+                }),
           },
         }),
     ...(request.maxBudgetUsd === undefined

@@ -188,6 +188,8 @@ export class ExternalEvalCostController {
       readonly transportStarted: boolean
       readonly chargedTokens: number
       readonly chargedCostUsd: number
+      readonly overReservedTokens: number
+      readonly overReservedCostUsd: number
     },
   ) {
     if (!this.activeReservations.delete(ordinal)) {
@@ -199,6 +201,12 @@ export class ExternalEvalCostController {
       this.chargedCostUsd = roundMoney(
         this.chargedCostUsd + input.chargedCostUsd,
       )
+    }
+    if (
+      input.overReservedTokens > 0 ||
+      input.overReservedCostUsd > 0
+    ) {
+      this.reached.add('reported_usage_exceeded_reservation')
     }
     this.markReachedLimits()
   }
@@ -222,6 +230,8 @@ export class ExternalEvalCostController {
       usageComplete: true,
       estimatedCostUsd: 0,
       chargedCostUsd: 0,
+      overReservedTokens: 0,
+      overReservedCostUsd: 0,
     })
   }
 
@@ -242,6 +252,14 @@ export class ExternalEvalCostController {
             requestedOutputTokens,
           )
           throw error
+        }
+        if (this.reached.has('reported_usage_exceeded_reservation')) {
+          this.rejectedEvent(
+            'LOCAL_BUDGET_EXHAUSTED',
+            estimatedInputTokens,
+            requestedOutputTokens,
+          )
+          throw new AgentModelError('LOCAL_BUDGET_EXHAUSTED', false)
         }
         if (
           requestedOutputTokens >
@@ -330,6 +348,8 @@ export class ExternalEvalCostController {
             transportStarted,
             chargedTokens,
             chargedCostUsd: chargedCost,
+            overReservedTokens: 0,
+            overReservedCostUsd: 0,
           })
           this.events.push({
             ordinal,
@@ -344,6 +364,8 @@ export class ExternalEvalCostController {
             usageComplete: !transportStarted,
             estimatedCostUsd: reservedCost,
             chargedCostUsd: chargedCost,
+            overReservedTokens: 0,
+            overReservedCostUsd: 0,
           })
           throw error
         }
@@ -359,10 +381,19 @@ export class ExternalEvalCostController {
                 this.options.pricing.outputUsdPerMillionTokens,
             })
           : reservedCost
+        const overReservedTokens = Math.max(
+          0,
+          chargedTokens - reservedTokens,
+        )
+        const overReservedCostUsd = roundMoney(
+          Math.max(0, chargedCost - reservedCost),
+        )
         this.reconcile(ordinal, {
           transportStarted: true,
           chargedTokens,
           chargedCostUsd: chargedCost,
+          overReservedTokens,
+          overReservedCostUsd,
         })
         this.events.push({
           ordinal,
@@ -383,6 +414,8 @@ export class ExternalEvalCostController {
           usageComplete: reported !== undefined,
           estimatedCostUsd: reservedCost,
           chargedCostUsd: chargedCost,
+          overReservedTokens,
+          overReservedCostUsd,
         })
         return result
       },
@@ -392,6 +425,16 @@ export class ExternalEvalCostController {
   snapshot() {
     const activeReservedTokens = this.activeReservedTokens()
     const activeReservedCostUsd = this.activeReservedCostUsd()
+    const overReservedTokens = this.events.reduce(
+      (total, event) => total + event.overReservedTokens,
+      0,
+    )
+    const overReservedCostUsd = roundMoney(
+      this.events.reduce(
+        (total, event) => total + event.overReservedCostUsd,
+        0,
+      ),
+    )
     return {
       calls: this.events
         .map((event) => ({ ...event }))
@@ -400,6 +443,8 @@ export class ExternalEvalCostController {
       chargedCostUsd: this.chargedCostUsd,
       chargedTokens: this.chargedTokens,
       transportedCalls: this.transportedCalls,
+      overReservedTokens,
+      overReservedCostUsd,
       activeReservations: this.activeReservations.size,
       activeReservedTokens,
       activeReservedCostUsd,

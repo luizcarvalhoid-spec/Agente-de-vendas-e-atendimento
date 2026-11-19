@@ -1,19 +1,23 @@
-# EVAL-07A — preparação de avaliações externas
+# EVAL-07B.1 — integração OpenRouter sem execução real
 
-A EVAL-07A prepara o fluxo do agente para uma futura avaliação controlada com
-modelo externo. Ela não autoriza rede, OpenRouter ou qualquer chamada
-potencialmente paga. A modalidade `live_external` permanece bloqueada no código
-e na CLI.
+A EVAL-07B.1 conecta tecnicamente cliente OpenRouter, adaptador de modelo,
+`ChatService`, ferramentas, assertions e relatórios usando exclusivamente um
+transporte HTTP em memória registrado pelo runner. Ela não autoriza rede,
+OpenRouter ou qualquer chamada potencialmente paga. A modalidade
+`live_external` permanece bloqueada incondicionalmente no código e na CLI:
+variável de ambiente, flag ou confirmação textual não a habilitam.
 
 ## Modalidades
 
-- `dry_run`: valida dataset, cenários, modelo, limites, preços, orçamento e
-  destino sem executar o agente;
-- `mock_external`: executa o `ChatService`, ferramentas, assertions e relatórios
-  com um modelo registrado explicitamente pela factory mock;
-- `live_external`: reservada para a EVAL-07B e sempre bloqueada nesta etapa.
+- `dry_run`: valida dataset, cenários, modelo, roteamento, limites, preços,
+  orçamento e destino sem executar o agente;
+- `mock_external`: executa o fluxo completo com um modelo registrado pela
+  factory mock ou, no teste de integração, com o cliente OpenRouter real sobre
+  um transporte em memória registrado;
+- `live_external`: reservada para uma etapa futura e sempre bloqueada nesta
+  entrega.
 
-Uma execução mock declara `simulated_external_transport` e
+Uma execução simulada declara `simulated_external_transport` e
 `not_real_model_performance`. Ela nunca deve ser apresentada como evidência de
 desempenho de um modelo real.
 
@@ -27,97 +31,118 @@ pnpm eval:live --action plan \
   --scenario universal.core.incomplete-need.001
 ```
 
-O exemplo retorna um plano bloqueado, pois modelo, limites, preços, orçamento,
-margem para uso não informado e diretório ainda não foram fornecidos. O preflight
-não lê `OPENROUTER_API_KEY`, não instancia o cliente OpenRouter e não permite
-rede.
+O preflight não lê `OPENROUTER_API_KEY`, não instancia o cliente OpenRouter e
+não permite rede. Para um plano completo, informe explicitamente modelo,
+provedor, política de dados, cenários, limites de chamadas/tokens/timeout,
+estimativa conservadora de entrada, preços de entrada e saída por milhão de
+tokens em USD, instante e fonte opcional da confirmação do preço, orçamento,
+margem para uso não informado e diretório de saída.
 
-Para um plano completo, informe explicitamente:
+O roteamento registra um provedor exato. `order` e `only` contêm somente esse
+provedor, `allow_fallbacks=false`, `require_parameters=true`, política de coleta
+de dados e, quando aplicável, ZDR. O provedor do preço deve ser o mesmo do
+roteamento. Não há lista de modelos alternativos.
 
-- modelo;
-- máximo de chamadas;
-- saída máxima por chamada;
-- limite total de tokens;
-- estimativa conservadora de entrada por chamada;
-- timeout;
-- preços de entrada e saída por milhão de tokens, moeda USD e instante de
-  confirmação;
-- orçamento máximo;
-- multiplicador de segurança para uso não informado;
-- diretório de saída.
+Com roteamento OpenRouter, o preflight aplica o limite de timeout do cliente
+(60.000 ms). Acima desse valor, o plano retorna o bloqueio
+`OPENROUTER_TIMEOUT_EXCEEDS_LIMIT`. Mocks genéricos sem roteamento continuam
+aceitando até 300.000 ms no preflight. Durante a avaliação, cada turno também
+respeita o teto de 45.000 ms do orquestrador.
 
-Preços não são embutidos no projeto. A tabela informada deve corresponder
-exatamente ao modelo selecionado. Se o pior caso exceder o orçamento, o plano é
-bloqueado antes da execução.
+Preços não são embutidos no projeto. Se o pior caso exceder o orçamento, o plano
+é bloqueado antes da execução.
 
-## Execução mock
+## Integração simulada
 
-O runner reutiliza o mesmo `ChatService`, catálogo, FAQ, ferramentas, histórico,
-preferências, carrinho, contexto de recomendação, trace e motor de assertions.
-Um modelo simulado deve passar por `createMockExternalEvalModel`: a factory cria
-uma instância registrada, e o runner recusa objetos não registrados. Adaptadores
-externos conhecidos, incluindo o adaptador OpenRouter, são marcados em sua
-criação e não podem ser registrados como mock. A existência de
-`OPENROUTER_API_KEY` não altera essa decisão.
+Um modelo puramente simulado deve passar por `createMockExternalEvalModel`; o
+runner recusa objetos não registrados. Adaptadores externos conhecidos não
+podem ser registrados como mocks. A existência de `OPENROUTER_API_KEY` não
+altera essa decisão.
 
-Essa fronteira evita a injeção acidental dos adaptadores externos conhecidos;
-ela não é uma sandbox para JavaScript arbitrário. Uma factory mock é código
-confiável do processo e não deve executar I/O por conta própria nem encapsular
-um transporte externo desconhecido. Metadados como `networkAllowed: false`
-descrevem a política e o fluxo implementado, mas isoladamente não conseguem
-impedir operações externas realizadas por código arbitrário injetado.
+O caminho OpenRouter simulado usa `createInMemoryOpenRouterTransport`. Somente
+transportes criados por essa factory são aceitos; `globalThis.fetch` e funções
+não registradas são recusados. O cliente serializa a requisição que seria usada
+no futuro e recebe uma resposta HTTP fabricada em memória, exercitando o fluxo
+real sem DNS, socket, credencial ou cobrança. A chave interna é uma sentinela
+fixa, não lê o ambiente e nunca é registrada.
 
-O controle financeiro registra chamadas, tokens e custo reservado antes de
-invocar `model.complete()`. A admissão seguinte considera, em conjunto, consumo
-já contabilizado e todas as reservas ativas. Cada reserva é reconciliada uma
-única vez: com `usage` completo e válido, contabiliza-se o uso reportado e o
-excedente reservado volta a ficar disponível; sem `usage`, mantém-se a reserva
-conservadora com o multiplicador configurado. Falhas após início do transporte,
-timeouts e cancelamentos conservam a reserva; rejeições comprovadamente
-anteriores ao transporte a liberam sem cobrança estimada.
+O adaptador observa separadamente modelo solicitado, modelo retornado, ID da
+geração, provedor somente quando informado pela resposta, `finish_reason` e
+estado de uso (`complete`, `missing` ou `inconsistent`). Divergência de modelo —
+ou de provedor quando ele é efetivamente retornado — interrompe a execução e
+impede chamadas posteriores. A ausência do provedor na resposta não é
+preenchida por suposição.
 
-O snapshot distingue consumo confirmado/contabilizado, reserva ativa e saldo
-preventivamente disponível. Chamadas futuras são recusadas quando a soma
-ultrapassaria chamadas, tokens ou orçamento, inclusive sob concorrência. Valores
-de `estimatedCostUsd` e `chargedCostUsd` continuam sendo estimativas de controle,
-não garantia da cobrança final de um provedor.
+Essa fronteira impede a injeção acidental do transporte de produção; ela não é
+uma sandbox para JavaScript arbitrário. Código confiável de teste não deve
+executar I/O por conta própria.
 
-## Relatórios
+## Controle de custo
 
-O contrato EVAL-07 v1 gera JSON e Markdown a partir do mesmo objeto validado. Os
-artefatos contêm apenas allowlists estruturais: identidades, estados técnicos,
-contagens, grounding, uso, custo estimado e resultados objetivos. Mensagens,
-prompts, credenciais, headers e argumentos brutos de ferramentas não são
-incluídos. Arquivos existentes nunca são sobrescritos.
+O controle financeiro reserva chamadas, tokens e custo antes de iniciar o
+transporte. Cada reserva é reconciliada uma única vez: com `usage` completo e
+válido, contabiliza-se o uso reportado; sem `usage` ou com dados inconsistentes,
+mantém-se a reserva conservadora. Falhas após o início do transporte, timeouts e
+cancelamentos também conservam a reserva. Rejeições comprovadamente anteriores
+ao transporte a liberam sem cobrança estimada.
+
+Quando o uso válido informado excede a reserva, o excesso de tokens e custo fica
+explícito no relatório. A reconciliação contabiliza o valor informado, marca o
+limite afetado e bloqueia admissões futuras; ela não reduz nem oculta o consumo
+para caber no orçamento estimado. Valores de custo continuam sendo estimativas
+de controle, não garantia da cobrança final de um provedor.
+
+## Relatórios e revisão humana
+
+O contrato EVAL-07 v2 gera JSON e Markdown a partir do mesmo objeto validado.
+Os artefatos contêm apenas allowlists estruturais: identidades, estados
+técnicos, contagens, grounding, uso, custo estimado e resultados objetivos.
+Mensagens, prompts, credenciais, headers e argumentos brutos de ferramentas não
+são incluídos. Arquivos existentes nunca são sobrescritos.
+
+Cada relatório possui `executionId` determinístico e mantém separados o modelo
+solicitado, os modelos retornados e os provedores realmente observados. Também
+preserva IDs de geração sanitizados, motivo de término, integridade de uso e
+divergências de identidade.
+
+`returnedIds` contém apenas modelos observados pelo adaptador e fica vazio
+quando não há observações. O campo legado `providerReportedIds` registra IDs
+declarados pelo mock. `providerIds` contém somente os provedores identificados
+nas respostas do transporte.
 
 A avaliação objetiva reutiliza o motor EVAL-04, mas fica dentro do contrato
 EVAL-07. O relatório EVAL-05 continua restrito a `mode: offline`; resultados de
 modelos diferentes não são comparados automaticamente aos baselines EVAL-08.
 
-## Revisão humana
+A integração com a EVAL-06 exige exportação explícita de transcrição já
+sanitizada. A exportação permanece desabilitada para a execução simulada desta
+etapa. Nenhuma nota humana é atribuída automaticamente e nenhuma transcrição é
+persistida por padrão.
 
-A integração com a EVAL-06 exige exportação explícita de uma transcrição já
-sanitizada. Amostras mock usam origem `unverified` e
-`not_real_performance`. Nenhuma nota humana é atribuída automaticamente e nenhuma
-transcrição é persistida por padrão. A identidade da amostra inclui um
-fingerprint SHA-256 dos turnos sanitizados, além de dataset, cenário, modalidade,
-modelo e versões aplicáveis. Transcrições equivalentes geram o mesmo ID;
-respostas sanitizadas diferentes geram IDs distintos, sem incluir texto bruto no
-identificador. A preparação também rejeita divergências entre dataset, cenário,
-quantidade de turnos e o relatório informado.
+## Condições para uma futura ativação real
 
-## Condições futuras da EVAL-07B
+Antes de implementar ou executar `live_external`, será necessária outra entrega,
+revisão e autorização explícita. Esta branch não contém a capacidade pública de
+ativação. A etapa futura deverá, no mínimo:
 
-Antes de implementar ou executar `live_external`, será necessária nova revisão e
-autorização explícita. A etapa deverá, no mínimo:
-
-1. confirmar preços atuais do modelo e registrar sua origem;
-2. exigir modalidade, chave de habilitação e confirmação humana independentes;
-3. exigir modelo, cenários, limites, orçamento e destino explícitos;
-4. conectar a instrumentação ao modelo efetivamente informado pelo provedor;
-5. recomendar e verificar limites financeiros também na conta do provedor;
-6. definir política própria de comparabilidade entre execuções externas;
-7. autorizar separadamente eventual exportação de transcrições sanitizadas.
+1. criar uma capacidade de ativação revisada, separada de variáveis, flags e
+   texto fornecido ao comando;
+2. administrar a credencial real como segredo, sem incluí-la em plano,
+   evidência, erro ou relatório;
+3. aprovar modelo, provedor, roteamento, política de coleta e ZDR;
+4. confirmar preços atuais, provedor e fonte, além de orçamento local e limites
+   financeiros na conta do provedor;
+5. exigir dataset, cenários, parâmetros, cobertura, destino e retenção
+   explicitamente aprovados;
+6. definir consentimento e autorização separados para persistência ou revisão
+   humana de transcrições sanitizadas;
+7. iniciar com canário controlado, monitoramento, interrupção operacional e
+   verificação posterior de uso e cobrança;
+8. comparar execuções externas apenas quando dataset/fingerprint, modelo,
+   provedor, roteamento, parâmetros, limites, contratos, cobertura e procedência
+   forem equivalentes.
 
 Uma variável `OPENROUTER_API_KEY` isolada nunca será autorização suficiente. Não
-há fallback de modelo nem retry automático nesta preparação.
+há fallback de modelo nem retry automático nesta integração. Resultados externos
+futuros não serão comparáveis automaticamente aos baselines determinísticos da
+EVAL-08.

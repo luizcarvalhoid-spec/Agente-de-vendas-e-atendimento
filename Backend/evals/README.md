@@ -253,8 +253,9 @@ falhas conhecidas, melhorias, perdas de evidência, novas falhas críticas e
 problemas técnicos permanecem separados. A política de atualização, os códigos
 de saída e os quatro baselines iniciais estão em `BASELINES.md`.
 
-## Preparação de avaliações externas (EVAL-07A)
+## Integração externa simulada (EVAL-07B.1)
 
-O preflight e o executor exclusivamente mock da EVAL-07A estão documentados em
-`EXTERNAL_EVAL.md`. A modalidade real permanece desabilitada, não há chamadas à
+O preflight, o executor mock e a integração do cliente OpenRouter sobre
+transporte exclusivamente em memória estão documentados em `EXTERNAL_EVAL.md`.
+A modalidade real permanece incondicionalmente desabilitada, não há chamadas à
 OpenRouter e os resultados simulados não são apresentados como desempenho real.

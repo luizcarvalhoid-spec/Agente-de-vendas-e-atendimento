@@ -11,6 +11,9 @@ interface CliOptions {
   dataset?: string
   scenario?: string
   model?: string
+  provider?: string
+  dataCollection?: 'allow' | 'deny'
+  zeroDataRetention?: boolean
   outputDir?: string
   maxCalls?: number
   maxOutputTokens?: number
@@ -20,6 +23,7 @@ interface CliOptions {
   inputPrice?: number
   outputPrice?: number
   priceConfirmedAt?: string
+  priceSource?: string
   budget?: number
   usageMargin?: number
   help: boolean
@@ -30,15 +34,17 @@ function usage() {
     'Uso: pnpm eval:live --action plan --dataset <id> [--scenario <id>] [opções de limites e custo]',
     '',
     'Modalidades: dry_run, mock_external, live_external.',
-    'A EVAL-07A executa somente preflight pela CLI; live_external permanece bloqueado.',
+    'A EVAL-07B.1 executa somente preflight pela CLI; live_external permanece bloqueado.',
     'A existência de OPENROUTER_API_KEY não concede autorização.',
     '',
     'Opções completas:',
     '  --model <id> --output-dir <diretório>',
+    '  --provider <slug> --data-collection <allow|deny> --zdr <true|false>',
     '  --max-calls <n> --max-output-tokens <n> --max-execution-tokens <n>',
     '  --estimated-input-tokens <n> --timeout-ms <n>',
     '  --input-price <USD/milhão> --output-price <USD/milhão>',
     '  --price-confirmed-at <ISO-8601> --budget <USD> --usage-margin <multiplicador>',
+    '  --price-source <referência documental opcional>',
   ].join('\n')
 }
 
@@ -93,6 +99,19 @@ function parseArguments(args: readonly string[]) {
       case '--dataset': options.dataset = value; break
       case '--scenario': options.scenario = value; break
       case '--model': options.model = value; break
+      case '--provider': options.provider = value; break
+      case '--data-collection':
+        if (value !== 'allow' && value !== 'deny') {
+          throw new TypeError('--data-collection aceita allow ou deny.')
+        }
+        options.dataCollection = value
+        break
+      case '--zdr':
+        if (value !== 'true' && value !== 'false') {
+          throw new TypeError('--zdr aceita true ou false.')
+        }
+        options.zeroDataRetention = value === 'true'
+        break
       case '--output-dir': options.outputDir = value; break
       case '--max-calls': options.maxCalls = numeric(value, argument); break
       case '--max-output-tokens': options.maxOutputTokens = numeric(value, argument); break
@@ -102,6 +121,7 @@ function parseArguments(args: readonly string[]) {
       case '--input-price': options.inputPrice = numeric(value, argument); break
       case '--output-price': options.outputPrice = numeric(value, argument); break
       case '--price-confirmed-at': options.priceConfirmedAt = value; break
+      case '--price-source': options.priceSource = value; break
       case '--budget': options.budget = numeric(value, argument); break
       case '--usage-margin': options.usageMargin = numeric(value, argument); break
       default: throw new TypeError(`Opção desconhecida: ${argument}.`)
@@ -130,6 +150,19 @@ function requestFrom(options: CliOptions): ExternalEvalPlanRequest {
       ? {}
       : { scenarioIds: [options.scenario] }),
     ...(options.model === undefined ? {} : { modelId: options.model }),
+    ...(options.provider === undefined || options.dataCollection === undefined
+      ? {}
+      : {
+          routing: {
+            providerId: options.provider,
+            allowFallbacks: false as const,
+            requireParameters: true as const,
+            dataCollection: options.dataCollection,
+            ...(options.zeroDataRetention === undefined
+              ? {}
+              : { zeroDataRetention: options.zeroDataRetention }),
+          },
+        }),
     ...(options.outputDir === undefined
       ? {}
       : { outputDirectory: options.outputDir }),
@@ -152,6 +185,12 @@ function requestFrom(options: CliOptions): ExternalEvalPlanRequest {
             inputUsdPerMillionTokens: options.inputPrice!,
             outputUsdPerMillionTokens: options.outputPrice!,
             confirmedAt: options.priceConfirmedAt!,
+            ...(options.provider === undefined
+              ? {}
+              : { providerId: options.provider }),
+            ...(options.priceSource === undefined
+              ? {}
+              : { source: options.priceSource }),
           },
         }
       : {}),

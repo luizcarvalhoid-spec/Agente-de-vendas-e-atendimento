@@ -21,6 +21,23 @@ const OPENROUTER_MAX_TOOL_NAME_CHARACTERS = 64
 const OPENROUTER_MAX_IDENTIFIER_CHARACTERS = 256
 const OPENROUTER_MAX_RESPONSE_CONTENT_CHARACTERS = 100_000
 
+const providerIdSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(200)
+  .regex(/^[^\s,]+$/)
+
+export const openRouterEvaluationRoutingSchema = z
+  .object({
+    providerId: providerIdSchema,
+    allowFallbacks: z.literal(false),
+    requireParameters: z.literal(true),
+    dataCollection: z.enum(['allow', 'deny']),
+    zeroDataRetention: z.boolean().optional(),
+  })
+  .strict()
+
 const toolNameSchema = z
   .string()
   .trim()
@@ -205,6 +222,9 @@ export type OpenRouterMessage = z.infer<typeof openRouterMessageSchema>
 export type OpenRouterChatInput = z.infer<
   typeof openRouterChatInputSchema
 >
+export type OpenRouterEvaluationRouting = z.infer<
+  typeof openRouterEvaluationRoutingSchema
+>
 
 export interface OpenRouterChatResult {
   readonly id: string
@@ -216,6 +236,7 @@ export interface OpenRouterChatResult {
     readonly toolCalls?: readonly OpenRouterToolCall[]
   }
   readonly finishReason: string | null
+  readonly providerId?: string
   readonly usage?: {
     readonly inputTokens: number
     readonly outputTokens: number
@@ -296,6 +317,7 @@ export interface CreateOpenRouterClientOptions {
   readonly transport?: OpenRouterTransport
   readonly timeoutMs?: number
   readonly maxOutputTokens?: number
+  readonly evaluationRouting?: OpenRouterEvaluationRouting
 }
 
 export interface OpenRouterClient {
@@ -328,6 +350,7 @@ const clientOptionsSchema = z
       .min(1)
       .max(OPENROUTER_MAX_OUTPUT_TOKENS)
       .default(OPENROUTER_DEFAULT_MAX_OUTPUT_TOKENS),
+    evaluationRouting: openRouterEvaluationRoutingSchema.optional(),
   })
   .strict()
 
@@ -350,6 +373,7 @@ const providerResponseSchema = z
   .object({
     id: z.string().min(1).max(OPENROUTER_MAX_IDENTIFIER_CHARACTERS),
     model: z.string().min(1).max(200),
+    provider: providerIdSchema.optional(),
     created: z.number().int().nonnegative(),
     choices: z
       .array(
@@ -380,6 +404,26 @@ const providerResponseSchema = z
         prompt_tokens: z.number().int().nonnegative(),
         completion_tokens: z.number().int().nonnegative(),
         total_tokens: z.number().int().nonnegative(),
+      })
+      .passthrough()
+      .optional(),
+    openrouter_metadata: z
+      .object({
+        endpoints: z
+          .object({
+            available: z
+              .array(
+                z
+                  .object({
+                    provider: providerIdSchema,
+                    selected: z.boolean(),
+                  })
+                  .passthrough(),
+              )
+              .max(100),
+          })
+          .passthrough()
+          .optional(),
       })
       .passthrough()
       .optional(),
@@ -532,6 +576,14 @@ function parseProviderResponse(
 
   validateToolResponse(input, toolCalls)
 
+  const metadataProviders =
+    parsed.data.openrouter_metadata?.endpoints?.available
+      .filter((endpoint) => endpoint.selected)
+      .map((endpoint) => endpoint.provider) ?? []
+  const providerId =
+    parsed.data.provider ??
+    (metadataProviders.length === 1 ? metadataProviders[0] : undefined)
+
   return {
     id: parsed.data.id,
     model: parsed.data.model,
@@ -542,6 +594,7 @@ function parseProviderResponse(
       ...(toolCalls.length > 0 ? { toolCalls } : {}),
     },
     finishReason: choice.finish_reason,
+    ...(providerId === undefined ? {} : { providerId }),
     ...(parsed.data.usage
       ? {
           usage: {
@@ -637,6 +690,7 @@ export function createOpenRouterClient(
     model,
     timeoutMs,
     maxOutputTokens: defaultMaxOutputTokens,
+    evaluationRouting,
   } = parsedOptions.data
   const transport = parsedOptions.data.transport ?? globalThis.fetch
 
@@ -658,6 +712,20 @@ export function createOpenRouterClient(
         max_completion_tokens:
           validatedInput.maxOutputTokens ?? defaultMaxOutputTokens,
         stream: false,
+        ...(evaluationRouting === undefined
+          ? {}
+          : {
+              provider: {
+                order: [evaluationRouting.providerId],
+                only: [evaluationRouting.providerId],
+                allow_fallbacks: evaluationRouting.allowFallbacks,
+                require_parameters: evaluationRouting.requireParameters,
+                data_collection: evaluationRouting.dataCollection,
+                ...(evaluationRouting.zeroDataRetention === undefined
+                  ? {}
+                  : { zdr: evaluationRouting.zeroDataRetention }),
+              },
+            }),
         ...(validatedInput.tools ? { tools: validatedInput.tools } : {}),
         ...(validatedInput.toolChoice
           ? {
@@ -709,6 +777,9 @@ export function createOpenRouterClient(
             headers: {
               Authorization: `Bearer ${apiKey}`,
               'Content-Type': 'application/json',
+              ...(evaluationRouting === undefined
+                ? {}
+                : { 'X-OpenRouter-Metadata': 'enabled' }),
             },
             body: serializedBody,
             signal: requestController.signal,

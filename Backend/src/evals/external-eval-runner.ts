@@ -442,7 +442,9 @@ function reportObservation(
     ...(observation.providerId === undefined
       ? {}
       : {
-          providerId: sanitizeEvalReportText(observation.providerId),
+          providerId: observation.providerId === observation.providerId.trim()
+            ? sanitizeEvalReportText(observation.providerId)
+            : '[IDENTIFIER_REDACTED]',
         }),
     finishReason:
       observation.finishReason === null ||
@@ -518,7 +520,16 @@ export async function runSimulatedOpenRouterExternalEval(
           if (identityDiverged) {
             throw new AgentModelError('INVALID_MODEL_RESPONSE', false)
           }
-          const result = await externalModel.complete(input)
+          let result
+          try {
+            result = await externalModel.complete(input)
+          } catch (error) {
+            if (options.canary !== undefined && error instanceof AgentModelError &&
+                error.code === 'INVALID_MODEL_RESPONSE') {
+              identityDiverged = true
+            }
+            throw error
+          }
           if (identityDiverged) {
             throw new AgentModelError('INVALID_MODEL_RESPONSE', true)
           }

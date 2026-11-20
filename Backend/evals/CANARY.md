@@ -101,26 +101,85 @@ Retention, o canário exige `ZDR only`. Confira a configuração efetiva do
 grupo OpenAI, as opções de retenção aplicáveis, `data_collection: deny` e o
 teto financeiro da conta. Nenhuma configuração da conta foi consultada.
 
-A API documenta o opt-in `X-OpenRouter-Metadata`. Seu
-[exemplo de guardrail](https://openrouter.ai/docs/guides/features/guardrails/overview)
-mostra `provider` como nome de exibição. O cliente registra o campo
-`provider` retornado ou o provedor de uma única entrada marcada
-`selected` nos metadados. A comparação exige identidade literal. Uma
-resposta `Azure` ou sem provedor não comprova a identidade configurada
-`azure`. O endpoint efetivo também permanece desconhecido. Um UUID de
-catálogo e os campos enviados em `only` não são evidência de execução.
+### Seleção e identidade do endpoint (EVAL-07B.6)
 
-Em `Backend`, o comando abaixo gera JSON e Markdown com as evidências e
-os preflights offline.
+Em 20/11/2026, o tag publicado para a rota global continua sendo `azure`.
+`provider.order` prioriza os slugs informados, `provider.only` restringe
+os candidatos e `allow_fallbacks: false` desativa o fallback. O slug base
+se expande para endpoints elegíveis da família. Sufixos delimitam variantes,
+regiões ou tiers e também podem corresponder a um prefixo. `azure/swedencentral`
+é a variante regional observada na EVAL-07B.5, apresentada na página do modelo
+fora do roteamento Standard. A rota regional exige análise própria. Exclusões
+por `provider.ignore` dependeriam da lista completa de rotas elegíveis.
+O UUID na tabela identifica o registro de catálogo. As fontes consultadas
+não documentam o UUID como seletor nem um slug exclusivo para o Azure global.
+O resultado permanece `EXACT_ENDPOINT_SELECTION_UNVERIFIED`.
+[Roteamento por provedor](https://openrouter.ai/docs/guides/routing/provider-selection) ·
+[API pública de endpoints](https://openrouter.ai/api/v1/models/openai/gpt-4.1-mini/endpoints) ·
+[Página do modelo](https://openrouter.ai/openai/gpt-4.1-mini)
+
+Nos ensaios, o campo `provider` da resposta é comparado literalmente. O
+nome de exibição `Azure` e um campo ausente não satisfazem a identidade
+esperada `azure`. Se a lista `openrouter_metadata.endpoints.available`
+estiver presente, a resposta deve indicar uma única seleção coerente com
+o modelo retornado e com `provider` quando informado. `selected` localiza
+uma entrada da lista, cujos campos documentados incluem provedor e modelo,
+sem UUID. Um `attempt` diferente de 1 em resposta bem-sucedida contradiz
+o ensaio com fallback desabilitado. O opt-in `X-OpenRouter-Metadata` está documentado e o ensaio
+injeta esse formato no transporte em memória.
+[Chat Completions](https://openrouter.ai/docs/api/api-reference/chat/create-a-chat-completion) ·
+[Metadados de roteamento](https://openrouter.ai/docs/guides/routing/routers/router-metadata)
+
+`GET /api/v1/generation` requer autenticação e pode correlacionar `id`,
+`model` e `provider_name`. `provider_name` é um nome de exibição, e a
+referência consultada não vincula um campo de identidade ao UUID de catálogo.
+A projeção offline exercita a correlação em fixtures e descarta todos os
+outros campos. Uma eventual consulta operacional exigiria autorização e
+credencial de leitura específicas. Ela usaria apenas metadados da mesma
+geração e excluiria a rota de conteúdo armazenado, novas gerações e retries.
+[Metadados de geração](https://openrouter.ai/docs/api/api-reference/generations/get-generation)
+
+O contrato do manifesto v1 e os dois candidatos permanecem válidos para
+preparação. Para revisar o contrato operacional são necessários um seletor
+exclusivo, uma evidência estável que correlacione o endpoint à geração, a
+compatibilidade dos parâmetros e a garantia efetiva de `ZDR only`, sem
+Safety Retention. A tarifa precisa corresponder à rota permitida. Os
+preços observados na família são exemplos documentais, pois a cobertura
+e a política de todas as rotas elegíveis não estão comprovadas. Uma futura
+mudança de contrato deverá vincular a rota, a identidade, a política e a
+tarifa ao fingerprint e exigir nova aprovação.
+
+Em `Backend`, o comando abaixo gera JSON e Markdown com as evidências,
+os preflights e os resultados dos ensaios offline.
 
 ```sh
-pnpm exec tsx src/scripts/eval-canary-compatibility.ts --output-dir external-eval-reports/gpt-4.1-mini-azure-compatibility
+pnpm exec tsx src/scripts/eval-canary-compatibility.ts --output-dir external-eval-reports/gpt-4.1-mini-azure-identity
 ```
 
 A alternativa segue documental e o gate mantém `LIVE_EXECUTION_DISABLED`.
 Uma futura mudança de provedor para execução depende de aprovação separada,
 confirmação da rota e da identidade observável, política ZDR efetiva
 sem Safety Retention não aprovada, tarifa e limite de conta confirmados.
+
+### Diagnóstico do ensaio intermitente do gate
+
+Na EVAL-07B.5, um caso do ensaio `timeout, erro técnico e identidade
+inválida` registrou zero chamadas em memória onde esperava uma. A causa
+não foi confirmada. A fixture usa um relógio fixo para a aprovação, mas
+a inspeção Git e os timeouts do ensaio usam limites reais. Se o sintoma
+reaparecer, preserve a primeira falha. O diagnóstico agora registra o
+caso sintético, os códigos de bloqueio, o estado de consumo e os códigos
+técnicos para distinguir falha antes do transporte de resposta rejeitada.
+
+Em `Backend`, execute o caso isolado e depois repita o mesmo comando de
+forma diagnóstica, inclusive sob a carga em que o erro foi observado.
+
+```sh
+pnpm exec tsx --test --test-name-pattern 'timeout, erro técnico e identidade inválida' test/external-canary-operations.test.ts
+```
+
+Instabilidade de I/O ou de agendamento continua possível quando os limites
+reais são atingidos. Registre o resultado e a duração de cada execução.
 
 ## Preflight local
 

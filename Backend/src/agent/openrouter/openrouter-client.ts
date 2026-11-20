@@ -369,11 +369,14 @@ const providerToolCallSchema = z
   })
   .passthrough()
 
+const reportedProviderSchema = z.string()
+  .refine((value) => providerIdSchema.safeParse(value).success)
+
 const providerResponseSchema = z
   .object({
     id: z.string().min(1).max(OPENROUTER_MAX_IDENTIFIER_CHARACTERS),
     model: z.string().min(1).max(200),
-    provider: providerIdSchema.optional(),
+    provider: reportedProviderSchema.optional(),
     created: z.number().int().nonnegative(),
     choices: z
       .array(
@@ -409,13 +412,15 @@ const providerResponseSchema = z
       .optional(),
     openrouter_metadata: z
       .object({
+        attempt: z.unknown().optional(),
         endpoints: z
           .object({
             available: z
               .array(
                 z
                   .object({
-                    provider: providerIdSchema,
+                    provider: reportedProviderSchema,
+                    model: z.unknown().optional(),
                     selected: z.boolean(),
                   })
                   .passthrough(),
@@ -548,6 +553,7 @@ function validateToolResponse(
 function parseProviderResponse(
   rawResponse: unknown,
   input: OpenRouterChatInput,
+  evaluation: boolean,
 ): OpenRouterChatResult {
   const parsed = providerResponseSchema.safeParse(rawResponse)
   if (!parsed.success) {
@@ -576,13 +582,22 @@ function parseProviderResponse(
 
   validateToolResponse(input, toolCalls)
 
-  const metadataProviders =
-    parsed.data.openrouter_metadata?.endpoints?.available
-      .filter((endpoint) => endpoint.selected)
-      .map((endpoint) => endpoint.provider) ?? []
-  const providerId =
-    parsed.data.provider ??
-    (metadataProviders.length === 1 ? metadataProviders[0] : undefined)
+  const metadata = parsed.data.openrouter_metadata
+  const available = metadata?.endpoints?.available
+  const selected = available?.filter((endpoint) => endpoint.selected) ?? []
+  const selectedEndpoint = selected[0]
+  const reportedProvider = parsed.data.provider
+  const conflictingSelection = available !== undefined && (
+    selected.length !== 1 ||
+    (reportedProvider !== undefined && selectedEndpoint?.provider !== reportedProvider) ||
+    (selectedEndpoint?.model !== undefined && selectedEndpoint.model !== parsed.data.model)
+  )
+  if (evaluation && (conflictingSelection || (metadata?.attempt !== undefined && metadata.attempt !== 1))) {
+    throw clientError('OPENROUTER_INVALID_RESPONSE', undefined, true)
+  }
+  // A lista do roteador documenta nomes de provedor, sem garantir um slug.
+  const providerId = evaluation ? reportedProvider :
+    (reportedProvider ?? (selected.length === 1 ? selectedEndpoint?.provider : undefined))?.trim()
 
   return {
     id: parsed.data.id,
@@ -811,7 +826,7 @@ export function createOpenRouterClient(
           throw clientError('OPENROUTER_INVALID_JSON', undefined, true)
         }
 
-        return parseProviderResponse(rawResponse, validatedInput)
+        return parseProviderResponse(rawResponse, validatedInput, evaluationRouting !== undefined)
       } catch (error) {
         if (error instanceof OpenRouterClientError) throw error
         if (timedOut) {

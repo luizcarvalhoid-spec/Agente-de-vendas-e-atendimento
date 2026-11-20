@@ -27,10 +27,11 @@ export function estimateExternalEvalCost(input: {
   return roundMoney(base * (input.multiplier ?? 1))
 }
 
-export function externalEvalWorstCaseCost(plan: Pick<
-  ExternalEvalPlan,
-  'limits' | 'pricing' | 'unreportedUsageMultiplier'
->) {
+export function externalEvalWorstCaseCost(plan:
+  Pick<ExternalEvalPlan, 'limits' | 'unreportedUsageMultiplier'> & {
+    pricing?: Pick<NonNullable<ExternalEvalPlan['pricing']>, 'inputUsdPerMillionTokens' | 'outputUsdPerMillionTokens'>
+  }
+) {
   if (
     plan.limits === undefined ||
     plan.pricing === undefined ||

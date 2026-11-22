@@ -3,11 +3,18 @@ import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { after, before, test } from 'node:test'
 
+import { createOpenRouterClient } from '../src/agent/openrouter/openrouter-client.js'
 import { configuredCanaryAuthorities } from '../src/evals/external-canary-authorities.js'
 import {
   canaryEndpointEvidenceSchema,
   compareCanaryEndpointEvidence,
 } from '../src/evals/external-canary-compatibility.js'
+import {
+  describeCanaryEndpointIdentity,
+  inspectCanaryGenerationIdentity,
+  inspectCanaryRoutingSelector,
+  rehearseCanaryEndpointIdentity,
+} from '../src/evals/external-canary-endpoint-identity.js'
 import { verifyCanaryOperations } from '../src/evals/external-canary-operations.js'
 import { externalCanaryDraftSchema, externalCanaryManifestSchema } from '../src/evals/external-canary-schema.js'
 import { CanaryAuthorizationUseStore } from '../src/evals/external-canary-use-store.js'
@@ -153,6 +160,90 @@ test('evidência pública usa allowlist e relatórios omitem payloads privados',
   assert.doesNotMatch(json, /authorization|headers|messages|baseUrl|sk-or-fixture-sensitive/)
 })
 
+test('família, variante regional documentada e UUID têm escopos diferentes', async () => {
+  const comparison = compareCanaryEndpointEvidence(original, azure, publicEvidence)
+  const { endpoints } = comparison.alternative
+  const family = inspectCanaryRoutingSelector('azure', 'azure', endpoints)
+  assert.equal(family.kind, 'provider_family')
+  assert.deepEqual(family.observedCatalogEntries.map((row) => row.routingSlug), ['azure', 'azure/swedencentral'])
+  assert.equal(inspectCanaryRoutingSelector('azure', 'azure', [endpoints[0]!]).kind, 'provider_family')
+  const regional = inspectCanaryRoutingSelector('azure/swedencentral', 'azure', endpoints)
+  assert.equal(regional.kind, 'documented_variant_slug')
+  assert.deepEqual(regional.observedCatalogEntries.map((row) => row.scope), ['regional_chat'])
+  assert.equal(inspectCanaryRoutingSelector('azure/global', 'azure', endpoints).kind, 'unverified_selector')
+  assert.deepEqual(inspectCanaryRoutingSelector(endpoints[0]!.catalogEndpointId!, 'azure', endpoints), {
+    kind: 'catalog_id_only', observedCatalogEntries: [],
+  })
+  const report = describeCanaryEndpointIdentity(comparison)
+  assert.equal(report.exactEndpointSelection, 'unverified')
+  assert.equal(report.observedCatalogEndpointId, null)
+  assert.equal(report.operationalPricing, 'pending')
+  assert.equal(report.eligibleSetCompleteness, 'unverified')
+  assert.equal(externalCanaryDraftSchema.safeParse({
+    ...azure, routing: { ...azure.routing, providerId: 'azure/swedencentral' },
+  }).success, false)
+
+  const providerId = 'synthetic-provider/variant/region'
+  const requests: unknown[] = []
+  const client = createOpenRouterClient({
+    apiKey: 'EVAL_SYNTHETIC_VARIANT', model: modelId,
+    evaluationRouting: { ...azure.routing!, providerId, dataCollection: 'deny', zeroDataRetention: true },
+    transport: createInMemoryOpenRouterTransport(async (_url, init) => {
+      requests.push(JSON.parse(String(init?.body)).provider)
+      return Response.json({
+        id: 'gen-synthetic-variant', model: modelId, created: 0,
+        choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: 'Synthetic' } }],
+      })
+    }),
+  })
+  const response = await client.createChatCompletion({ messages: [{ role: 'user', content: 'Synthetic' }] })
+  assert.deepEqual(requests, [{
+    order: [providerId], only: [providerId], allow_fallbacks: false,
+    require_parameters: true, data_collection: 'deny', zdr: true,
+  }])
+  assert.equal(response.providerId, undefined)
+})
+
+test('geração simulada correlaciona id e modelo, e nome de exibição não comprova endpoint', () => {
+  const generationId = 'gen-synthetic-fixture'
+  const expected = { generationId, modelId, providerDisplayName: 'Azure' }
+  const data = {
+    id: generationId, model: modelId, provider_name: 'Azure',
+    endpoint_id: publicEvidence.endpoints[1]!.catalogEndpointId,
+    provider_responses: [{ privateField: 'sk-or-synthetic-sensitive' }],
+    prompt: 'Synthetic private body',
+  }
+  const cases = [
+    [data, 'PROVIDER_DISPLAY_NAME_ONLY'],
+    [{ ...data, id: 'gen-synthetic-other' }, 'GENERATION_ID_MISMATCH'],
+    [{ ...data, model: 'mock/other' }, 'MODEL_IDENTITY_MISMATCH'],
+    [{ ...data, provider_name: 'azure' }, 'PROVIDER_DISPLAY_NAME_MISMATCH'],
+    [{ ...data, provider_name: null }, 'PROVIDER_DISPLAY_NAME_MISSING'],
+    [undefined, 'GENERATION_METADATA_INVALID'],
+  ] as const
+  for (const [payload, status] of cases) {
+    assert.deepEqual(inspectCanaryGenerationIdentity({ data: payload }, expected), { status, endpointIdentity: 'unverified' })
+  }
+})
+
+test('ensaio de identidade de endpoint exige UUID permitido e mantém verificações documentais', () => {
+  const comparison = compareCanaryEndpointEvidence(original, azure, evidence([
+    endpoint(),
+    endpoint({ catalogEndpointId: 'synthetic-other', pricing: undefined }),
+    endpoint({ catalogEndpointId: 'synthetic-non-zdr', zdr: 'excluded', safetyRetention: true, parameters: [] }),
+  ], 'strict_zdr_only'))
+  const [expected, withoutPricing, incompatible] = comparison.alternative.endpoints
+  assert.deepEqual(rehearseCanaryEndpointIdentity(expected!, expected!.catalogEndpointId), {
+    provenance: 'synthetic_fixture', issues: [],
+  })
+  assert.deepEqual(rehearseCanaryEndpointIdentity(expected!, undefined).issues, ['ENDPOINT_IDENTITY_UNVERIFIED'])
+  assert.deepEqual(rehearseCanaryEndpointIdentity(expected!, withoutPricing!.catalogEndpointId).issues, ['ENDPOINT_IDENTITY_MISMATCH'])
+  assert(rehearseCanaryEndpointIdentity(withoutPricing!, withoutPricing!.catalogEndpointId).issues.includes('ENDPOINT_PRICING_UNVERIFIED'))
+  assert.deepEqual(rehearseCanaryEndpointIdentity(incompatible!, incompatible!.catalogEndpointId).issues, [
+    'ZDR_INCOMPATIBLE', 'ENDPOINT_SAFETY_RETENTION_UNVERIFIED_OR_PRESENT', 'REQUIRED_PARAMETERS_NOT_ADVERTISED',
+  ])
+})
+
 test('variante preserva o escopo, exige revisão e troca de provedor ou preço invalida o fingerprint', async () => {
   assert.equal(original.routing?.providerId, 'openai')
   assert.deepEqual(azure.scenarioIds, ['universal.core.incomplete-need.001'])
@@ -201,13 +292,31 @@ test('ensaio em memória valida serialização e preserva comparação exata de 
       confirmedAt: '2025-12-31T00:00:00Z', source: 'https://prices.example.invalid/synthetic',
     },
   })
-  for (const example of [
+  const selected = { provider: 'azure', model: modelId, selected: true }
+  const cases: Array<{
+    title: string
+    model: string
+    provider: string | undefined
+    available?: Array<typeof selected>
+    attempt?: number
+    rejectedBeforeObservation?: boolean
+    succeeds: boolean
+  }> = [
     { title: 'modelo e provedor literais', model: modelId, provider: 'azure', succeeds: true },
     { title: 'modelo divergente', model: 'openai/another-fixture', provider: 'azure', succeeds: false },
     { title: 'provedor divergente', model: modelId, provider: 'openai', succeeds: false },
     { title: 'nome de exibição não é slug comprovado', model: modelId, provider: 'Azure', succeeds: false },
     { title: 'provedor ausente', model: modelId, provider: undefined, succeeds: false },
-  ]) {
+    { title: 'provedor não é normalizado', model: modelId, provider: ' azure ', succeeds: false },
+    { title: 'seleção isolada não preenche provider', model: modelId, provider: undefined, available: [selected], succeeds: false },
+    { title: 'provider e metadata coerentes no ensaio', model: modelId, provider: 'azure', available: [selected], succeeds: true },
+    { title: 'provedores conflitantes', model: modelId, provider: 'azure', available: [{ ...selected, provider: 'openai' }], rejectedBeforeObservation: true, succeeds: false },
+    { title: 'modelos conflitantes', model: modelId, provider: 'azure', available: [{ ...selected, model: 'openai/another-fixture' }], rejectedBeforeObservation: true, succeeds: false },
+    { title: 'dois endpoints selecionados mesmo com provedor igual', model: modelId, provider: 'azure', available: [selected, selected], rejectedBeforeObservation: true, succeeds: false },
+    { title: 'lista sem seleção', model: modelId, provider: 'azure', available: [{ ...selected, selected: false }], rejectedBeforeObservation: true, succeeds: false },
+    { title: 'tentativa adicional contradiz fallback desabilitado', model: modelId, provider: 'azure', available: [selected], attempt: 2, rejectedBeforeObservation: true, succeeds: false },
+  ]
+  for (const example of cases) {
     await t.test(example.title, async () => {
       const requests: Array<Record<string, unknown>> = []
       const transport = createInMemoryOpenRouterTransport(async (_url, init) => {
@@ -218,6 +327,9 @@ test('ensaio em memória valida serialização e preserva comparação exata de 
             role: 'assistant', content: 'O que você gostaria de resolver com o produto?',
           } }],
           usage: { prompt_tokens: 300, completion_tokens: 15, total_tokens: 315 },
+          ...(example.available === undefined ? {} : {
+            openrouter_metadata: { attempt: example.attempt, endpoints: { available: example.available } },
+          }),
         })
       })
       const { rehearsal } = await rehearseExternalCanary(syntheticManifest, { transport })
@@ -235,8 +347,11 @@ test('ensaio em memória valida serialização e preserva comparação exata de 
       })
       assert.equal(rehearsal?.provenance, 'simulated_external_transport')
       assert.equal(rehearsal.technicalStatus, example.succeeds ? 'completed' : 'technical_failure')
-      assert.deepEqual(rehearsal.returnedModelIds, [example.model])
-      assert.deepEqual(rehearsal.observedProviderIds, example.provider === undefined ? [] : [example.provider])
+      if (!example.succeeds) assert(rehearsal.technicalErrorCodes.includes('AI_BAD_RESPONSE'))
+      assert.deepEqual(rehearsal.returnedModelIds, example.rejectedBeforeObservation ? [] : [example.model])
+      const observedProvider = example.provider === undefined || example.rejectedBeforeObservation ? [] :
+        [example.provider === example.provider.trim() ? example.provider : '[IDENTIFIER_REDACTED]']
+      assert.deepEqual(rehearsal.observedProviderIds, observedProvider)
     })
   }
 })

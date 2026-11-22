@@ -204,7 +204,7 @@ test('aprovação de teste autenticada permanece bloqueada para rede e verify n�
 })
 
 test('assinatura, autoridade, validade, plano e orçamento são verificados separadamente', async (t) => {
-  const { input, deps, signed, legacyApproval } = await fixture(t)
+  const { input, deps, signed, legacyApproval, storeDirectory } = await fixture(t)
   assert.match(canaryApprovalSigningBytes(input.approval.payload).toString(), /^agent-evals\/canary-approval\/v1\nsha256:/)
   for (const [approval, code] of [
     [legacyApproval, 'APPROVAL_INVALID'],
@@ -232,6 +232,24 @@ test('assinatura, autoridade, validade, plano e orçamento são verificados sepa
   }, deps)
   assert(changed.blockers.includes('APPROVAL_FINGERPRINT_MISMATCH'))
   assert(changed.blockers.includes('MANIFEST_NOT_APPROVED'))
+
+  const route = 'other-synthetic-route'
+  const manifest = {
+    ...input.manifest,
+    routing: { ...input.manifest.routing, providerId: route },
+    pricing: { ...input.manifest.pricing, providerId: route },
+  }
+  const manifestFingerprint = fingerprintExternalCanaryManifest(manifest)
+  assert.notEqual(manifestFingerprint, input.review.manifestFingerprint)
+  const controlled = syntheticTransport()
+  const reusedApproval = await rehearseCanaryFixtureActivation({
+    ...input, manifest, review: { ...input.review, manifestFingerprint },
+  }, deps, controlled)
+  assert(reusedApproval.blockers.includes('APPROVAL_FINGERPRINT_MISMATCH'))
+  assert(reusedApproval.blockers.includes('CANARY_SCOPE_MISMATCH'))
+  assert.equal(reusedApproval.authorizationUse, 'available')
+  assert.equal(controlled.calls, 0)
+  assert.deepEqual(await readdir(storeDirectory), [])
 })
 
 test('gate operacional rejeita checkout de fixture e não consome sua aprovação', async (t) => {
@@ -476,7 +494,12 @@ test('timeout, erro técnico e identidade inválida preservam o estado de consum
     const report = await rehearseCanaryFixtureActivation({
       ...input, approval: signed({ useId: randomBytes(16).toString('hex') }),
     }, deps, controlled)
-    assert.equal(controlled.calls, 1)
+    assert.equal(controlled.calls, 1, JSON.stringify({
+      case: options,
+      blockers: report.blockers,
+      authorizationUse: report.authorizationUse,
+      technicalErrorCodes: report.rehearsal?.technicalErrorCodes,
+    }))
     assert.equal(report.authorizationUse, 'consumed')
     assert.equal(report.rehearsal?.technicalStatus, 'technical_failure')
     assert.equal(report.rehearsal.assertions.failed, 0)

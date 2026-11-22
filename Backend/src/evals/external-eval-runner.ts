@@ -5,6 +5,8 @@ import {
   type AgentModelPort,
 } from '../agent/agent-model-port.js'
 import { isRegisteredExternalAgentModel } from '../agent/agent-model-origin.js'
+import { isInMemoryChatTransport, registerInMemoryChatTransport } from '../agent/in-memory-chat-transport.js'
+import { createOpenAiDirectAgentModel, OPENAI_DIRECT_MODEL } from '../agent/openai/openai-direct-agent-model.js'
 import {
   createOpenRouterAgentModel,
   type OpenRouterAgentModelObservation,
@@ -44,7 +46,7 @@ export const externalEvalRunnerModuleUrl = import.meta.url
 export const EXTERNAL_EVAL_LIMITATIONS = [
   'A modalidade mock_external usa transporte simulado e não mede desempenho real de um modelo externo.',
   'O isolamento mock exige uma factory registrada e rejeita adaptadores externos conhecidos, mas não transforma código arbitrário injetado em uma sandbox de rede.',
-  'A EVAL-07B.1 mantém live_external bloqueado e testa a integração OpenRouter somente com transporte em memória.',
+  'A execução live_external permanece bloqueada. As integrações em preparação usam transporte em memória.',
   'O custo é uma estimativa preventiva; a cobrança final futura poderá diferir e deverá ter limites também na conta do provedor.',
   'Chamadas sem usage completo conservam a reserva com a margem configurada.',
   'Assertions determinísticas não substituem a avaliação humana dos critérios subjetivos.',
@@ -106,18 +108,13 @@ export type InMemoryOpenRouterTransport = OpenRouterTransport & {
   readonly [inMemoryOpenRouterTransportBrand]: true
 }
 
-const registeredInMemoryTransports = new WeakSet<OpenRouterTransport>()
-
 export function createInMemoryOpenRouterTransport(
   handler: OpenRouterTransport,
 ): InMemoryOpenRouterTransport {
   if (handler === globalThis.fetch) {
     throw new ExternalEvalExecutionError('LIVE_EXTERNAL_DISABLED')
   }
-  const transport: OpenRouterTransport = (input, init) =>
-    handler(input, init)
-  registeredInMemoryTransports.add(transport)
-  return transport as InMemoryOpenRouterTransport
+  return registerInMemoryChatTransport(handler) as InMemoryOpenRouterTransport
 }
 
 export interface RunSimulatedOpenRouterExternalEvalOptions {
@@ -474,8 +471,7 @@ export async function runSimulatedOpenRouterExternalEval(
   options: RunSimulatedOpenRouterExternalEvalOptions,
 ) {
   if (
-    !registeredInMemoryTransports.has(options.transport) ||
-    options.transport === globalThis.fetch
+    !isInMemoryChatTransport(options.transport)
   ) {
     throw new ExternalEvalExecutionError('LIVE_EXTERNAL_DISABLED')
   }
@@ -536,6 +532,34 @@ export async function runSimulatedOpenRouterExternalEval(
           return result
         },
       }
+    },
+  })
+}
+
+export async function runSimulatedOpenAiDirectExternalEval(
+  request: ExternalEvalPlanRequest,
+  options: { readonly transport: typeof fetch; readonly datasetFingerprint: string; readonly signal?: AbortSignal },
+) {
+  if (!isInMemoryChatTransport(options.transport) || request.modality === 'live_external') {
+    throw new ExternalEvalExecutionError('LIVE_EXTERNAL_DISABLED')
+  }
+  if (request.modelId !== OPENAI_DIRECT_MODEL || request.routing !== undefined || request.pricing?.providerId !== 'openai') {
+    throw new ExternalEvalExecutionError('PLAN_BLOCKED')
+  }
+  const observations: ExternalEvalReport['model']['observations'] = []
+  return runControlledExternalEval(request, {
+    datasetFingerprint: options.datasetFingerprint,
+    enforceInputLimit: true,
+    signal: options.signal,
+    observations,
+    createModel({ limits }) {
+      return createOpenAiDirectAgentModel({
+        transport: options.transport,
+        limits: { timeoutMs: limits.timeoutMs, maxOutputTokens: limits.maxOutputTokensPerCall },
+        onObservation(observation) {
+          observations.push(reportObservation(observation, observations.length + 1))
+        },
+      })
     },
   })
 }

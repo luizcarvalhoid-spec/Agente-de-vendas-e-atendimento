@@ -229,6 +229,62 @@ benefício inventado e linguagem coloquial com pedido de garantia clínica.
 Os casos verificam grounding, ferramentas executadas, preços canônicos e
 limites comerciais. A qualidade conversacional do modelo real segue pendente.
 
+## Primeiro canário operacional OpenAI direto (EVAL-07C.1)
+
+O [rascunho operacional](canary/gpt-6-luna-openai-operational-candidate.v1.json)
+define `universal.core.incomplete-need.001` como primeiro cenário, com dados
+fictícios, até duas chamadas, 20.000 tokens estimados de entrada e 512 de
+saída por chamada, e timeout de 15 segundos. A simulação e o rascunho
+operacional usam contratos distintos. O rascunho não possui revisão nem
+fingerprint operacional. A reserva documental é USD 0,00564, com teto
+proposto de USD 1,00 e margem de 1,25.
+
+A futura assinatura Ed25519 usa o domínio `agent-evals/openai-direct-canary-approval/v1`.
+Ela vincula o manifesto completo, dataset, cenário, código, worktree,
+dependências, projeto e autorização de uso único. As evidências assinadas
+para retenção, vigência de tarifas e teto externo são verificadas
+independentemente. O gate exige enforcement do limite externo e saldo
+suficiente no mesmo projeto. A própria OpenAI documenta que notificações
+permitem novas chamadas e que o enforcement do teto pode ter atraso.
+[Limites de projetos na OpenAI](https://help.openai.com/en/articles/9186755-managing-projects-in-the-api-platform)
+
+O caminho autenticado fixa HTTPS, `OpenAI-Project`, `gpt-6-luna` e bloqueia
+redirecionamentos. Reutiliza o timeout, cancelamento, limites de payload,
+validação de ferramentas e reserva financeira existentes. Verifica a
+vigência das evidências antes de cada envio. A autorização é reservada de
+forma atômica antes do primeiro envio e permanece consumida após falha ou
+interrupção. Os relatórios registram contagens e códigos, sem prompts,
+transcrições, textos retornados, IDs de geração, cabeçalhos ou credenciais.
+
+O módulo operacional vem sem deployment ou autoridade provisionados.
+Variáveis de ambiente e argumentos CLI não liberam esse caminho. Um
+deployment futuro exige revisão separada, serviço Linux dedicado com UID
+fixo, diretório de estado privado e persistente em
+`/var/lib/openai-canary/authorizations`, e credencial protegida pelo serviço
+em `/run/credentials/openai-canary.service/openai-api-key`, vinculada ao
+projeto dedicado. O mount e o
+checkout precisam ficar protegidos de alterações concorrentes. O runtime
+verificável usa os módulos TypeScript do checkout aprovado e dependências
+instaladas no próprio checkout. Uma junction para dependências de outra
+worktree pode servir aos testes e fica bloqueada pela verificação operacional.
+
+`store: false` não comprova ZDR. A futura execução exige decisão humana
+expressa sobre a retenção padrão para este escopo exclusivamente fictício.
+Dados pessoais reais e persistência de transcrições permanecem proibidos.
+[Controles de dados da OpenAI](https://developers.openai.com/api/docs/guides/your-data)
+
+O comando abaixo executa o preflight somente leitura e grava os relatórios.
+
+```sh
+pnpm exec tsx src/scripts/verify-openai-canary.ts --output-dir external-eval-reports/openai-canary-07c1
+```
+
+Os ensaios de gate em `test/openai-canary-operations.test.ts` usam checkout,
+assinatura, credencial e transporte sintéticos. Cobrem recusas antes do
+envio, expiração após reserva, concorrência, modelo divergente, falhas HTTP,
+timeout, cancelamento, limite de duas chamadas, excesso de reserva e
+sanitização. A preparação não habilitou `live_external` nem executou o canário.
+
 ## Preflight local
 
 A partir de `Backend`, gere os dois relatórios de preparação:

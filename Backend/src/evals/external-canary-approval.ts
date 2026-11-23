@@ -52,32 +52,43 @@ export type CanaryApproval = z.infer<typeof canaryApprovalSchema>
 export interface CanaryAuthority {
   readonly publicKey: KeyObject
   readonly approverId: string
-  readonly scope: z.infer<typeof scope>
+  readonly scope: z.infer<typeof scope> | 'openai_direct_once' | 'openai_direct_fixture_once'
 }
 
 export type CanaryAuthorityRegistry = ReadonlyMap<string, CanaryAuthority>
 
 export function canaryApprovalSigningBytes(payload: unknown) {
   const validated = canaryApprovalPayloadSchema.parse(payload)
-  return Buffer.from(`agent-evals/canary-approval/v1\n${fingerprintEvalValue(validated)}\n`)
+  return signedCanaryPayloadBytes('agent-evals/canary-approval/v1', validated)
+}
+
+export function signedCanaryPayloadBytes(domain: string, payload: unknown) {
+  return Buffer.from(`${domain}\n${fingerprintEvalValue(payload)}\n`)
+}
+
+export function verifySignedCanaryPayload(
+  payload: { authorityId: string; approverId: string; scope: CanaryAuthority['scope'] },
+  signature: string,
+  authorities: CanaryAuthorityRegistry,
+  domain: string,
+) {
+  const authority = authorities.get(payload.authorityId)
+  if (authority?.publicKey.type !== 'public' || authority.publicKey.asymmetricKeyType !== 'ed25519' ||
+      authority.approverId !== payload.approverId || authority.scope !== payload.scope) {
+    return false
+  }
+  try {
+    const decoded = Buffer.from(signature, 'base64url')
+    return decoded.toString('base64url') === signature &&
+      verify(null, signedCanaryPayloadBytes(domain, payload), authority.publicKey, decoded)
+  } catch {
+    return false
+  }
 }
 
 export function authenticateCanaryApproval(input: unknown, authorities: CanaryAuthorityRegistry) {
   const parsed = canaryApprovalSchema.safeParse(input)
   if (!parsed.success) return undefined
   const { payload, signature } = parsed.data
-  const authority = authorities.get(payload.authorityId)
-  if (authority?.publicKey.type !== 'public' || authority.publicKey.asymmetricKeyType !== 'ed25519' ||
-      authority.approverId !== payload.approverId || authority.scope !== payload.scope) {
-    return undefined
-  }
-  try {
-    const bytes = Buffer.from(signature, 'base64url')
-    return bytes.toString('base64url') === signature &&
-      verify(null, canaryApprovalSigningBytes(payload), authority.publicKey, bytes)
-      ? payload
-      : undefined
-  } catch {
-    return undefined
-  }
+  return verifySignedCanaryPayload(payload, signature, authorities, 'agent-evals/canary-approval/v1') ? payload : undefined
 }

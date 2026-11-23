@@ -13,6 +13,8 @@ import {
   type OpenRouterMessage,
 } from './chat-completions-client.js'
 
+export const chatCompletionsAgentModelModuleUrl = import.meta.url
+
 export interface ChatCompletionsModelObservation {
   readonly requestedModelId?: string
   readonly returnedModelId: string
@@ -111,6 +113,7 @@ export function createChatCompletionsAgentModel(
           signal: input.signal,
         })
       } catch (error) {
+        if (error instanceof AgentModelError) throw error
         if (error instanceof OpenRouterClientError) {
           throw new AgentModelError(
             mapErrorCode(error),

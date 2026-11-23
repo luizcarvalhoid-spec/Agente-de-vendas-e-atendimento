@@ -2,7 +2,10 @@ import { Buffer } from 'node:buffer'
 
 import { z } from 'zod'
 
+import { AgentModelError } from './agent-model-port.js'
 import { isInMemoryChatTransport } from './in-memory-chat-transport.js'
+
+export const chatCompletionsModuleUrl = import.meta.url
 
 export const OPENROUTER_CHAT_COMPLETIONS_ENDPOINT =
   'https://openrouter.ai/api/v1/chat/completions'
@@ -743,7 +746,7 @@ export function createChatCompletionsClient(options: {
     readonly authorization: string
     readonly evaluationRouting?: OpenRouterEvaluationRouting
   } | {
-    readonly kind: 'direct_offline'
+    readonly kind: 'direct_offline' | 'direct_canary'
     readonly endpoint: string
     readonly reasoningEffort: 'none'
     readonly store: false
@@ -751,6 +754,9 @@ export function createChatCompletionsClient(options: {
 }): OpenRouterClient {
   const { model, timeoutMs, maxOutputTokens: defaultMaxOutputTokens, transport, protocol } = options
   if (protocol.kind === 'direct_offline' && !isInMemoryChatTransport(transport)) {
+    throw clientError('OPENROUTER_CONFIGURATION_ERROR')
+  }
+  if (protocol.kind === 'direct_canary' && transport === globalThis.fetch) {
     throw clientError('OPENROUTER_CONFIGURATION_ERROR')
   }
   const evaluationRouting = protocol.kind === 'openrouter' ? protocol.evaluationRouting : undefined
@@ -762,7 +768,7 @@ export function createChatCompletionsClient(options: {
       }
 
       const validatedInput = parsedInput.data
-      if (protocol.kind === 'direct_offline' && validatedInput.maxOutputTokens !== undefined &&
+      if (protocol.kind !== 'openrouter' && validatedInput.maxOutputTokens !== undefined &&
           validatedInput.maxOutputTokens > defaultMaxOutputTokens) {
         throw clientError('OPENROUTER_INVALID_REQUEST')
       }
@@ -776,7 +782,7 @@ export function createChatCompletionsClient(options: {
         max_completion_tokens:
           validatedInput.maxOutputTokens ?? defaultMaxOutputTokens,
         stream: false,
-        ...(protocol.kind === 'direct_offline' ? { reasoning_effort: protocol.reasoningEffort, store: protocol.store } : {}),
+        ...(protocol.kind !== 'openrouter' ? { reasoning_effort: protocol.reasoningEffort, store: protocol.store } : {}),
         ...(evaluationRouting === undefined
           ? {}
           : {
@@ -846,7 +852,7 @@ export function createChatCompletionsClient(options: {
                 ? {}
                 : { 'X-OpenRouter-Metadata': 'enabled' }),
             },
-            ...(protocol.kind === 'direct_offline' ? { redirect: 'error' } : {}),
+            ...(protocol.kind !== 'openrouter' ? { redirect: 'error' } : {}),
             body: serializedBody,
             signal: requestController.signal,
           },
@@ -877,9 +883,9 @@ export function createChatCompletionsClient(options: {
           throw clientError('OPENROUTER_INVALID_JSON', undefined, true)
         }
 
-        return parseProviderResponse(rawResponse, validatedInput, evaluationRouting !== undefined, protocol.kind === 'direct_offline')
+        return parseProviderResponse(rawResponse, validatedInput, evaluationRouting !== undefined, protocol.kind !== 'openrouter')
       } catch (error) {
-        if (error instanceof OpenRouterClientError) throw error
+        if (error instanceof OpenRouterClientError || (protocol.kind === 'direct_canary' && error instanceof AgentModelError)) throw error
         if (timedOut) {
           throw clientError(
             'OPENROUTER_TIMEOUT',

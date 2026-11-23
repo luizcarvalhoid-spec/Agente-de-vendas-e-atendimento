@@ -73,18 +73,19 @@ function inside(root: string, path: string) {
 }
 
 // Captura a revisão no carregamento para detectar troca de HEAD com módulos ainda em memória.
-function captureRuntimeSource() {
+function captureRuntimeSource(extraAnchors: readonly (readonly [string, string])[]) {
   try {
     const canonicalPath = realpathSync.native
     const root = canonicalPath(fileURLToPath(new URL('../../../', import.meta.url)))
     const anchors = ([
-      [import.meta.url, 'external-canary-integrity.ts'],
-      [externalCanaryModuleUrl, 'external-canary.ts'],
-      [externalEvalRunnerModuleUrl, 'external-eval-runner.ts'],
+      [import.meta.url, 'evals/external-canary-integrity.ts'],
+      [externalCanaryModuleUrl, 'evals/external-canary.ts'],
+      [externalEvalRunnerModuleUrl, 'evals/external-eval-runner.ts'],
+      ...extraAnchors,
     ] as const).map(([url, name]) => {
       const path = fileURLToPath(url)
       const resolved = canonicalPath(path)
-      if (relative(resolved, join(root, 'Backend', 'src', 'evals', name)) !== '') throw new Error()
+      if (relative(resolved, join(root, 'Backend', 'src', name)) !== '') throw new Error()
       return { path, resolved, digest: createHash('sha256').update(readFileSync(resolved)).digest('hex') }
     })
     const gitAtLoad = (...args: string[]) => execFileSync(
@@ -104,11 +105,16 @@ function captureRuntimeSource() {
   }
 }
 
-const runtimeSource = captureRuntimeSource()
+export function createCanaryRuntimeSourceInspector(anchors: readonly (readonly [string, string])[] = []) {
+  const runtimeSource = captureRuntimeSource(anchors)
+  return (expectedRevision?: string) => inspectRuntimeSource(runtimeSource, expectedRevision)
+}
 
-export async function inspectCanaryRuntimeSource(expectedRevision: string): Promise<CanarySourceIntegrity> {
+export const inspectCanaryRuntimeSource = createCanaryRuntimeSourceInspector()
+
+async function inspectRuntimeSource(runtimeSource: ReturnType<typeof captureRuntimeSource>, expectedRevision?: string): Promise<CanarySourceIntegrity> {
   if (runtimeSource === undefined) return { issues: ['RUNTIME_SOURCE_MISMATCH'] }
-  const result = await inspectCanarySource(runtimeSource.root, expectedRevision)
+  const result = await inspectCanarySource(runtimeSource.root, expectedRevision ?? runtimeSource.commit)
   result.runtimeCommit = runtimeSource.commit
   try {
     if (

@@ -3,6 +3,8 @@ import { createChatCompletionsAgentModel, type ChatCompletionsAgentModelOptions 
 import { chatCompletionsLimitsSchema, createChatCompletionsClient } from '../chat-completions-client.js'
 import { isInMemoryChatTransport } from '../in-memory-chat-transport.js'
 
+export const openAiDirectAgentModelModuleUrl = import.meta.url
+
 export const OPENAI_DIRECT_MODEL = 'gpt-6-luna'
 export const OPENAI_DIRECT_PROTOCOL = {
   kind: 'direct_offline',

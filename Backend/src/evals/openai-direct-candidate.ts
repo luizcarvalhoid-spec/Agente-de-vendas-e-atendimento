@@ -45,11 +45,11 @@ export const openAiDirectCandidateSchema = externalCanaryManifestSchema.omit({
   ]),
 })
 
-async function inspectOpenAiDirectCandidate(input: unknown) {
-  const candidate = openAiDirectCandidateSchema.parse(input)
+export function openAiDirectPlanRequest(candidate: Pick<z.infer<typeof openAiDirectCandidateSchema>,
+  'dataset' | 'scenarioIds' | 'modelId' | 'limits' | 'pricing' | 'maxBudgetUsd' | 'unreportedUsageMultiplier' | 'outputDirectory'>): ExternalEvalPlanRequest {
   const { maxInputTokensPerCall, effectiveTimeoutMs: _effectiveTimeout, ...limits } = candidate.limits
   const { observedAt, ...pricing } = candidate.pricing
-  const request: ExternalEvalPlanRequest = {
+  return {
     modality: 'mock_external',
     datasetId: candidate.dataset.id,
     scenarioIds: candidate.scenarioIds,
@@ -60,6 +60,11 @@ async function inspectOpenAiDirectCandidate(input: unknown) {
     unreportedUsageMultiplier: candidate.unreportedUsageMultiplier,
     outputDirectory: candidate.outputDirectory,
   }
+}
+
+async function inspectOpenAiDirectCandidate(input: unknown) {
+  const candidate = openAiDirectCandidateSchema.parse(input)
+  const request = openAiDirectPlanRequest(candidate)
   const { plan, loaded } = await planExternalEval(request)
   const datasetMatches = loaded !== undefined && loaded.data.dataset.id === candidate.dataset.id &&
     loaded.data.dataset.version === candidate.dataset.version && fingerprintEvalDataset(loaded) === candidate.dataset.fingerprint

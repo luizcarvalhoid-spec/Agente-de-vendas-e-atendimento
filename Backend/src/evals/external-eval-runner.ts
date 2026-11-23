@@ -567,3 +567,23 @@ export async function runSimulatedOpenAiDirectExternalEval(
 export async function runLiveExternalEval(): Promise<never> {
   throw new ExternalEvalExecutionError('LIVE_EXTERNAL_DISABLED')
 }
+
+// O runner recebe somente um AgentModelPort. O gate permanece dono do transporte autenticado.
+export async function evaluateOpenAiCanaryModel(request: ExternalEvalPlanRequest, options: {
+  model: AgentModelPort
+  datasetFingerprint: string
+  signal?: AbortSignal
+}) {
+  const { execution, consumption, modelCalls, objectiveEvaluation } = await runControlledExternalEval(request, {
+    createModel: () => options.model,
+    datasetFingerprint: options.datasetFingerprint,
+    enforceInputLimit: true,
+    signal: options.signal,
+    observations: [],
+  })
+  return {
+    execution, consumption,
+    modelCalls: modelCalls.map(({ status, errorCode, usageComplete }) => ({ status, errorCode, usageComplete })),
+    assertions: objectiveEvaluation.summary.assertions,
+  }
+}

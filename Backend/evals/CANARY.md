@@ -181,6 +181,54 @@ pnpm exec tsx --test --test-name-pattern 'timeout, erro técnico e identidade in
 Instabilidade de I/O ou de agendamento continua possível quando os limites
 reais são atingidos. Registre o resultado e a duração de cada execução.
 
+## Candidato GPT-6 Luna via OpenAI direto
+
+O manifesto [gpt-6-luna-openai-direct-candidate.v1.json](canary/gpt-6-luna-openai-direct-candidate.v1.json)
+usa o contrato de preparação `openai_direct_preparation`. O adaptador
+implementa `AgentModelPort` e reutiliza as validações, o transporte
+limitado e o tratamento de uso de Chat Completions. O servidor continua
+com a configuração existente. A preparação direta exige transporte
+em memória registrado e não lê credenciais.
+
+O contrato envia `model: gpt-6-luna`, `reasoning_effort: none`,
+`stream: false`, `store: false`, `max_completion_tokens` e, quando
+fornecidas pelo `ChatService`, as funções registradas com `tool_choice: auto`.
+A requisição é dirigida a `https://api.openai.com/v1/chat/completions`.
+Os campos de roteamento da OpenRouter não fazem parte da requisição.
+A origem OpenAI vem da integração selecionada, e o campo `model` retornado
+é comparado literalmente. A identidade do endpoint executado fica
+desconhecida nos ensaios. [GPT-6 Luna](https://developers.openai.com/api/docs/models/gpt-6-luna) ·
+[Chat Completions](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create)
+
+`store: false` desativa o armazenamento solicitado da conclusão. A
+documentação lista retenção padrão de até 30 dias para monitoramento de
+abuso e descreve exceções e condições de ZDR. A política efetiva do
+projeto e eventuais dados permitidos ainda precisam de revisão humana.
+O manifesto tem fingerprint próprio, sem revisão operacional ou aprovação,
+e `LIVE_EXECUTION_DISABLED` continua obrigatório. [Controles de dados](https://developers.openai.com/api/docs/guides/your-data)
+
+Em 22/11/2026, as tarifas públicas Standard eram USD 0,10 por milhão de
+tokens de entrada e USD 0,50 por milhão de saída. Com duas chamadas de até
+20.000 tokens de entrada e 512 de saída, o controlador estima uma reserva
+documental de USD 0,00564, já incluindo margem de 1,25. O teto proposto é
+USD 1,00. Tarifas efetivas, condições da conta e cobrança futura continuam
+pendentes de aprovação. [Tarifas do modelo](https://developers.openai.com/api/docs/models/gpt-6-luna)
+
+Em `Backend`, gere o relatório JSON e Markdown do ensaio em `universal-core`.
+
+```sh
+pnpm exec tsx src/scripts/eval-openai-direct.ts --output-dir external-eval-reports/openai-direct-preparation
+```
+
+As dez jornadas de cosméticos são exercitadas separadamente em
+`test/openai-direct-commercial.test.ts`, com respostas de modelo sintéticas
+e catálogo local. Os testes cobrem interesse em anticaspa, necessidade
+incompleta, couro cabeludo oleoso, comparação, preço e estoque, produto
+inexistente, orçamento contraditório, recomendação imediata sem preferências,
+benefício inventado e linguagem coloquial com pedido de garantia clínica.
+Os casos verificam grounding, ferramentas executadas, preços canônicos e
+limites comerciais. A qualidade conversacional do modelo real segue pendente.
+
 ## Preflight local
 
 A partir de `Backend`, gere os dois relatórios de preparação:

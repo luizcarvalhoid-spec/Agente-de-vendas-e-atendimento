@@ -6,6 +6,9 @@ Ele seleciona `universal.core.incomplete-need.001` no dataset `universal-core`.
 pergunta de esclarecimento. Modelo, provedor e configuração financeira aguardam
 decisão humana.
 
+O [candidato GPT-6 Luna via OpenRouter](OPENROUTER_LUNA_CANARY.md) da
+EVAL-07D.1 prepara um cenário comercial separado e permanece em NO-GO.
+
 ## Candidato GPT-4.1 Mini (EVAL-07B.4)
 
 O [candidato versionado](canary/gpt-4.1-mini-candidate.v1.json) fixa

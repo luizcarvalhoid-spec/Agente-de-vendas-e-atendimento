@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "dataset": {
+    "id": "hidrasplash-luna-commercial-canary",
+    "version": "1.0.0",
+    "scope": "store",
+    "locale": "pt-BR",
+    "storeProfile": "hidrasplash"
+  },
+  "cases": [
+    {
+      "id": "hidrasplash.canary.antidandruff-clarification.001",
+      "category": "consultative-dialogue",
+      "difficulty": "easy",
+      "severity": "high",
+      "tags": ["antidandruff", "clarification", "commercial-canary"],
+      "input": {
+        "initialState": { "history": [], "cart": [] },
+        "turns": [
+          {
+            "message": "Olá! Estou procurando um shampoo anticaspa, mas não sei qual escolher. Vocês podem me ajudar?",
+            "preferences": { "mode": "preserve" },
+            "cart": { "mode": "preserve" },
+            "recommendationContext": { "mode": "auto" }
+          }
+        ]
+      },
+      "expected_behaviors": [
+        {
+          "turn": 0,
+          "action": "ask_clarification",
+          "description": "Reconhecer o interesse em shampoo anticaspa e esclarecer o perfil do couro cabeludo antes de recomendar. Consultar o catálogo quando necessário, sem prometer benefício clínico.",
+          "requiredGrounding": []
+        }
+      ],
+      "assertions": [
+        { "id": "clarification", "criterionId": "commercial-objective", "turn": 0, "severity": "high", "type": "response_type_allowed", "responseTypes": ["text"], "textReasons": ["clarification"] },
+        { "id": "no-early-recommendation", "criterionId": "commercial-objective", "turn": 0, "severity": "critical", "type": "product_ids_exact", "productIds": [] },
+        { "id": "single-question", "criterionId": "commercial-objective", "turn": 0, "severity": "high", "type": "max_questions", "maximum": 1 },
+        { "id": "bounded-model-calls", "criterionId": "commercial-objective", "turn": 0, "severity": "high", "type": "max_model_calls", "maximum": 2 }
+      ],
+      "quality_criteria": [
+        { "id": "commercial-objective", "criterion": "consultative_quality", "kind": "objective", "applicability": "required", "evaluation": "deterministic", "status": "not_evaluated", "weight": 2, "assertionIds": ["clarification", "no-early-recommendation", "single-question", "bounded-model-calls"] },
+        { "id": "naturalness-review", "criterion": "naturalness", "kind": "subjective", "applicability": "required", "evaluation": "human", "status": "not_evaluated", "weight": 1 },
+        { "id": "consultative-review", "criterion": "consultative_quality", "kind": "subjective", "applicability": "required", "evaluation": "human", "status": "not_evaluated", "weight": 1 },
+        { "id": "safety-review", "criterion": "safety", "kind": "subjective", "applicability": "required", "evaluation": "human", "status": "not_evaluated", "weight": 1 }
+      ]
+    }
+  ]
+}

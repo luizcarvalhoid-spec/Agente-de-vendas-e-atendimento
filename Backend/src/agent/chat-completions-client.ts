@@ -40,6 +40,8 @@ export const openRouterEvaluationRoutingSchema = z
     requireParameters: z.literal(true),
     dataCollection: z.enum(['allow', 'deny']),
     zeroDataRetention: z.boolean().optional(),
+    reasoningEffort: z.literal('none').optional(),
+    serviceTier: z.literal('default').optional(),
   })
   .strict()
 
@@ -783,6 +785,8 @@ export function createChatCompletionsClient(options: {
           validatedInput.maxOutputTokens ?? defaultMaxOutputTokens,
         stream: false,
         ...(protocol.kind !== 'openrouter' ? { reasoning_effort: protocol.reasoningEffort, store: protocol.store } : {}),
+        ...(evaluationRouting?.reasoningEffort === undefined ? {} : { reasoning_effort: evaluationRouting.reasoningEffort }),
+        ...(evaluationRouting?.serviceTier === undefined ? {} : { service_tier: evaluationRouting.serviceTier }),
         ...(evaluationRouting === undefined
           ? {}
           : {

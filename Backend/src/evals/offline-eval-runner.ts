@@ -56,6 +56,11 @@ export const OFFLINE_EVAL_DATASETS = {
     'datasets/stores/hidrasplash/conversations.v1.json',
 } as const
 
+// O canário tem escopo próprio e não integra a matriz de baselines versionados.
+const CANARY_EVAL_DATASETS = {
+  'hidrasplash-luna-commercial-canary': 'datasets/stores/hidrasplash/luna-commercial-canary.v1.json',
+} as const
+
 export type OfflineEvalDatasetId = keyof typeof OFFLINE_EVAL_DATASETS
 export type EvalTechnicalStatus = 'completed' | 'technical_failure'
 
@@ -141,6 +146,9 @@ export function resolveOfflineEvalDataset(
   datasetId: string,
   moduleUrl: string = import.meta.url,
 ) {
+  if (Object.hasOwn(CANARY_EVAL_DATASETS, datasetId)) {
+    return resolve(resolveEvalRoot(moduleUrl), CANARY_EVAL_DATASETS[datasetId as keyof typeof CANARY_EVAL_DATASETS])
+  }
   if (!(datasetId in OFFLINE_EVAL_DATASETS)) {
     throw new TypeError(`Dataset offline desconhecido: ${datasetId}.`)
   }

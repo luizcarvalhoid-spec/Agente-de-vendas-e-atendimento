@@ -1,0 +1,54 @@
+{
+  "manifestVersion": 1,
+  "experimentId": "first-commercial-canary-gpt-6-luna-openrouter",
+  "purpose": "external_candidate",
+  "environment": "isolated_non_production",
+  "dataset": {
+    "id": "hidrasplash-luna-commercial-canary",
+    "version": "1.0.0",
+    "fingerprint": "sha256:6deda7968a92d74565ae94f258afb69f3c96866ccc00016cf8879bd53da61bfe"
+  },
+  "scenarioIds": ["hidrasplash.canary.antidandruff-clarification.001"],
+  "generation": {
+    "stream": false,
+    "sampling": "provider_defaults",
+    "toolChoice": "chat_service"
+  },
+  "modelId": "openai/gpt-6-luna",
+  "routing": {
+    "providerId": "azure",
+    "allowFallbacks": false,
+    "requireParameters": true,
+    "dataCollection": "deny",
+    "zeroDataRetention": true,
+    "reasoningEffort": "none",
+    "serviceTier": "default"
+  },
+  "limits": {
+    "maxModelCalls": 2,
+    "maxInputTokensPerCall": 20000,
+    "maxOutputTokensPerCall": 512,
+    "maxExecutionTokens": 41024,
+    "timeoutMs": 15000,
+    "effectiveTimeoutMs": 15000
+  },
+  "maxBudgetUsd": 1,
+  "unreportedUsageMultiplier": 1.25,
+  "outputDirectory": "external-eval-reports/first-commercial-canary-gpt-6-luna-openrouter",
+  "transcriptPersistence": "disabled",
+  "stopCriteria": [
+    "technical_failure",
+    "model_identity_mismatch",
+    "provider_identity_mismatch_or_unobserved",
+    "preventive_limit_reached",
+    "reported_usage_exceeded_reservation",
+    "operator_cancellation"
+  ],
+  "technicalVersions": {
+    "datasetSchema": 1,
+    "externalPlan": 2,
+    "externalReport": 2,
+    "objectiveReport": 1,
+    "objectiveEngine": "deterministic-assertion-engine-v1"
+  }
+}

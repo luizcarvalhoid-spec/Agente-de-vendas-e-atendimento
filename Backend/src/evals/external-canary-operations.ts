@@ -34,7 +34,9 @@ export interface CanaryFixtureDependencies extends CanaryOperationDependencies {
   readonly fixtureRoot: string
 }
 
-type SourceContext = { kind: 'loaded_runtime' } | { kind: 'synthetic_fixture'; root: string }
+type SourceContext =
+  | { kind: 'loaded_runtime'; inspect?: typeof inspectCanaryRuntimeSource }
+  | { kind: 'synthetic_fixture'; root: string }
 
 export type CanaryOperationalBlocker = CanarySourceIssue
   | 'MANIFEST_INVALID'
@@ -110,10 +112,11 @@ export interface CanaryOperationalInput {
   readonly approval?: unknown
 }
 
-async function inspectOperations(
+export async function inspectCanaryOperationGate(
   input: CanaryOperationalInput,
   deps: CanaryOperationDependencies,
   sourceContext: SourceContext,
+  mode: 'legacy' | 'openrouter_luna' = 'legacy',
 ) {
   const blockers = new Set<CanaryOperationalBlocker>()
   const approval = authenticateCanaryApproval(input.approval, deps.authorities)
@@ -182,7 +185,7 @@ async function inspectOperations(
 
   if (manifest !== undefined &&
       (sourceContext.kind === 'loaded_runtime' || manifest.purpose === 'synthetic_rehearsal')) {
-    if (manifest.purpose === 'synthetic_rehearsal') {
+    if (mode === 'legacy' && manifest.purpose === 'synthetic_rehearsal') {
       try {
         credentialAvailable = await deps.credentials?.resolve({
           experimentId: manifest.experimentId,
@@ -194,7 +197,7 @@ async function inspectOperations(
       }
     }
     source = sourceContext.kind === 'loaded_runtime'
-      ? await inspectCanaryRuntimeSource(manifest.sourceRevision)
+      ? await (sourceContext.inspect ?? inspectCanaryRuntimeSource)(manifest.sourceRevision)
       : await inspectCanarySource(sourceContext.root, manifest.sourceRevision)
     for (const issue of source.issues) blockers.add(issue)
     if (approval !== undefined && source.worktreeFingerprint !== approval.worktreeFingerprint) {
@@ -204,13 +207,13 @@ async function inspectOperations(
       blockers.add('APPROVAL_DEPENDENCIES_MISMATCH')
     }
   }
-  if (!credentialAvailable) blockers.add('CREDENTIAL_UNAVAILABLE')
+  if (mode === 'legacy' && !credentialAvailable) blockers.add('CREDENTIAL_UNAVAILABLE')
 
   const verifiedSourceMatches = source !== undefined && source.issues.length === 0 &&
     (approval === undefined || (source.commit === approval.sourceRevision &&
       source.worktreeFingerprint === approval.worktreeFingerprint &&
       source.dependenciesFingerprint === approval.dependenciesFingerprint))
-  const rehearsalEligible = blockers.size === 0 && manifest?.purpose === 'synthetic_rehearsal'
+  const rehearsalEligible = mode === 'legacy' && blockers.size === 0 && manifest?.purpose === 'synthetic_rehearsal'
   const report: CanaryOperationalReport = {
     reportVersion: 1,
     plan: {
@@ -246,7 +249,7 @@ async function inspectOperations(
       credentialAvailable,
     },
     authorizationUse,
-    blockers: [...blockers, 'LIVE_EXECUTION_DISABLED'],
+    blockers: mode === 'legacy' ? [...blockers, 'LIVE_EXECUTION_DISABLED'] : [...blockers],
     rehearsalEligible,
     financial: {
       manifestBudgetUsd: prep.draft?.maxBudgetUsd,
@@ -262,11 +265,11 @@ async function inspectOperations(
     networkAllowed: false,
     limitations,
   }
-  return { report, manifest, approval }
+  return { report, manifest, approval, budget: prep.budget }
 }
 
 export async function verifyCanaryOperations(input: CanaryOperationalInput, deps: CanaryOperationDependencies) {
-  return (await inspectOperations(input, deps, { kind: 'loaded_runtime' })).report
+  return (await inspectCanaryOperationGate(input, deps, { kind: 'loaded_runtime' })).report
 }
 
 type RehearsalOptions = { transport: InMemoryOpenRouterTransport; signal?: AbortSignal }
@@ -276,12 +279,12 @@ export async function rehearseCanaryActivation(
   deps: CanaryOperationDependencies,
   options: RehearsalOptions,
 ): Promise<CanaryOperationalReport> {
-  return runRehearsal(await inspectOperations(input, deps, { kind: 'loaded_runtime' }), deps, options)
+  return runRehearsal(await inspectCanaryOperationGate(input, deps, { kind: 'loaded_runtime' }), deps, options)
 }
 
 // As fixtures exercitam o fluxo sintético. Seu checkout nunca comprova integridade operacional.
 export async function verifyCanaryFixtureOperations(input: CanaryOperationalInput, deps: CanaryFixtureDependencies) {
-  return (await inspectOperations(input, deps, { kind: 'synthetic_fixture', root: deps.fixtureRoot })).report
+  return (await inspectCanaryOperationGate(input, deps, { kind: 'synthetic_fixture', root: deps.fixtureRoot })).report
 }
 
 export async function rehearseCanaryFixtureActivation(
@@ -289,11 +292,11 @@ export async function rehearseCanaryFixtureActivation(
   deps: CanaryFixtureDependencies,
   options: RehearsalOptions,
 ): Promise<CanaryOperationalReport> {
-  return runRehearsal(await inspectOperations(input, deps, { kind: 'synthetic_fixture', root: deps.fixtureRoot }), deps, options)
+  return runRehearsal(await inspectCanaryOperationGate(input, deps, { kind: 'synthetic_fixture', root: deps.fixtureRoot }), deps, options)
 }
 
 async function runRehearsal(
-  { report, manifest, approval }: Awaited<ReturnType<typeof inspectOperations>>,
+  { report, manifest, approval }: Awaited<ReturnType<typeof inspectCanaryOperationGate>>,
   deps: CanaryOperationDependencies,
   options: RehearsalOptions,
 ): Promise<CanaryOperationalReport> {

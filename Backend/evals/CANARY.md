@@ -285,6 +285,13 @@ envio, expiração após reserva, concorrência, modelo divergente, falhas HTTP,
 timeout, cancelamento, limite de duas chamadas, excesso de reserva e
 sanitização. A preparação não habilitou `live_external` nem executou o canário.
 
+## Readiness do primeiro canário (EVAL-07C.2)
+
+A decisão atual é **NO-GO**. O procedimento de instalação, revisão humana,
+aprovação e reconciliação está no [checklist operacional](OPENAI_CANARY_READINESS.md).
+O [relatório JSON](canary/openai-readiness.07c2.v1.json) registra o preflight
+offline e as regressões executadas na revisão do merge do PR #52.
+
 ## Preflight local
 
 A partir de `Backend`, gere os dois relatórios de preparação:

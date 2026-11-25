@@ -17,6 +17,7 @@
     "eval:human": "tsx src/scripts/human-eval.ts",
     "eval:live": "tsx src/scripts/eval-live.ts",
     "eval:canary": "tsx src/scripts/eval-canary.ts",
+    "eval:commercial-openrouter": "tsx src/scripts/eval-commercial-openrouter.ts",
     "test": "tsc -p tsconfig.json && tsx --test \"test/**/*.test.ts\"",
     "smoke:chat": "tsx src/scripts/smoke-chat.ts",
     "smoke:openrouter": "tsx src/scripts/smoke-openrouter.ts",

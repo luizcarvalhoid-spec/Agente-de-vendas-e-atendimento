@@ -119,3 +119,132 @@ português, ausência de benefícios inventados e respeito aos limites clínicos
 e comerciais. Encerrar após a primeira resposta ao usuário ou qualquer
 condição de parada do manifesto. O ensaio sintético verifica o fluxo local
 com uma busca real no catálogo, sem medir o desempenho do Luna.
+
+## Entrada operacional protegida da EVAL-07D.2
+
+`verify-openrouter` verifica o manifesto e a evidência local sem abrir o
+arquivo da chave, consumir autorização ou usar rede. `execute-openrouter`
+usa o mesmo gate e só chega ao transporte se a implantação confiável estiver
+configurada. O registro de autoridades e a configuração da implantação
+continuam vazios. O caminho genérico `runLiveExternalEval()` continua
+bloqueado. A CLI devolve os bloqueios em JSON, sem transcrições, headers,
+chaves ou corpos brutos de resposta.
+
+O escopo operacional é fixo no turno comercial já versionado e no seu
+fingerprint, com o modelo, a família e os limites do manifesto candidato.
+Com a autorização autenticada, o gate abre a credencial montada, compara
+seu SHA-256 com a evidência assinada e sincroniza o marcador de uso único
+antes de qualquer acesso HTTP. Em cada tentativa, revisa a validade da
+evidência, a revisão e dependências em uso e a presença do marcador. A
+chave dedicada consulta `GET https://openrouter.ai/api/v1/key` para confirmar
+teto USD 1,00, ausência de reset e saldo da chave ou do orçamento efetivo
+aplicável suficiente para a reserva restante. Uma confirmação inválida
+impede o POST e mantém a autorização consumida. Saldo da conta, recarga,
+BYOK e privacidade exigem evidência assinada do console. A chave dedicada
+fica sem permissões administrativas. [Metadados da chave](https://openrouter.ai/docs/api/api-reference/api-keys/get-current-api-key) ·
+[Saldo de conta com chave de gerenciamento](https://openrouter.ai/docs/api/api-reference/credits/get-remaining-credits) ·
+[Acesso administrativo aos guardrails](https://openrouter.ai/docs/api/api-reference/guardrails/list-guardrails)
+
+Cada POST exige a mesma revisão e isolamento revalidados após o GET.
+Cancelamento e o prazo de 15 segundos cobrem a sequência de verificação e
+envio. O cliente interrompe após falha ou ausência de identidade, sem retry
+nem redirecionamento. No caminho protegido, `azure` e o nome publicado
+`Azure` identificam apenas a família, sob a decisão assinada de uso com
+dados fictícios. O parser continua rejeitando dados de roteamento
+contraditórios, e o relatório mantém o endpoint exato como `unverified`.
+
+### Preço para a aprovação futura
+
+O GET público revisitado em 24/11/2026 manteve Azure global como a entrada
+da família na lista ZDR, com `safety_retention: false`. Para 20.000 tokens,
+o patamar público de preços acima de 272.000 tokens não se aplica. No Azure
+global, cobrar toda a entrada como escrita de cache a USD 0,125/M e a
+saída a USD 0,50/M dá reserva preventiva de **USD 0,00689** para a rodada.
+A página pública também mostra variantes Azure com saída de até USD
+0,60/M. Usar USD 0,15/M como hipótese conservadora de escrita de cache e
+USD 0,60/M de saída dá **USD 0,008268**, valor usado no teste sintético,
+sem confirmar a tarifa de escrita de cache das variantes. O manifesto
+operacional deve usar o maior preço de entrada, leitura ou escrita de cache
+entre todas as variantes elegíveis e o maior preço de saída. O gate
+compara essas tarifas com os máximos assinados. Se houver tarifa adicional
+fora do modelo por token ou uma variante sem tarifa comprovada, a decisão
+permanece NO-GO. [Catálogo do modelo](https://openrouter.ai/api/v1/models/openai/gpt-6-luna/endpoints) ·
+[Tarifas regionais](https://openrouter.ai/openai/gpt-6-luna) ·
+[Endpoints ZDR](https://openrouter.ai/api/v1/endpoints/zdr)
+
+### Provisionamento após revisão e autorização separadas
+
+1. Verificar a revisão final no próprio runtime. Configurar, em mudança
+   revisada, a chave **pública** Ed25519 da autoridade, a identidade do
+   aprovador, o escopo `external_canary_once` e um UID Linux exclusivo e
+   sem sudo. Manter a chave privada de assinatura com a autoridade, fora
+   do serviço. A configuração da implantação fica no código revisado.
+2. Preparar checkout, lockfile e dependências protegidos contra escrita
+   pelo serviço durante a rodada. Demonstrar o isolamento do host e de
+   outros processos, a proteção das configurações do runtime e a
+   restrição de egresso a HTTPS para `openrouter.ai`. Verificar que
+   `/var/lib/openrouter-canary/authorizations` é persistente, canônico,
+   privado e pertence ao UID do serviço. A sincronização do arquivo e do
+   diretório preserva o marcador em Linux. Um marcador nunca é apagado
+   para repetir a rodada.
+3. Provisionar somente a chave dedicada de inferência pelo mount privado
+   somente leitura `/run/credentials/openrouter-canary.service/openrouter-api-key`.
+   O arquivo deve ser regular, pertencer ao UID do serviço, ter um único
+   link e acesso vedado a grupo e outros. Usar o gerenciador de segredos
+   do ambiente para a montagem. Manter a chave fora de argumentos, de
+   variáveis de ambiente, do checkout e de logs. Calcular o SHA-256 do
+   valor sem o terminador de linha, dentro do canal protegido.
+4. Completar uma cópia local e protegida do manifesto com a revisão e as
+   tarifas efetivas verificadas. Registrar o checklist existente e obter
+   uma nova assinatura Ed25519, vinculada ao fingerprint do manifesto e
+   aos fingerprints do checkout e das dependências daquele runtime.
+   Além de `providerSpendLimit` em USD 1,00, o payload assinado
+   `openRouterEvidence` exige `routingDecision` com aceite explícito
+   `azure_family_fictional_data_only`, `privacy` com ZDR only sem Safety
+   Retention, `account` com dados da chave e saldo atestado e `pricing`
+   com os máximos revalidados. A validade de cada evidência deve cobrir a
+   rodada. Declarações prévias do operador continuam pendentes até a
+   verificação e assinatura.
+
+### Verificação atual e primeira rodada
+
+O WSL2 é adequado para preflight offline em ext4 com dependências
+próprias. O clone de validação pertence à conta local, que pode alterá-lo.
+O serviço isolado, o mount privado da credencial, o armazenamento de
+uso único daquela implantação e a política de egresso do processo não
+foram comprovados. Isso mantém `ISOLATED_ENVIRONMENT_UNVERIFIED`.
+Uma futura revisão pode comprovar esses controles localmente ou em outro
+ambiente isolado. O canário real continua NO-GO.
+
+Na preparação offline, a CLI aceita o rascunho existente e produz o
+diagnóstico do runtime, sem acesso autenticado:
+
+```sh
+pnpm eval:canary --action verify-openrouter \
+  --manifest evals/canary/gpt-6-luna-openrouter-candidate.v1.json \
+  --output-dir /caminho/privado/novo-preflight
+```
+
+Somente após o aceite do PR, prova de isolamento e autorização humana
+específica, executar sob o UID dedicado no checkout aprovado, partindo de
+`Backend`. Primeiro rodar `verify-openrouter` com o manifesto completo e
+os argumentos `--review` e `--approval` abaixo. Prosseguir somente com
+`ready_for_credential_check` e lista de bloqueios vazia. Usar um novo
+destino privado para a única execução:
+
+```sh
+pnpm eval:canary --action execute-openrouter \
+  --manifest /caminho/privado/manifesto-aprovado.json \
+  --review /caminho/privado/revisao.json \
+  --approval /caminho/privado/autorizacao-assinada.json \
+  --output-dir /caminho/privado/resultado-da-rodada --observe
+```
+
+Usar `--observe` somente em terminal privado sem gravação ou histórico
+de saída. Após uma rodada bem-sucedida, a resposta sanitizada aparece
+apenas no terminal interativo, sem transcrição no relatório. Revisar a
+adequação da resposta em português e a segurança comercial e clínica.
+Conferir tentativas, tokens, assertions e ferramentas no relatório e
+reconciliar a cobrança no painel da OpenRouter, inclusive se a tentativa
+falhar. Nesta etapa foram usados somente metadados públicos e transporte
+em memória nos testes.

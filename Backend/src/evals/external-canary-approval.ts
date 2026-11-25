@@ -11,6 +11,39 @@ const safeId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/)
 const timestamp = z.iso.datetime({ offset: true })
 export const canaryUseIdSchema = z.string().regex(/^[a-f0-9]{32}$/)
 const scope = z.enum(['synthetic_canary_once', 'external_canary_once'])
+const evidenceWindow = { verifiedAt: timestamp, validUntil: timestamp }
+const rate = z.number().finite().nonnegative()
+
+const openRouterEvidence = z.strictObject({
+  routingDecision: z.strictObject({
+    scope: z.literal('azure_family_fictional_data_only'),
+    ...evidenceWindow,
+  }).optional(),
+  privacy: z.strictObject({
+    zdrOnly: z.literal(true),
+    safetyRetention: z.literal(false),
+    dataCollection: z.literal('deny'),
+    ...evidenceWindow,
+  }).optional(),
+  account: z.strictObject({
+    keyFingerprint: canaryFingerprintSchema,
+    availableCreditsUsd: rate,
+    limitReset: z.null(),
+    autoTopUp: z.literal(false),
+    dedicatedKey: z.literal(true),
+    byok: z.literal(false),
+    ...evidenceWindow,
+  }).optional(),
+  pricing: z.strictObject({
+    variantsAndCacheReviewed: z.literal(true),
+    tokenPricingOnly: z.literal(true),
+    maximumPromptUsdPerMillion: rate,
+    maximumCacheReadUsdPerMillion: rate,
+    maximumCacheWriteUsdPerMillion: rate,
+    maximumOutputUsdPerMillion: rate,
+    ...evidenceWindow,
+  }).optional(),
+})
 
 export const canaryApprovalPayloadSchema = z.strictObject({
   version: z.literal(1),
@@ -39,6 +72,7 @@ export const canaryApprovalPayloadSchema = z.strictObject({
     verifiedAt: timestamp,
     validUntil: timestamp,
   }).optional(),
+  openRouterEvidence: openRouterEvidence.optional(),
 })
 
 export const canaryApprovalSchema = z.strictObject({

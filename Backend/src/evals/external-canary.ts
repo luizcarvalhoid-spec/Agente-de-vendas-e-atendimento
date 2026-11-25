@@ -131,7 +131,7 @@ export function fingerprintExternalCanaryManifest(input: unknown) {
 const canaryPreparationConfigurationSchema = externalCanaryManifestSchema.omit({ sourceRevision: true })
 type CanaryPreparationConfiguration = Omit<ExternalCanaryManifest, 'sourceRevision'>
 
-function requestFor(manifest: CanaryPreparationConfiguration, modality: 'dry_run' | 'mock_external') {
+export function externalCanaryPlanRequest(manifest: CanaryPreparationConfiguration, modality: 'dry_run' | 'mock_external') {
   const { effectiveTimeoutMs: _effectiveTimeoutMs, maxInputTokensPerCall, ...limits } = manifest.limits
   return {
     modality,
@@ -148,7 +148,7 @@ function requestFor(manifest: CanaryPreparationConfiguration, modality: 'dry_run
 }
 
 function budgetFor(manifest: CanaryPreparationConfiguration, locallyApproved: boolean): CanaryBudget {
-  const request = requestFor(manifest, 'dry_run')
+  const request = externalCanaryPlanRequest(manifest, 'dry_run')
   const cost = {
     inputTokens: manifest.limits.maxInputTokensPerCall,
     outputTokens: manifest.limits.maxOutputTokensPerCall,
@@ -213,7 +213,7 @@ async function inspectCanary(input: unknown, reviewInput?: unknown) {
     const configuration = complete.success ? complete : canaryPreparationConfigurationSchema.safeParse(draftConfiguration)
     if (configuration.success) {
       const candidate = configuration.data
-      const request = requestFor(candidate, 'dry_run')
+      const request = externalCanaryPlanRequest(candidate, 'dry_run')
       budget = budgetFor(candidate, false)
       if (candidate.limits.effectiveTimeoutMs !== Math.min(
         candidate.limits.timeoutMs,
@@ -314,7 +314,7 @@ export async function rehearseExternalCanary(
       issues: [...report.issues, { code: 'SYNTHETIC_REHEARSAL_REQUIRED' }],
     }
   }
-  const result = await runSimulatedOpenRouterExternalEval(requestFor(manifest, 'mock_external'), {
+  const result = await runSimulatedOpenRouterExternalEval(externalCanaryPlanRequest(manifest, 'mock_external'), {
     transport: options.transport,
     canary: { datasetFingerprint: manifest.dataset.fingerprint, signal: options.signal },
   })

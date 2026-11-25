@@ -11,7 +11,7 @@ import { createCanaryRuntimeSourceInspector, inspectCanarySource, type CanarySou
 import { CanaryAuthorizationUseStore } from './external-canary-use-store.js'
 import { estimateExternalEvalCost } from './external-eval-cost.js'
 import { planExternalEval } from './external-eval-plan.js'
-import { evaluateOpenAiCanaryModel } from './external-eval-runner.js'
+import { evaluateCanaryModel } from './external-eval-runner.js'
 import {
   authenticateOpenAiCanaryApproval, fingerprintOpenAiCanaryManifest, openAiCanaryDraftSchema, openAiCanaryManifestSchema,
   openAiCanaryContractModuleUrl, openAiCanaryProjectSchema, type OpenAiCanaryApproval, type OpenAiCanaryManifest,
@@ -181,7 +181,7 @@ async function inspect(input: OpenAiCanaryInput, context: GateContext) {
     networkAllowed: false,
     transportAttempts: 0,
     realInferenceAttempts: 0,
-    execution: undefined as Awaited<ReturnType<typeof evaluateOpenAiCanaryModel>> | undefined,
+    execution: undefined as Awaited<ReturnType<typeof evaluateCanaryModel>> | undefined,
   }}
 }
 
@@ -256,7 +256,7 @@ async function run(input: OpenAiCanaryInput, context: GateContext, dispatch: typ
     protocol: { ...OPENAI_DIRECT_PROTOCOL, kind: 'direct_canary' },
   }), { expectedModelId: OPENAI_DIRECT_MODEL, onObservation(value) { modelMatches = value.modelIdentityMatches } })
   try {
-    report.execution = await evaluateOpenAiCanaryModel(request, { model, datasetFingerprint: manifest.dataset.fingerprint, signal })
+    report.execution = await evaluateCanaryModel(request, { model, datasetFingerprint: manifest.dataset.fingerprint, signal })
     if (modelMatches === false) report.blockers.push('MODEL_IDENTITY_MISMATCH')
     if (report.execution.execution.limitsReached.includes('reported_usage_exceeded_reservation')) report.blockers.push('USAGE_EXCEEDED_RESERVATION')
     if (report.execution.execution.technicalStatus === 'technical_failure') report.blockers.push('TECHNICAL_FAILURE')

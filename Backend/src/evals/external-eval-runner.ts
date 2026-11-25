@@ -139,6 +139,7 @@ interface RunControlledExternalEvalOptions {
   readonly enforceInputLimit?: boolean
   readonly datasetFingerprint?: string
   readonly signal?: AbortSignal
+  readonly observeResponse?: (message: string) => void
 }
 
 function tracedModel(
@@ -257,6 +258,13 @@ async function runControlledExternalEval(
     evaluateAssertions: true,
     canonicalData: createEvalCanonicalData(catalog),
   })
+  if (options.observeResponse) {
+    for (const scenario of execution.scenarios) {
+      for (const turn of scenario.turns) {
+        if (turn.response) options.observeResponse(turn.response.message)
+      }
+    }
+  }
   const objectiveReport = buildEvalReport(loaded, execution)
   const costSnapshot = costs.snapshot()
   const transportedCalls = costSnapshot.calls.filter(
@@ -569,16 +577,18 @@ export async function runLiveExternalEval(): Promise<never> {
 }
 
 // O runner recebe somente um AgentModelPort. O gate permanece dono do transporte autenticado.
-export async function evaluateOpenAiCanaryModel(request: ExternalEvalPlanRequest, options: {
+export async function evaluateCanaryModel(request: ExternalEvalPlanRequest, options: {
   model: AgentModelPort
   datasetFingerprint: string
   signal?: AbortSignal
+  observeResponse?: (message: string) => void
 }) {
   const { execution, consumption, modelCalls, objectiveEvaluation } = await runControlledExternalEval(request, {
     createModel: () => options.model,
     datasetFingerprint: options.datasetFingerprint,
     enforceInputLimit: true,
     signal: options.signal,
+    observeResponse: options.observeResponse,
     observations: [],
   })
   return {

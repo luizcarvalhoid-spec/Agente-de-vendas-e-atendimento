@@ -650,7 +650,7 @@ async function discardErrorBody(response: Response) {
   }
 }
 
-async function awaitWithAbort<T>(
+export async function awaitWithAbort<T>(
   start: () => Promise<T>,
   signal: AbortSignal,
 ) {
@@ -672,7 +672,7 @@ async function awaitWithAbort<T>(
   }
 }
 
-async function readResponseBodyWithinLimit(
+export async function readResponseBodyWithinLimit(
   response: Response,
   signal: AbortSignal,
 ) {

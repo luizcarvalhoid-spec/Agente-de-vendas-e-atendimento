@@ -1,3 +1,4 @@
+import { constants } from 'node:fs'
 import { lstat, open } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 
@@ -50,6 +51,14 @@ export class CanaryAuthorizationUseStore {
         await entry.sync()
       } finally {
         await entry.close()
+      }
+      if (process.platform === 'linux') {
+        const directory = await open(this.directory, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW)
+        try {
+          await directory.sync()
+        } finally {
+          await directory.close()
+        }
       }
       return 'reserved'
     } catch {

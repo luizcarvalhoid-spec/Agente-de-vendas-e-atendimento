@@ -1,4 +1,6 @@
-import { open } from 'node:fs/promises'
+import { mkdir, open } from 'node:fs/promises'
+import { join } from 'node:path'
+import { isatty } from 'node:tty'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 
@@ -14,6 +16,7 @@ import {
 import { prepareExternalCanary, rehearseExternalCanary } from '../evals/external-canary.js'
 import { CanaryAuthorizationUseStore } from '../evals/external-canary-use-store.js'
 import { createInMemoryOpenRouterTransport } from '../evals/external-eval-runner.js'
+import { executeOpenRouterLunaCanary, verifyOpenRouterLunaCanary } from '../evals/openrouter-luna-canary.js'
 
 async function readJson(path: string): Promise<unknown> {
   const file = await open(path, 'r')
@@ -42,19 +45,67 @@ async function main() {
       review: { type: 'string' },
       approval: { type: 'string' },
       'output-dir': { type: 'string' },
+      observe: { type: 'boolean' },
       help: { type: 'boolean' },
     },
   })
   if (values.help) {
-    console.log('pnpm eval:canary --action prepare|rehearse|verify --manifest <json> --output-dir <diretório> [--review <json>] [--approval <json> apenas em verify]')
+    console.log('pnpm eval:canary --action prepare|rehearse|verify|verify-openrouter|execute-openrouter --manifest <json> --output-dir <diretório> [--review <json>] [--approval <json> em ações de verificação e execução] [--observe em execute-openrouter]')
     return
   }
   const action = values.action
-  if ((action !== 'prepare' && action !== 'rehearse' && action !== 'verify') ||
-      !values.manifest || !values['output-dir'] || (action !== 'verify' && values.approval)) {
+  const openRouter = action === 'verify-openrouter' || action === 'execute-openrouter'
+  if ((!openRouter && action !== 'prepare' && action !== 'rehearse' && action !== 'verify') ||
+      !values.manifest || !values['output-dir'] || (!openRouter && action !== 'verify' && values.approval) ||
+      (values.observe && action !== 'execute-openrouter')) {
     throw new TypeError('Comando de preparação inválido.')
   }
   const input = await readJson(values.manifest)
+  if (openRouter) {
+    if (!import.meta.url.endsWith('/src/scripts/eval-canary.ts')) {
+      throw new TypeError('Execute o canário a partir do código-fonte rastreado.')
+    }
+    const options = {
+      manifest: input,
+      review: values.review === undefined ? undefined : await readJson(values.review),
+      approval: values.approval === undefined ? undefined : await readJson(values.approval),
+    }
+    const cancellation = new AbortController()
+    const cancel = () => cancellation.abort()
+    process.once('SIGINT', cancel)
+    process.once('SIGTERM', cancel)
+    let terminal: Awaited<ReturnType<typeof open>> | undefined
+    try {
+      if (values.observe) {
+        terminal = await open('/dev/tty', 'r+')
+        if (!isatty(terminal.fd)) throw new TypeError('A observação requer um terminal interativo privado.')
+      }
+      const interactiveTerminal = terminal
+      const observe = interactiveTerminal && (async (message: string) => {
+        const text = message.replace(/[\x00-\x09\x0b-\x1f\x7f-\x9f]/g, '')
+        await interactiveTerminal.write('\nResposta final para revisão humana\n\n' + text + '\n\n')
+      })
+      await mkdir(values['output-dir'], { recursive: true, mode: 0o700 })
+      const file = await open(join(values['output-dir'], `${action}.v1.json`), 'wx', 0o600)
+      try {
+        const report = action === 'verify-openrouter'
+          ? await verifyOpenRouterLunaCanary(options)
+          : await executeOpenRouterLunaCanary(options, cancellation.signal, observe)
+        await file.writeFile(`${JSON.stringify(report, null, 2)}\n`)
+        console.log(JSON.stringify({
+          blockers: report.blockers, networkAllowed: report.networkAllowed, realInferenceAttempts: report.realInferenceAttempts,
+        }))
+        if (report.blockers.length) process.exitCode = 1
+      } finally {
+        await file.close()
+      }
+    } finally {
+      process.removeListener('SIGINT', cancel)
+      process.removeListener('SIGTERM', cancel)
+      await terminal?.close()
+    }
+    return
+  }
   if (action === 'verify') {
     if (!import.meta.url.endsWith('/src/scripts/eval-canary.ts')) {
       throw new TypeError('Execute a verificação a partir do código-fonte rastreado.')

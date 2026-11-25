@@ -17,12 +17,14 @@ import { externalEvalWorstCaseCost, ExternalEvalCostController } from './externa
 
 export const commercialQuestion = 'Quero um shampoo anticaspa para couro cabeludo oleoso, com sensação refrescante, até R$ 50. Qual você recomenda?'
 export const commercialModel = 'openai/gpt-6-luna'
-export const commercialUseId = '070d6000000000000000000000000001'
+export const commercialExperimentId = 'EVAL-07D.6-R2'
+export const commercialUseId = '070d6000000000000000000000000002'
 export const commercialProvider = 'azure'
 const modelCatalogURL = `https://openrouter.ai/api/v1/models/${commercialModel}/endpoints`
 const zdrCatalogURL = 'https://openrouter.ai/api/v1/endpoints/zdr'
 const currentKeyURL = 'https://openrouter.ai/api/v1/key'
-const maxBudgetUsd = 1
+const providerKeyLimitUsd = 5
+const experimentBudgetUsd = 1
 const unreportedUsageMultiplier = 1.25
 const limits = {
   maxModelCalls: 2, estimatedInputTokensPerCall: 20_000, maxOutputTokensPerCall: 512,
@@ -59,9 +61,9 @@ const modelCatalog = z.object({ data: z.object({ endpoints: z.array(z.unknown())
 const zdrCatalog = z.object({ data: z.array(z.unknown()) })
 
 const dedicatedKey = z.object({ data: z.object({
-  limit: z.literal(maxBudgetUsd),
+  limit: z.literal(providerKeyLimitUsd),
   limit_reset: z.null(),
-  limit_remaining: z.number().finite().min(0).max(maxBudgetUsd),
+  limit_remaining: z.number().finite().min(0).max(providerKeyLimitUsd),
   is_free_tier: z.literal(false),
   is_management_key: z.literal(false),
   is_provisioning_key: z.literal(false),
@@ -157,7 +159,7 @@ export async function runCommercialExperiment({ live, signal }: Options, deps: D
     (p.tags.includes('frescor') || p.variant.sensoryNotes?.some((note) => note.toLowerCase() === 'frescor'))).map((p) => p.id)
   if (compatibleIds.length === 0) throw new CommercialExperimentError('NO_COMPATIBLE_PRODUCT')
   if (products.some((p) => !p.isDemo)) throw new CommercialExperimentError('CATALOG_NOT_FICTIONAL')
-  const base = { experiment: 'EVAL-07D.6', question: commercialQuestion, requestedModel: commercialModel, compatibleIds, limits }
+  const base = { experiment: commercialExperimentId, question: commercialQuestion, requestedModel: commercialModel, compatibleIds, limits }
   if (!live) return { ...base, status: 'dry-run' as const, historicalReserveUsd, authenticatedRequests: 0, modelAttempts: 0 }
   if (!live.authorized || live.provider !== commercialProvider) throw new CommercialExperimentError('LIVE_AUTHORIZATION_REQUIRED')
   if (!live.accountZdrOnlyConfirmed) throw new CommercialExperimentError('ACCOUNT_ZDR_ONLY_CONFIRMATION_REQUIRED')
@@ -170,7 +172,7 @@ export async function runCommercialExperiment({ live, signal }: Options, deps: D
   if (priorUse !== 'available') throw new CommercialExperimentError(priorUse === 'consumed' ? 'EXPERIMENT_ALREADY_CONSUMED' : 'USE_STORE_UNAVAILABLE')
   const pricing = await verifyPricing(deps.transport, signal)
   const reservedUsd = reserve(pricing)
-  if (!Number.isFinite(reservedUsd) || reservedUsd <= 0 || reservedUsd > maxBudgetUsd) throw new CommercialExperimentError('BUDGET_INSUFFICIENT')
+  if (!Number.isFinite(reservedUsd) || reservedUsd <= 0 || reservedUsd > experimentBudgetUsd) throw new CommercialExperimentError('BUDGET_INSUFFICIENT')
   if (signal.aborted) throw new CommercialExperimentError('OPERATOR_CANCELLED')
   const use = await useStore.consume(commercialUseId)
   if (use !== 'reserved') throw new CommercialExperimentError(use === 'consumed' ? 'EXPERIMENT_ALREADY_CONSUMED' : 'USE_STORE_UNAVAILABLE')
@@ -234,7 +236,7 @@ export async function runCommercialExperiment({ live, signal }: Options, deps: D
     },
   }
   const cost = new ExternalEvalCostController({
-    requestedModelId: commercialModel, limits, pricing, maxBudgetUsd, unreportedUsageMultiplier,
+    requestedModelId: commercialModel, limits, pricing, maxBudgetUsd: experimentBudgetUsd, unreportedUsageMultiplier,
     maxInputTokensPerCall: limits.estimatedInputTokensPerCall, cancellableBeforeTransport: true,
   })
   const service = createChatService({

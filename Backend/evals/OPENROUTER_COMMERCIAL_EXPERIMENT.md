@@ -36,7 +36,7 @@ sem Safety Retention. Para a rodada autorizada, execute o comando abaixo
 no processo com a chave injetada.
 
 ```sh
-pnpm eval:commercial-openrouter --live --authorize EVAL-07D.6 --provider azure --confirm-zdr-only
+pnpm eval:commercial-openrouter --live --authorize EVAL-07D.6-R2 --provider azure --confirm-zdr-only
 ```
 
 O seletor `azure` cobre a família. O CLI exige uma única entrada Azure
@@ -55,11 +55,13 @@ família não identifica um endpoint exato no resultado. [Catálogo do Luna](htt
 
 Com rota comprovada, o CLI recalcula a reserva para duas chamadas usando os
 maiores preços publicados de entrada e cache e o preço de saída aplicável,
-com margem de 1,25. Valida na API o teto de USD 1,00, a ausência de reset
-e o saldo disponível da chave e do orçamento efetivo, quando informado.
-O marcador em `~/.hidrasplash-eval-07d6` é criado atomicamente antes do
-primeiro GET autenticado. Ele pertence ao usuário Linux e permanece após
-falha ou reinício. A rodada deve ser executada somente pelo usuário
+com margem de 1,25 e orçamento interno de USD 1,00. Na API, exige teto
+externo de USD 5,00 sem reset para a chave dedicada. O saldo da chave e o
+do orçamento efetivo, quando informado, devem cobrir a reserva.
+A autorização `EVAL-07D.6-R2` tem um novo marcador, criado atomicamente
+em `~/.hidrasplash-eval-07d6` antes do primeiro GET autenticado. O marcador
+anterior permanece preservado. O novo permanece consumido após falha
+ou reinício. A rodada deve ser executada somente pelo usuário
 autorizado. [Metadados da chave](https://openrouter.ai/docs/api/api-reference/api-keys/get-current-api-key)
 
 São permitidas duas chamadas de até 20.000 tokens estimados de entrada e

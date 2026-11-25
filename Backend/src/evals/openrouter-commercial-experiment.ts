@@ -18,8 +18,7 @@ import { externalEvalWorstCaseCost, ExternalEvalCostController } from './externa
 export const commercialQuestion = 'Quero um shampoo anticaspa para couro cabeludo oleoso, com sensação refrescante, até R$ 50. Qual você recomenda?'
 export const commercialModel = 'openai/gpt-6-luna'
 export const commercialUseId = '070d6000000000000000000000000001'
-export const commercialProviders = ['azure/us', 'azure/eu'] as const
-type Provider = (typeof commercialProviders)[number]
+export const commercialProvider = 'azure'
 const modelCatalogURL = `https://openrouter.ai/api/v1/models/${commercialModel}/endpoints`
 const zdrCatalogURL = 'https://openrouter.ai/api/v1/endpoints/zdr'
 const currentKeyURL = 'https://openrouter.ai/api/v1/key'
@@ -41,13 +40,16 @@ const pricingFields = z.object({
   prompt: rate, completion: rate, input_cache_read: rate, input_cache_write: rate,
   request: rate.optional(),
 })
-const endpointIdentity = z.object({ model_id: z.literal(commercialModel), tag: z.enum(commercialProviders) })
-const endpointSchema = endpointIdentity.extend({
+const endpointSchema = z.object({
+  model_id: z.literal(commercialModel),
+  tag: z.literal(commercialProvider),
+  name: z.string().min(1),
   provider_name: z.literal('Azure'),
   status: z.literal(0),
   service_tier: z.union([z.null(), z.literal('default')]),
   supported_parameters: z.array(z.string()),
   supports_tool_choice: z.object({ auto: z.literal(true) }),
+  safety_retention: z.literal(false).optional(),
   pricing: pricingFields.extend({
     overrides: z.array(pricingFields.extend({ min_prompt_tokens: z.number().int().nonnegative() })).optional(),
   }),
@@ -70,8 +72,25 @@ function reserve(pricing: { inputUsdPerMillionTokens: number; outputUsdPerMillio
   return externalEvalWorstCaseCost({ pricing, limits, unreportedUsageMultiplier })!
 }
 
-function pickExact(endpoints: unknown[], provider: Provider) {
-  return endpoints.filter((entry) => endpointIdentity.safeParse(entry).data?.tag === provider)
+const advertisedIdentity = z.object({ model_id: z.unknown(), tag: z.unknown(), provider_name: z.unknown() })
+
+function azureEntries(endpoints: unknown[], modelSpecific: boolean) {
+  return endpoints.filter((entry) => {
+    const identity = advertisedIdentity.safeParse(entry).data
+    if (!identity || (!modelSpecific && typeof identity.model_id === 'string' && identity.model_id !== commercialModel)) return false
+    const tag = typeof identity.tag === 'string' ? identity.tag.trim().toLowerCase() : ''
+    const name = typeof identity.provider_name === 'string' ? identity.provider_name.trim().toLowerCase() : ''
+    return tag === commercialProvider || tag.startsWith(commercialProvider + '/') || name === commercialProvider
+  })
+}
+
+function supportsExperiment(endpoint: z.infer<typeof endpointSchema>) {
+  return ['tools', 'tool_choice', 'reasoning_effort', 'max_completion_tokens']
+    .every((name) => endpoint.supported_parameters.includes(name))
+}
+
+export function hasCommercialKeyFormat(value: string | undefined): value is string {
+  return value !== undefined && /^sk-or-v1-[A-Za-z0-9_-]{17,240}$/.test(value)
 }
 
 async function fetchOpenRouterJson(transport: typeof fetch, url: string, signal: AbortSignal, errorCode: string, key?: string) {
@@ -95,18 +114,19 @@ async function fetchOpenRouterJson(transport: typeof fetch, url: string, signal:
   }
 }
 
-async function verifyPricing(provider: Provider, transport: typeof fetch, signal: AbortSignal) {
+async function verifyPricing(transport: typeof fetch, signal: AbortSignal) {
   const catalog = modelCatalog.safeParse(await fetchOpenRouterJson(transport, modelCatalogURL, signal, 'PUBLIC_CATALOG_UNAVAILABLE'))
-  const matches = catalog.success ? pickExact(catalog.data.data.endpoints, provider) : []
+  const matches = catalog.success ? azureEntries(catalog.data.data.endpoints, true) : []
   const endpoint = endpointSchema.safeParse(matches[0]).data
-  if (matches.length !== 1 || !endpoint ||
-      !['tools', 'tool_choice', 'reasoning_effort', 'max_completion_tokens'].every((name) => endpoint.supported_parameters.includes(name))) {
-    throw new CommercialExperimentError('EXACT_AZURE_ENDPOINT_UNVERIFIED')
+  if (matches.length !== 1 || !endpoint || !supportsExperiment(endpoint)) {
+    throw new CommercialExperimentError('AZURE_ROUTING_UNVERIFIED')
   }
   const publishedZdr = zdrCatalog.safeParse(await fetchOpenRouterJson(transport, zdrCatalogURL, signal, 'ZDR_LIST_UNAVAILABLE'))
-  const zdrMatches = publishedZdr.success ? pickExact(publishedZdr.data.data, provider) : []
+  const zdrMatches = publishedZdr.success ? azureEntries(publishedZdr.data.data, false) : []
   const zdr = noRetainingEndpoint.safeParse(zdrMatches[0]).data
-  if (zdrMatches.length !== 1 || !zdr) throw new CommercialExperimentError('ZDR_WITHOUT_SAFETY_RETENTION_UNVERIFIED')
+  if (zdrMatches.length !== 1 || !zdr || zdr.name !== endpoint.name || !supportsExperiment(zdr)) {
+    throw new CommercialExperimentError('ZDR_WITHOUT_SAFETY_RETENTION_UNVERIFIED')
+  }
   if (JSON.stringify(endpoint.pricing) !== JSON.stringify(zdr.pricing)) throw new CommercialExperimentError('PRICING_UNVERIFIED')
   const rates = [endpoint.pricing, ...(endpoint.pricing.overrides ?? [])
     .filter((tier) => tier.min_prompt_tokens <= limits.estimatedInputTokensPerCall)]
@@ -117,9 +137,9 @@ async function verifyPricing(provider: Provider, transport: typeof fetch, signal
   return { modelId: commercialModel, currency: 'USD' as const, inputUsdPerMillionTokens, outputUsdPerMillionTokens, confirmedAt: new Date().toISOString() }
 }
 
-const historicalReserveUsd = reserve({ inputUsdPerMillionTokens: 0.15, outputUsdPerMillionTokens: 0.60 })
+const historicalReserveUsd = reserve({ inputUsdPerMillionTokens: 0.125, outputUsdPerMillionTokens: 0.50 })
 type Options = {
-  live?: { provider: Provider; authorized: boolean; accountZdrOnlyConfirmed: boolean }
+  live?: { provider: typeof commercialProvider; authorized: boolean; accountZdrOnlyConfirmed: boolean }
   signal: AbortSignal
 }
 type Dependencies = {
@@ -139,16 +159,16 @@ export async function runCommercialExperiment({ live, signal }: Options, deps: D
   if (products.some((p) => !p.isDemo)) throw new CommercialExperimentError('CATALOG_NOT_FICTIONAL')
   const base = { experiment: 'EVAL-07D.6', question: commercialQuestion, requestedModel: commercialModel, compatibleIds, limits }
   if (!live) return { ...base, status: 'dry-run' as const, historicalReserveUsd, authenticatedRequests: 0, modelAttempts: 0 }
-  if (!live.authorized || !commercialProviders.some((item) => item === live.provider)) throw new CommercialExperimentError('LIVE_AUTHORIZATION_REQUIRED')
+  if (!live.authorized || live.provider !== commercialProvider) throw new CommercialExperimentError('LIVE_AUTHORIZATION_REQUIRED')
   if (!live.accountZdrOnlyConfirmed) throw new CommercialExperimentError('ACCOUNT_ZDR_ONLY_CONFIRMATION_REQUIRED')
   if (signal.aborted) throw new CommercialExperimentError('OPERATOR_CANCELLED')
   const credential = deps.loadKey()
-  if (credential === undefined || !/^sk-or-v1-[A-Za-z0-9_-]{17,240}$/.test(credential)) throw new CommercialExperimentError('DEDICATED_KEY_UNAVAILABLE')
+  if (!hasCommercialKeyFormat(credential)) throw new CommercialExperimentError('DEDICATED_KEY_UNAVAILABLE')
   const faqDocuments = await loadFaqDocuments().catch(() => { throw new CommercialExperimentError('FAQ_UNAVAILABLE') })
   const useStore = await deps.createUseStore().catch(() => { throw new CommercialExperimentError('USE_STORE_UNAVAILABLE') })
   const priorUse = await useStore.status(commercialUseId)
   if (priorUse !== 'available') throw new CommercialExperimentError(priorUse === 'consumed' ? 'EXPERIMENT_ALREADY_CONSUMED' : 'USE_STORE_UNAVAILABLE')
-  const pricing = await verifyPricing(live.provider, deps.transport, signal)
+  const pricing = await verifyPricing(deps.transport, signal)
   const reservedUsd = reserve(pricing)
   if (!Number.isFinite(reservedUsd) || reservedUsd <= 0 || reservedUsd > maxBudgetUsd) throw new CommercialExperimentError('BUDGET_INSUFFICIENT')
   if (signal.aborted) throw new CommercialExperimentError('OPERATOR_CANCELLED')
@@ -163,10 +183,12 @@ export async function runCommercialExperiment({ live, signal }: Options, deps: D
   let modelAttempts = 0
   let toolCalls = 0
   let executedTools = 0
+  let productEvidence = false
   let returnedModel: string | undefined
   let observedProvider: string | undefined
   let firstFailure: string | undefined
   let termination: string | undefined
+  let finalModelText: string | undefined
   const client = createOpenRouterClient({
     model: commercialModel, apiKey: credential, timeoutMs: limits.timeoutMs, maxOutputTokens: limits.maxOutputTokensPerCall,
     evaluationRouting: {
@@ -188,7 +210,7 @@ export async function runCommercialExperiment({ live, signal }: Options, deps: D
       returnedModel = /^[a-z0-9.-]+\/[a-z0-9._:-]+$/i.test(observation.returnedModelId) && !observation.returnedModelId.includes(credential)
         ? observation.returnedModelId
         : undefined
-      observedProvider = observation.providerId === live.provider || observation.providerId === 'Azure' || observation.providerId === 'azure'
+      observedProvider = observation.providerId === live.provider || observation.providerId === 'Azure'
         ? observation.providerId : undefined
       if (!observation.modelIdentityMatches) firstFailure = 'MODEL_IDENTITY_MISMATCH'
       else if (!observedProvider) firstFailure = 'PROVIDER_UNVERIFIED'
@@ -203,6 +225,7 @@ export async function runCommercialExperiment({ live, signal }: Options, deps: D
         if (result.usage && (result.usage.inputTokens > limits.estimatedInputTokensPerCall ||
             result.usage.outputTokens > limits.maxOutputTokensPerCall)) firstFailure = 'TOKEN_LIMIT_EXCEEDED'
         if (!result.usage && result.message.toolCalls?.length) firstFailure = 'USAGE_UNVERIFIED_BEFORE_NEXT_CALL'
+        if (!firstFailure && !result.message.toolCalls?.length) finalModelText = result.message.content?.trim() || undefined
         return result
       } catch (error) {
         firstFailure ??= error instanceof AgentModelError ? error.code : 'MODEL_FAILURE'
@@ -225,24 +248,30 @@ export async function runCommercialExperiment({ live, signal }: Options, deps: D
       if (event.type === 'orchestrator_tool') {
         toolCalls += 1
         if (event.executed) executedTools += 1
+        if (event.executed && event.outcome === 'found' &&
+            (event.toolName === 'search_products' || event.toolName === 'get_product_details')) productEvidence = true
       }
       if (event.type === 'orchestrator_termination') termination = event.status
     } },
   }).catch(() => {
+    if (termination === 'INSUFFICIENT_GROUNDING' && finalModelText && !signal.aborted) return undefined
     firstFailure ??= signal.aborted ? 'OPERATOR_CANCELLED' : 'CHAT_FAILURE'
     return undefined
   })
   const snapshot = cost.snapshot()
   const calls = snapshot.calls.filter((call) => call.status !== 'rejected')
   const productIds = response?.type === 'recommendation' ? response.productIds : []
-  if (response && response.type !== 'text' && (response.type !== 'recommendation' || productIds.some((id) => !compatibleIds.includes(id)))) {
-    firstFailure ??= 'RECOMMENDATION_OUTSIDE_SCENARIO'
-  }
   if (signal.aborted) firstFailure ??= 'OPERATOR_CANCELLED'
   if (snapshot.limitsReached.includes('reported_usage_exceeded_reservation')) firstFailure ??= 'USAGE_EXCEEDED_RESERVATION'
   if (snapshot.calls.some((call) => call.errorCode === 'LOCAL_BUDGET_EXHAUSTED')) firstFailure ??= 'LOCAL_BUDGET_EXHAUSTED'
   if (modelAttempts === 0) firstFailure ??= 'NO_MODEL_RESPONSE'
   if (termination && termination !== 'ASSISTANT_RESPONSE' && termination !== 'INSUFFICIENT_GROUNDING') firstFailure ??= termination
+  const commercialFailures: string[] = []
+  if (!firstFailure) {
+    if (!productEvidence) commercialFailures.push('PRODUCT_TOOL_EVIDENCE_MISSING')
+    if (productIds.length === 0) commercialFailures.push('RECOMMENDATION_MISSING')
+    if (productIds.some((id) => !compatibleIds.includes(id))) commercialFailures.push('RECOMMENDATION_OUTSIDE_SCENARIO')
+  }
   const tokens = calls.length === modelAttempts && calls.length > 0 && calls.every((call) => call.usageComplete)
     ? calls.reduce((total, call) => ({
       input: total.input + (call.reportedInputTokens ?? 0),
@@ -250,12 +279,15 @@ export async function runCommercialExperiment({ live, signal }: Options, deps: D
       total: total.total + (call.reportedTotalTokens ?? 0),
     }), { input: 0, output: 0, total: 0 })
     : undefined
+  const answer = response?.message ?? (termination === 'INSUFFICIENT_GROUNDING' ? finalModelText : undefined)
   return {
     ...base, status: firstFailure ? 'interrupted' as const : 'completed' as const, reason: firstFailure,
-    response: firstFailure || !response ? undefined : sanitizeEvalText(response.message.replaceAll(credential, '[REDACTED]'))
+    commercialStatus: firstFailure ? 'not_evaluated' as const : commercialFailures.length ? 'failed' as const : 'passed' as const,
+    commercialFailures,
+    response: firstFailure || !answer ? undefined : sanitizeEvalText(answer.replaceAll(credential, '[REDACTED]'))
       .replace(/[\x00-\x09\x0b-\x1f\x7f-\x9f]/g, ''),
+    responseSource: response ? 'chat_service' as const : 'model_for_review' as const,
     returnedModel, requestedProvider: live.provider, observedProvider,
-    endpointVerifiedInResponse: observedProvider === live.provider,
     productIds: firstFailure ? [] : productIds, modelAttempts, toolCalls, executedTools, tokens,
     reservedUsd, estimatedCostUsd: snapshot.chargedCostUsd, effectiveChargeUsd: undefined,
   }

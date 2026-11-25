@@ -6,7 +6,9 @@ import { parseArgs } from 'node:util'
 
 import { loadCatalogRepository } from '../catalog/catalog-repository.js'
 import { CanaryAuthorizationUseStore } from '../evals/external-canary-use-store.js'
-import { commercialProviders, CommercialExperimentError, runCommercialExperiment } from '../evals/openrouter-commercial-experiment.js'
+import {
+  commercialProvider, CommercialExperimentError, hasCommercialKeyFormat, runCommercialExperiment,
+} from '../evals/openrouter-commercial-experiment.js'
 
 const confirmation = 'EVAL-07D.6'
 const unknown = 'não verificado'
@@ -35,6 +37,7 @@ async function main() {
   const { values } = parseArgs({ options: {
     live: { type: 'boolean' },
     'dry-run': { type: 'boolean' },
+    'check-key': { type: 'boolean' },
     authorize: { type: 'string' },
     provider: { type: 'string' },
     'confirm-zdr-only': { type: 'boolean' },
@@ -42,10 +45,21 @@ async function main() {
   } })
   if (values.help) {
     console.log('Dry-run (padrão)    pnpm eval:commercial-openrouter')
-    console.log('Live autorizado    pnpm eval:commercial-openrouter --live --authorize EVAL-07D.6 --provider <azure/us|azure/eu> --confirm-zdr-only')
+    console.log('Chave offline      pnpm eval:commercial-openrouter --check-key')
+    console.log('Live autorizado    pnpm eval:commercial-openrouter --live --authorize EVAL-07D.6 --provider azure --confirm-zdr-only')
     return
   }
-  const route = commercialProviders.find((provider) => provider === values.provider)
+  if (values['check-key']) {
+    if (values.live || values['dry-run'] || values.authorize !== undefined || values.provider !== undefined || values['confirm-zdr-only']) {
+      throw new CommercialExperimentError('INVALID_KEY_CHECK_OPTIONS')
+    }
+    const key = process.env.OPENROUTER_API_KEY
+    const ready = hasCommercialKeyFormat(key)
+    console.log('OPENROUTER_API_KEY', ready ? 'presente, formato compatível' : key ? 'formato incompatível' : 'ausente')
+    if (!ready) process.exitCode = 1
+    return
+  }
+  const route = values.provider === commercialProvider ? commercialProvider : undefined
   if ((!values.live && (values.authorize !== undefined || values.provider !== undefined || values['confirm-zdr-only'])) ||
       (values.live && (values['dry-run'] || values.authorize !== confirmation || route === undefined))) {
     throw new CommercialExperimentError('LIVE_AUTHORIZATION_REQUIRED')
@@ -74,18 +88,23 @@ async function main() {
       console.log('Solicitações autenticadas e tentativas de modelo', result.authenticatedRequests, result.modelAttempts)
       return
     }
-    if (result.response) console.log('\n' + result.response + '\n')
+    if (result.response) {
+      console.log(result.responseSource === 'model_for_review' ? 'Texto do modelo para revisão comercial' : 'Resposta do agente')
+      console.log(result.response)
+    }
     console.log({
-      status: result.status, motivo: result.reason,
+      statusTecnico: result.status, motivoTecnico: result.reason,
+      avaliacaoComercial: result.commercialStatus, motivosComerciais: result.commercialFailures,
       modeloSolicitado: result.requestedModel, modeloRetornado: result.returnedModel ?? unknown,
       rotaSolicitada: result.requestedProvider, provedorObservado: result.observedProvider ?? unknown,
-      endpointObservado: result.endpointVerifiedInResponse ? result.requestedProvider : unknown,
+      endpointObservado: unknown,
       tentativasDeModelo: result.modelAttempts, chamadasDeFerramentas: result.toolCalls, ferramentasExecutadas: result.executedTools,
       idsRecomendados: result.productIds, tokens: result.tokens ?? unknown,
       reservaUsd: result.reservedUsd, custoEstimadoUsd: result.estimatedCostUsd,
       cobrancaEfetivaUsd: result.effectiveChargeUsd ?? unknown,
     })
     if (result.status === 'interrupted') process.exitCode = 1
+    else if (result.commercialStatus === 'failed') process.exitCode = 2
   } finally {
     process.removeListener('SIGINT', stop)
     process.removeListener('SIGTERM', stop)

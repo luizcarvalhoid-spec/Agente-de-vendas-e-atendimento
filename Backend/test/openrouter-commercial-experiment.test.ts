@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { execFile } from 'node:child_process'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, test, type TestContext } from 'node:test'
+import { fileURLToPath } from 'node:url'
+import { promisify } from 'node:util'
 
 import { loadCatalogRepository } from '../src/catalog/catalog-repository.js'
 import { CanaryAuthorizationUseStore } from '../src/evals/external-canary-use-store.js'
@@ -22,13 +25,14 @@ after(() => {
 })
 
 const fakeKey = 'sk-or-v1-only-a-test-fixture-not-a-secret'
-const provider = 'azure/eu'
+const provider = 'azure'
 const live = { provider, authorized: true, accountZdrOnlyConfirmed: true } as const
 const endpoint = {
   model_id: commercialModel, tag: provider, provider_name: 'Azure', status: 0, service_tier: null,
+  name: 'Azure | openai/gpt-6-luna-20260922',
   supported_parameters: ['tools', 'tool_choice', 'reasoning_effort', 'max_completion_tokens'],
   supports_tool_choice: { auto: true },
-  pricing: { prompt: '0.00000012', completion: '0.00000060', input_cache_read: '0.000000012', input_cache_write: '0.00000015' },
+  pricing: { prompt: '0.00000010', completion: '0.00000050', input_cache_read: '0.000000010', input_cache_write: '0.000000125' },
 }
 const key = {
   limit: 1, limit_reset: null, limit_remaining: 1,
@@ -90,7 +94,7 @@ test('dry-run valida catálogo e orçamento histórico sem ler chave, usar rede 
   assert.equal(result.status, 'dry-run')
   assert.equal(result.modelAttempts, 0)
   assert.deepEqual(result.compatibleIds, [9, 13])
-  if (result.status === 'dry-run') assert.equal(result.historicalReserveUsd, 0.008268)
+  if (result.status === 'dry-run') assert.equal(result.historicalReserveUsd, 0.00689)
 })
 
 test('ausência de autorização, prova da política da conta, chave ou catálogo impede qualquer rede', async (t) => {
@@ -107,14 +111,17 @@ test('ausência de autorização, prova da política da conta, chave ou catálog
   assert.deepEqual(requests, [])
 })
 
-test('entrada Azure genérica ou ZDR ausente/retentivo bloqueia antes do GET da chave', async (t) => {
-  const baseOnly = await fixture(t, { catalog: [{ ...endpoint, tag: 'azure' }] })
-  await assert.rejects(baseOnly.run(), { code: 'EXACT_AZURE_ENDPOINT_UNVERIFIED' })
-  assert.equal(baseOnly.requests.length, 1)
-  const duplicate = await fixture(t, { catalog: [endpoint, endpoint] })
-  await assert.rejects(duplicate.run(), { code: 'EXACT_AZURE_ENDPOINT_UNVERIFIED' })
-  assert.equal(duplicate.requests.length, 1)
-  for (const zdr of [[], [{ ...endpoint, safety_retention: true }], [{ ...endpoint }]]) {
+test('família Azure ambígua e ZDR sem prova inequívoca barram antes do GET da chave', async (t) => {
+  for (const catalog of [[], [endpoint, endpoint], [{ ...endpoint, tag: 'azure/eu' }],
+    [endpoint, { ...endpoint, tag: 'azure/us' }], [{ ...endpoint, safety_retention: true }],
+    [{ ...endpoint, supported_parameters: ['tools'] }]]) {
+    const uncertain = await fixture(t, { catalog })
+    await assert.rejects(uncertain.run(), { code: 'AZURE_ROUTING_UNVERIFIED' })
+    assert.equal(uncertain.requests.length, 1)
+  }
+  const zdrAzure = { ...endpoint, safety_retention: false }
+  for (const zdr of [[], [{ ...endpoint, safety_retention: true }], [{ ...endpoint }],
+    [zdrAzure, { ...zdrAzure, tag: 'azure/us' }], [{ ...zdrAzure, name: 'outro deployment' }]]) {
     const fixtureResult = await fixture(t, { zdr })
     await assert.rejects(fixtureResult.run(), { code: 'ZDR_WITHOUT_SAFETY_RETENTION_UNVERIFIED' })
     assert.equal(fixtureResult.requests.length, 2)
@@ -163,13 +170,53 @@ test('concorrência permite uma rodada com ferramenta canônica, dois POSTs e re
   }
   assert(success && success.value.status !== 'dry-run')
   assert.equal(success.value.status, 'completed')
-  assert.equal(success.value.reservedUsd, 0.008268)
+  assert.equal(success.value.reservedUsd, 0.00689)
   assert.equal(success.value.executedTools, 1)
   assert(success.value.productIds.length > 0)
   assert.equal(success.value.returnedModel, commercialModel)
-  assert.equal(success.value.endpointVerifiedInResponse, true)
+  assert.equal(success.value.observedProvider, 'azure')
+  assert.equal(success.value.commercialStatus, 'passed')
+  assert.deepEqual(success.value.commercialFailures, [])
   assert.equal(success.value.tokens?.total, 1268)
   assert(!JSON.stringify(success).includes(fakeKey))
+})
+
+test('resposta genérica sem ferramenta conclui tecnicamente e falha comercialmente', async (t) => {
+  const { run } = await fixture(t, { post: () => completion(`Posso ajudar você a escolher um shampoo. ${fakeKey}`) })
+  const result = await run()
+  assert(result.status !== 'dry-run')
+  assert.equal(result.status, 'completed', result.reason)
+  assert.equal(result.commercialStatus, 'failed')
+  assert.deepEqual(result.commercialFailures, ['PRODUCT_TOOL_EVIDENCE_MISSING', 'RECOMMENDATION_MISSING'])
+  assert.equal(result.executedTools, 0)
+  assert.deepEqual(result.productIds, [])
+  assert.equal(result.responseSource, 'model_for_review')
+  assert.match(result.response ?? '', /Posso ajudar/)
+  assert(result.response)
+  assert(!result.response.includes(fakeKey))
+})
+
+test('chave injetada por ambiente é reconhecida offline sem carregar .env ou expor o valor', async (t) => {
+  const cwd = await mkdtemp(join(tmpdir(), 'eval-07d6-key-'))
+  t.after(() => rm(cwd, { recursive: true, force: true }))
+  await writeFile(join(cwd, '.env'), `OPENROUTER_API_KEY=${fakeKey}\n`)
+  const script = fileURLToPath(new URL('../src/scripts/eval-commercial-openrouter.ts', import.meta.url))
+  const tsx = import.meta.resolve('tsx')
+  const guard = 'data:text/javascript,globalThis.fetch%3D()%3D%3Eprocess.exit(97)'
+  const args = ['--import', guard, '--import', tsx, script, '--check-key']
+  const env = { ...process.env }
+  delete env.OPENROUTER_API_KEY
+  const exec = promisify(execFile)
+  await assert.rejects(exec(process.execPath, args, { cwd, env }), (error: unknown) => {
+    const { code, stdout, stderr } = error as { code: number; stdout: string; stderr: string }
+    assert.equal(code, 1)
+    assert.equal(stdout.trim(), 'OPENROUTER_API_KEY ausente')
+    assert.equal(stderr, '')
+    return true
+  })
+  const result = await exec(process.execPath, args, { cwd, env: { ...env, OPENROUTER_API_KEY: fakeKey } })
+  assert.equal(result.stdout.trim(), 'OPENROUTER_API_KEY presente, formato compatível')
+  assert.equal(result.stderr, '')
 })
 
 test('HTTP inválido, provedor ausente, excesso de tokens e ferramentas repetidas não fazem retry', async (t) => {

@@ -675,6 +675,7 @@ export async function awaitWithAbort<T>(
 export async function readResponseBodyWithinLimit(
   response: Response,
   signal: AbortSignal,
+  byteLimit = OPENROUTER_MAX_RESPONSE_BYTES,
 ) {
   if (!response.body) return ''
 
@@ -694,7 +695,7 @@ export async function readResponseBodyWithinLimit(
       }
 
       bytesRead += chunk.value.byteLength
-      if (bytesRead > OPENROUTER_MAX_RESPONSE_BYTES) {
+      if (bytesRead > byteLimit) {
         throw clientError('OPENROUTER_INVALID_RESPONSE', undefined, true)
       }
 

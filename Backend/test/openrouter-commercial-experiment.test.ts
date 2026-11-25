@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, test, type TestContext } from 'node:test'
@@ -35,7 +35,7 @@ const endpoint = {
   pricing: { prompt: '0.00000010', completion: '0.00000050', input_cache_read: '0.000000010', input_cache_write: '0.000000125' },
 }
 const key = {
-  limit: 1, limit_reset: null, limit_remaining: 1,
+  limit: 5, limit_reset: null, limit_remaining: 5,
   is_free_tier: false, is_management_key: false, is_provisioning_key: false,
 }
 const usage = { prompt_tokens: 600, completion_tokens: 34, total_tokens: 634 }
@@ -82,7 +82,7 @@ async function fixture(t: TestContext, options: {
       return options.post?.(bodies.length, body) ?? completion('Qual intensidade de frescor você prefere?')
     }) satisfies typeof fetch,
   }
-  return { deps, controller, requests, bodies, run: () => runCommercialExperiment({ live, signal: controller.signal }, deps) }
+  return { deps, controller, requests, bodies, directory, store, run: () => runCommercialExperiment({ live, signal: controller.signal }, deps) }
 }
 
 test('dry-run valida catálogo e orçamento histórico sem ler chave, usar rede ou consumir autorização', async (t) => {
@@ -136,10 +136,16 @@ test('família Azure ambígua e ZDR sem prova inequívoca barram antes do GET da
 })
 
 test('teto, reset e saldo incompatíveis barram inferência e o consumo único permanece após a falha', async (t) => {
-  for (const options of [{ key: { limit: 2 } }, { key: { limit_reset: 'daily' } }, { key: { limit_remaining: 0.001 } },
-    { key: { effective_budget: { remaining_usd: 0.001 } } }]) {
+  const cases = [
+    [{ key: { limit: 1 } }, 'KEY_CONFIGURATION_UNVERIFIED'],
+    [{ key: { limit_reset: 'daily' } }, 'KEY_CONFIGURATION_UNVERIFIED'],
+    [{ key: { limit_remaining: 5.01 } }, 'KEY_CONFIGURATION_UNVERIFIED'],
+    [{ key: { limit_remaining: 0.001 } }, 'BUDGET_INSUFFICIENT'],
+    [{ key: { effective_budget: { remaining_usd: 0.001 } } }, 'BUDGET_INSUFFICIENT'],
+  ] as const
+  for (const [options, code] of cases) {
     const { run, bodies, requests } = await fixture(t, options)
-    await assert.rejects(run(), { code: 'limit_remaining' in options.key || 'effective_budget' in options.key ? 'BUDGET_INSUFFICIENT' : 'KEY_CONFIGURATION_UNVERIFIED' })
+    await assert.rejects(run(), { code })
     assert.equal(bodies.length, 0)
     assert.equal(requests.length, 3)
     await assert.rejects(run(), { code: 'EXPERIMENT_ALREADY_CONSUMED' })
@@ -147,10 +153,24 @@ test('teto, reset e saldo incompatíveis barram inferência e o consumo único p
   }
 })
 
-test('concorrência permite uma rodada com ferramenta canônica, dois POSTs e resposta sem segredo', async (t) => {
-  const { run, bodies, requests } = await fixture(t, {
+test('reserva maior que o orçamento interno bloqueia antes de consultar a chave com teto de USD 5', async (t) => {
+  const expensive = { ...endpoint, pricing: { ...endpoint.pricing, input_cache_write: '0.00003' } }
+  const { run, requests, store } = await fixture(t, { catalog: [expensive], zdr: [{ ...expensive, safety_retention: false }] })
+  await assert.rejects(run(), { code: 'BUDGET_INSUFFICIENT' })
+  assert.equal(requests.length, 2)
+  assert.equal(await store.status(commercialUseId), 'available')
+})
+
+test('a R2 aceita saldo acima de USD 1, usa um único marcador novo e preserva o anterior', async (t) => {
+  const { run, bodies, requests, directory, store } = await fixture(t, {
+    key: { limit_remaining: 4.90 },
     post: (ordinal) => ordinal === 1 ? search(ordinal) : completion('Essa opção entrega uma sensação de frescor.'),
   })
+  const previousId = '070d6000000000000000000000000001'
+  const previousPath = join(directory, `${previousId}.used`)
+  const previousMarker = '{"version":1,"state":"consumed"}\n'
+  await writeFile(previousPath, previousMarker, { flag: 'wx', mode: 0o600 })
+  assert.equal(await store.status(commercialUseId), 'available')
   const results = await Promise.allSettled([run(), run()])
   const success = results.find((result) => result.status === 'fulfilled')
   const duplicate = results.find((result) => result.status === 'rejected')
@@ -170,6 +190,9 @@ test('concorrência permite uma rodada com ferramenta canônica, dois POSTs e re
   }
   assert(success && success.value.status !== 'dry-run')
   assert.equal(success.value.status, 'completed')
+  assert.equal(success.value.experiment, 'EVAL-07D.6-R2')
+  assert.equal(await store.status(commercialUseId), 'consumed')
+  assert.equal(await readFile(previousPath, 'utf8'), previousMarker)
   assert.equal(success.value.reservedUsd, 0.00689)
   assert.equal(success.value.executedTools, 1)
   assert(success.value.productIds.length > 0)
@@ -217,6 +240,20 @@ test('chave injetada por ambiente é reconhecida offline sem carregar .env ou ex
   const result = await exec(process.execPath, args, { cwd, env: { ...env, OPENROUTER_API_KEY: fakeKey } })
   assert.equal(result.stdout.trim(), 'OPENROUTER_API_KEY presente, formato compatível')
   assert.equal(result.stderr, '')
+})
+
+test('CLI anuncia R2 e rejeita a autorização antiga antes de usar a rede', async () => {
+  const script = fileURLToPath(new URL('../src/scripts/eval-commercial-openrouter.ts', import.meta.url))
+  const guard = 'data:text/javascript,globalThis.fetch%3D()%3D%3Eprocess.exit(97)'
+  const args = ['--import', guard, '--import', import.meta.resolve('tsx'), script]
+  const exec = promisify(execFile)
+  assert.match((await exec(process.execPath, [...args, '--help'])).stdout, /--authorize EVAL-07D\.6-R2 /)
+  await assert.rejects(exec(process.execPath, [...args, '--live', '--authorize', 'EVAL-07D.6', '--provider', 'azure', '--confirm-zdr-only']), (error: unknown) => {
+    const { code, stderr } = error as { code: number; stderr: string }
+    assert.equal(code, 1)
+    assert.equal(stderr.trim(), 'NO-GO LIVE_AUTHORIZATION_REQUIRED')
+    return true
+  })
 })
 
 test('HTTP inválido, provedor ausente, excesso de tokens e ferramentas repetidas não fazem retry', async (t) => {

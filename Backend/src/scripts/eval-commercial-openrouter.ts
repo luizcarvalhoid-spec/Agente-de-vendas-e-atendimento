@@ -7,10 +7,9 @@ import { parseArgs } from 'node:util'
 import { loadCatalogRepository } from '../catalog/catalog-repository.js'
 import { CanaryAuthorizationUseStore } from '../evals/external-canary-use-store.js'
 import {
-  commercialProvider, CommercialExperimentError, hasCommercialKeyFormat, runCommercialExperiment,
+  commercialExperimentId, commercialProvider, CommercialExperimentError, hasCommercialKeyFormat, runCommercialExperiment,
 } from '../evals/openrouter-commercial-experiment.js'
 
-const confirmation = 'EVAL-07D.6'
 const unknown = 'não verificado'
 
 async function privateUseStore() {
@@ -46,7 +45,7 @@ async function main() {
   if (values.help) {
     console.log('Dry-run (padrão)    pnpm eval:commercial-openrouter')
     console.log('Chave offline      pnpm eval:commercial-openrouter --check-key')
-    console.log('Live autorizado    pnpm eval:commercial-openrouter --live --authorize EVAL-07D.6 --provider azure --confirm-zdr-only')
+    console.log(`Live autorizado    pnpm eval:commercial-openrouter --live --authorize ${commercialExperimentId} --provider azure --confirm-zdr-only`)
     return
   }
   if (values['check-key']) {
@@ -61,7 +60,7 @@ async function main() {
   }
   const route = values.provider === commercialProvider ? commercialProvider : undefined
   if ((!values.live && (values.authorize !== undefined || values.provider !== undefined || values['confirm-zdr-only'])) ||
-      (values.live && (values['dry-run'] || values.authorize !== confirmation || route === undefined))) {
+      (values.live && (values['dry-run'] || values.authorize !== commercialExperimentId || route === undefined))) {
     throw new CommercialExperimentError('LIVE_AUTHORIZATION_REQUIRED')
   }
   if (values.live && (!process.stdin.isTTY || !process.stdout.isTTY)) throw new CommercialExperimentError('PRIVATE_TERMINAL_REQUIRED')
@@ -71,7 +70,7 @@ async function main() {
   process.once('SIGINT', stop)
   process.once('SIGTERM', stop)
   try {
-    console.log('EVAL-07D.6 · Teste comercial experimental simplificado')
+    console.log(`${commercialExperimentId} · Teste comercial experimental simplificado`)
     const result = await runCommercialExperiment({
       live: values.live && route ? { provider: route, authorized: true, accountZdrOnlyConfirmed: Boolean(values['confirm-zdr-only']) } : undefined,
       signal: abort.signal,

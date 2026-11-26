@@ -36,7 +36,7 @@ sem Safety Retention. Para a rodada autorizada, execute o comando abaixo
 no processo com a chave injetada.
 
 ```sh
-pnpm eval:commercial-openrouter --live --authorize EVAL-07D.6-R3 --provider azure --confirm-zdr-only
+pnpm eval:commercial-openrouter --live --authorize EVAL-07D.6-R4 --provider azure --confirm-zdr-only
 ```
 
 O seletor `azure` cobre a família. O CLI exige uma única entrada Azure
@@ -58,10 +58,10 @@ maiores preços publicados de entrada e cache e o preço de saída aplicável,
 com margem de 1,25 e orçamento interno de USD 1,00. Na API, exige teto
 externo de USD 5,00 sem reset para a chave dedicada. O saldo da chave e o
 do orçamento efetivo, quando informado, devem cobrir a reserva.
-A autorização `EVAL-07D.6-R3` usa o marcador exclusivo
-`070d6000000000000000000000000003`, criado atomicamente
+A autorização `EVAL-07D.6-R4` usa o marcador exclusivo
+`070d6000000000000000000000000004`, criado atomicamente
 em `~/.hidrasplash-eval-07d6` antes do primeiro GET autenticado. Os
-marcadores R1 e R2 permanecem preservados. O da R3 permanece consumido
+marcadores R1, R2 e R3 permanecem preservados. O da R4 permanece consumido
 após falha ou reinício. A rodada deve ser executada somente pelo usuário
 autorizado. [Metadados da chave](https://openrouter.ai/docs/api/api-reference/api-keys/get-current-api-key)
 
@@ -105,10 +105,10 @@ mensagens do validador.
 O catálogo público relaciona o ID solicitado `openai/gpt-6-luna` ao
 `canonical_slug` `openai/gpt-6-luna-20260922`. Isso comprova a relação no
 catálogo. O valor de `model` no JSON entregue ao cliente segue
-desconhecido. As fixtures reproduzem dois casos. Metadados de seleção e
-resposta com slugs diferentes falham antes da observação. Um slug
-canônico coerente nos metadados chega à comparação literal do adaptador e
-gera `MODEL_IDENTITY_MISMATCH`, com a identidade observada.
+desconhecido. No código da R2, metadados de seleção e
+resposta com slugs diferentes falhavam antes da observação. Um slug
+canônico coerente nos metadados chegava à comparação literal do adaptador e
+gerava `MODEL_IDENTITY_MISMATCH`, com a identidade observada.
 [Metadados públicos do modelo](https://openrouter.ai/api/v1/model/openai/gpt-6-luna)
 
 O POST inclui `stream: false`, conferido nas fixtures. A OpenRouter
@@ -128,12 +128,28 @@ Reproduza as verificações em `Backend` com transporte em memória.
 node --import tsx --test test/openrouter-commercial-experiment.test.ts test/openrouter-client.test.ts test/tool-orchestrator.test.ts test/openai-direct.test.ts
 ```
 
-Antes de autorizar outra rodada, revisar a categoria mais provável com
-evidência sanitizada sobre o tipo de mídia e a consistência dos campos de
-roteamento. Se a divergência de slugs for confirmada, validar uma regra
-restrita ao par de IDs comprovado com as mesmas exigências de Azure, ZDR
-e ausência de fallback. Os marcadores consumidos da R1 e R2 devem ser
-preservados.
+## Verificação de identidade na R4
+
+A R3 confirmou `ROUTING_MODEL_CONFLICT`. Os valores dos dois campos
+rejeitados não foram registrados, portanto a divergência entre alias e
+slug canônico segue como hipótese para aquela resposta.
+
+No preflight da R4, um GET público, sem credencial, confirma os campos
+`id` e `canonical_slug` do par fixado
+`openai/gpt-6-luna` e `openai/gpt-6-luna-20260922`. A execução bloqueia
+antes de consumir o marcador se a consulta falhar ou se o par mudar.
+O dry-run não faz essa consulta. [Catálogo público da OpenRouter](https://openrouter.ai/api/v1/model/openai/gpt-6-luna)
+
+O POST continua solicitando o alias com `stream: false`. O cliente exige
+a confirmação do ID solicitado, uma única seleção, a primeira tentativa
+e consistência no provedor. Quando o detalhe das tentativas é publicado,
+deve identificar uma única tentativa bem-sucedida coerente com a seleção.
+Apenas os dois IDs comprovados podem substituir um ao outro na comparação
+da seleção com a resposta e na verificação do adaptador. O CLI preserva o
+valor literal retornado quando ele pertence ao par. Diagnósticos de
+rejeição usam categorias fixas. O roteamento continua limitado à família
+Azure verificada no preflight, sem atribuir um endpoint exato a partir
+de metadados que só identificam o provedor. [Metadados de roteamento da OpenRouter](https://openrouter.ai/docs/guides/routing/routers/router-metadata)
 
 O caminho é um experimento por usuário local. A autorização digitada e
 a declaração de privacidade são responsabilização do operador. O canário

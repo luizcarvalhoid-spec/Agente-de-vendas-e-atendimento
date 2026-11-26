@@ -33,6 +33,16 @@ const providerIdSchema = z
   .max(200)
   .regex(/^[^\s,]+$/)
 
+const modelIdSchema = z.string().trim().min(1).max(200).regex(/^[^\s/]+\/[^\s]+$/)
+
+export function matchesChatCompletionModelId(
+  observed: unknown,
+  requested: string,
+  verifiedCanonical?: string,
+): boolean {
+  return observed === requested || (verifiedCanonical !== undefined && observed === verifiedCanonical)
+}
+
 export const openRouterEvaluationRoutingSchema = z
   .object({
     providerId: providerIdSchema,
@@ -285,6 +295,7 @@ export type ChatCompletionResponseValidationFailure =
   | 'ROUTING_SELECTION_UNVERIFIED'
   | 'ROUTING_PROVIDER_CONFLICT'
   | 'ROUTING_MODEL_CONFLICT'
+  | 'ROUTING_REQUESTED_MODEL_CONFLICT'
   | 'ROUTING_ATTEMPT_CONFLICT'
 
 const errorMessages: Record<OpenRouterErrorCode, string> = {
@@ -348,6 +359,7 @@ export interface CreateOpenRouterClientOptions {
   readonly timeoutMs?: number
   readonly maxOutputTokens?: number
   readonly evaluationRouting?: OpenRouterEvaluationRouting
+  readonly verifiedCanonicalModelId?: string
 }
 
 export interface OpenRouterClient {
@@ -359,12 +371,7 @@ export interface OpenRouterClient {
 const clientOptionsSchema = z
   .object({
     apiKey: z.string().trim().min(1).max(4_096),
-    model: z
-      .string()
-      .trim()
-      .min(1)
-      .max(200)
-      .regex(/^[^\s/]+\/[^\s]+$/),
+    model: modelIdSchema,
     transport: z
       .custom<OpenRouterTransport>((value) => typeof value === 'function')
       .optional(),
@@ -381,6 +388,7 @@ const clientOptionsSchema = z
       .max(OPENROUTER_MAX_OUTPUT_TOKENS)
       .default(OPENROUTER_DEFAULT_MAX_OUTPUT_TOKENS),
     evaluationRouting: openRouterEvaluationRoutingSchema.optional(),
+    verifiedCanonicalModelId: modelIdSchema.optional(),
   })
   .strict()
 
@@ -403,6 +411,12 @@ const providerToolCallSchema = z
 
 const reportedProviderSchema = z.string()
   .refine((value) => providerIdSchema.safeParse(value).success)
+
+const singleRoutingAttemptSchema = z.tuple([z.object({
+  provider: reportedProviderSchema,
+  model: z.string(),
+  status: z.literal(200),
+})])
 
 const providerResponseSchema = z
   .object({
@@ -606,7 +620,7 @@ function validateToolResponse(
 function parseProviderResponse(
   rawResponse: unknown,
   input: OpenRouterChatInput,
-  evaluation: boolean,
+  evaluation: { requestedModelId: string; verifiedCanonicalModelId?: string } | undefined,
   direct: boolean,
 ): OpenRouterChatResult {
   // A projeção direta descarta campos de identidade exclusivos do intermediário.
@@ -648,17 +662,42 @@ function parseProviderResponse(
   const selected = available?.filter((endpoint) => endpoint.selected) ?? []
   const selectedEndpoint = selected[0]
   const reportedProvider = routingEvidence?.provider
-  if (evaluation && available !== undefined) {
+  const canonical = evaluation?.verifiedCanonicalModelId
+  const returnedModelIsVerified = evaluation !== undefined && canonical !== undefined &&
+    matchesChatCompletionModelId(parsed.data.model, evaluation.requestedModelId, canonical)
+  if (evaluation && (available !== undefined || canonical !== undefined)) {
     if (selected.length !== 1) throw invalidResponse('ROUTING_SELECTION_UNVERIFIED')
     if (reportedProvider !== undefined && selectedEndpoint?.provider !== reportedProvider) {
       throw invalidResponse('ROUTING_PROVIDER_CONFLICT')
     }
-    if (selectedEndpoint?.model !== undefined && selectedEndpoint.model !== parsed.data.model) {
+    const selectedModel = selectedEndpoint?.model
+    const equivalent = returnedModelIsVerified &&
+      matchesChatCompletionModelId(selectedModel, evaluation.requestedModelId, canonical)
+    if ((selectedModel !== undefined || canonical !== undefined) &&
+        selectedModel !== parsed.data.model && !equivalent) {
       throw invalidResponse('ROUTING_MODEL_CONFLICT')
     }
   }
-  if (evaluation && metadata?.attempt !== undefined && metadata.attempt !== 1) {
+  if (evaluation && (metadata?.attempt !== undefined || canonical !== undefined) && metadata?.attempt !== 1) {
     throw invalidResponse('ROUTING_ATTEMPT_CONFLICT')
+  }
+  if (evaluation && canonical !== undefined) {
+    if (metadata?.requested !== evaluation.requestedModelId) {
+      throw invalidResponse('ROUTING_REQUESTED_MODEL_CONFLICT')
+    }
+    if (metadata.strategy === 'fallback') throw invalidResponse('ROUTING_ATTEMPT_CONFLICT')
+    if (metadata.attempts !== undefined) {
+      const attempt = singleRoutingAttemptSchema.safeParse(metadata.attempts).data?.[0]
+      if (!attempt || attempt.provider !== selectedEndpoint?.provider) {
+        throw invalidResponse('ROUTING_ATTEMPT_CONFLICT')
+      }
+      if (attempt.model !== parsed.data.model && !(
+        returnedModelIsVerified &&
+        matchesChatCompletionModelId(attempt.model, evaluation.requestedModelId, canonical)
+      )) {
+        throw invalidResponse('ROUTING_MODEL_CONFLICT')
+      }
+    }
   }
   // A lista do roteador documenta nomes de provedor, sem garantir um slug.
   const providerId = evaluation ? reportedProvider :
@@ -772,7 +811,12 @@ export function createOpenRouterClient(
     timeoutMs,
     maxOutputTokens: defaultMaxOutputTokens,
     evaluationRouting,
+    verifiedCanonicalModelId,
   } = parsedOptions.data
+  if (verifiedCanonicalModelId !== undefined &&
+      (evaluationRouting === undefined || verifiedCanonicalModelId === model)) {
+    throw clientError('OPENROUTER_CONFIGURATION_ERROR')
+  }
   const transport = parsedOptions.data.transport ?? globalThis.fetch
   return createChatCompletionsClient({
     model, timeoutMs, maxOutputTokens: defaultMaxOutputTokens, transport,
@@ -780,6 +824,7 @@ export function createOpenRouterClient(
       kind: 'openrouter',
       authorization: `Bearer ${apiKey}`,
       evaluationRouting,
+      verifiedCanonicalModelId,
     },
   })
 }
@@ -793,6 +838,7 @@ export function createChatCompletionsClient(options: {
     readonly kind: 'openrouter'
     readonly authorization: string
     readonly evaluationRouting?: OpenRouterEvaluationRouting
+    readonly verifiedCanonicalModelId?: string
   } | {
     readonly kind: 'direct_offline' | 'direct_canary'
     readonly endpoint: string
@@ -808,6 +854,9 @@ export function createChatCompletionsClient(options: {
     throw clientError('OPENROUTER_CONFIGURATION_ERROR')
   }
   const evaluationRouting = protocol.kind === 'openrouter' ? protocol.evaluationRouting : undefined
+  const responseRouting = protocol.kind === 'openrouter' && evaluationRouting !== undefined
+    ? { requestedModelId: model, verifiedCanonicalModelId: protocol.verifiedCanonicalModelId }
+    : undefined
   return {
     async createChatCompletion(input) {
       const parsedInput = openRouterChatInputSchema.safeParse(input)
@@ -937,7 +986,7 @@ export function createChatCompletionsClient(options: {
           )
         }
 
-        return parseProviderResponse(rawResponse, validatedInput, evaluationRouting !== undefined, protocol.kind !== 'openrouter')
+        return parseProviderResponse(rawResponse, validatedInput, responseRouting, protocol.kind !== 'openrouter')
       } catch (error) {
         if (error instanceof OpenRouterClientError || (protocol.kind === 'direct_canary' && error instanceof AgentModelError)) throw error
         if (timedOut) {

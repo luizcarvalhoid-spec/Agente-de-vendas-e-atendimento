@@ -1,5 +1,14 @@
+import { createHash } from 'node:crypto'
+import { z } from 'zod'
+
 import type { Product } from '../catalog/product-schema.js'
+import {
+  calculateCommercialTotals,
+  priceToCents,
+  type CommercialShippingRules,
+} from '../commercial/demo-commercial-rules.js'
 import type { FaqDocument } from '../knowledge/faq-document-schema.js'
+import type { ConsultativeAgentProfile } from './consultative-agent-policy.js'
 import type { SearchProductsInput } from './tools/product-tools.js'
 
 export interface CommercialPresentationContext {
@@ -7,10 +16,58 @@ export interface CommercialPresentationContext {
   readonly sensoryTerms: readonly string[]
 }
 
-interface FaqCompositionInput {
-  readonly question: string
-  readonly sourceIds: readonly string[]
-  readonly faqDocuments: ReadonlyMap<string, FaqDocument>
+const faqSourceIdSchema = z.string().regex(/^faq-\d{3}$/)
+
+const pricingFaqReferenceSchema = z.strictObject({
+  sourceId: faqSourceIdSchema,
+  // Legacy articles may display amounts, but their expected values come from the rules.
+  contentTemplate: z.string().min(40).max(1_500).refine(
+    (value) => !/R\$\s*\d/.test(value),
+  ),
+})
+
+const shippingProfileSchema = z.strictObject({
+  rules: z.strictObject({
+    standardShippingCents: z.int().positive(),
+    freeShippingThresholdCents: z.int().positive(),
+    freeShippingComparison: z.enum(['above', 'at_or_above']),
+  }),
+  freeShippingFaq: pricingFaqReferenceSchema,
+  standardShippingFaq: pricingFaqReferenceSchema,
+})
+
+const reviewedFaqsSchema = z.record(faqSourceIdSchema, z.string().regex(/^[a-f0-9]{64}$/))
+const commercialEvidenceSchema = z.strictObject({
+  shipping: shippingProfileSchema.optional(),
+  reviewedFaqs: reviewedFaqsSchema.default({}),
+}).refine(({ shipping, reviewedFaqs }) => {
+  if (!shipping) return true
+  const freeId = shipping.freeShippingFaq.sourceId
+  const standardId = shipping.standardShippingFaq.sourceId
+  return freeId !== standardId && !reviewedFaqs[freeId] && !reviewedFaqs[standardId]
+})
+
+// Trusted backend configuration. FAQ results can supply evidence, never these rules.
+export interface StoreResponseProfile extends ConsultativeAgentProfile {
+  readonly shipping?: z.input<typeof shippingProfileSchema>
+  readonly reviewedFaqs?: Readonly<z.input<typeof reviewedFaqsSchema>>
+  readonly presentation?: {
+    readonly shippingLabel?: string
+    readonly shippingNotice?: string
+    readonly quoteNotice?: string
+    readonly comparisonNotice?: string
+    readonly describeProduct?: (product: Product) => string | undefined
+    readonly recommendationReasons?: (
+      product: Product,
+      context: CommercialPresentationContext,
+    ) => { readonly primary: readonly string[]; readonly secondary: readonly string[] }
+    readonly presentFaq?: (document: FaqDocument) => string
+    readonly clinicalBoundary?: (
+      question: string,
+      previousUserMessages: readonly string[],
+    ) => string | undefined
+    readonly describeIngredients?: (product: Product) => string
+  }
 }
 
 function normalize(value: string) {
@@ -22,8 +79,36 @@ function normalize(value: string) {
     .trim()
 }
 
-function formatCurrency(value: number) {
-  return `R$ ${value.toFixed(2).replace('.', ',')}`
+export function formatCommercialCents(cents: number) {
+  return `R$ ${Math.floor(cents / 100)},${String(cents % 100).padStart(2, '0')}`
+}
+
+function expectedPricingContent(
+  reference: z.infer<typeof pricingFaqReferenceSchema>,
+  rules: CommercialShippingRules,
+) {
+  const inclusive = rules.freeShippingComparison === 'at_or_above'
+  return reference.contentTemplate
+    .replaceAll('{threshold}', formatCommercialCents(rules.freeShippingThresholdCents))
+    .replaceAll('{fee}', formatCommercialCents(rules.standardShippingCents))
+    .replaceAll('{freeComparison}', inclusive ? 'maior ou igual a' : 'maior que')
+    .replaceAll('{standardComparison}', inclusive ? 'abaixo de' : 'de até')
+    .replaceAll('{atThreshold}', inclusive ? 'recebe' : 'não recebe')
+}
+
+function pricingEvidenceStatus(
+  documents: ReadonlyMap<string, FaqDocument>,
+  reference: z.infer<typeof pricingFaqReferenceSchema>,
+  rules: CommercialShippingRules,
+) {
+  const document = documents.get(reference.sourceId)
+  if (!document) return 'missing'
+  return (
+    document.sourceId === reference.sourceId &&
+    document.category === 'frete' &&
+    document.classification === 'fictional-demo' &&
+    document.content === expectedPricingContent(reference, rules)
+  ) ? 'verified' : 'conflicting'
 }
 
 function joinNatural(parts: readonly string[]) {
@@ -31,247 +116,161 @@ function joinNatural(parts: readonly string[]) {
   return `${parts.slice(0, -1).join(', ')} e ${parts.at(-1)}`
 }
 
-const scalpLabels = {
-  oleoso: 'couro cabeludo com tendência à oleosidade',
-  seco: 'couro cabeludo com tendência ao ressecamento',
-  normal: 'couro cabeludo de perfil normal',
-  sensivel: 'couro cabeludo de perfil sensível',
-  todos: 'diferentes perfis de couro cabeludo',
-} as const
-
-const concernLabels = {
-  caspa: 'o objetivo anticaspa',
-  descamacao: 'o cuidado com descamação',
-  oleosidade: 'o controle de oleosidade',
-  ressecamento: 'o cuidado com ressecamento',
-  sensibilidade: 'o cuidado com sensibilidade',
-  'queda-e-quebra': 'o cuidado com queda e quebra',
-  frizz: 'o cuidado com frizz',
-  danos: 'o cuidado com danos',
-  'falta-de-brilho': 'a busca por brilho',
-  'definicao-de-cachos': 'a busca por definição de cachos',
-  'acumulo-de-residuos': 'o cuidado com acúmulo de resíduos',
-} as const
-
-function canonicalProductText(product: Product) {
-  return normalize(
-    [
-      product.name,
-      product.description,
-      product.shortDescription,
-      product.variant.name,
-      product.variant.profile,
-      ...(product.variant.sensoryNotes ?? []),
-      ...product.tags,
-      ...product.indications,
-      ...product.benefits,
-    ].join(' '),
-  )
+function shippingStatements(rules: CommercialShippingRules, shippingLabel: string) {
+  const threshold = formatCommercialCents(rules.freeShippingThresholdCents)
+  const fee = formatCommercialCents(rules.standardShippingCents)
+  const inclusive = rules.freeShippingComparison === 'at_or_above'
+  return {
+    standard: `Para subtotais ${inclusive ? 'abaixo de' : 'de até'} ${threshold}, aplica-se o frete padrão de ${fee}.`,
+    free: inclusive
+      ? `A partir de ${threshold}, o ${shippingLabel} é grátis.`
+      : `Acima de ${threshold}, o ${shippingLabel} é grátis. Um subtotal de ${threshold} exatos não recebe frete grátis. Nesse valor, aplica-se o frete padrão.`,
+  }
 }
 
-const sensoryEvidence = [
-  {
-    requested: /\b(?:frescor|refrescante)\b/,
-    canonical: /\bfresc/,
-    label: 'a preferência por frescor',
-  },
-  {
-    requested: /\bcitrico\b/,
-    canonical: /\bcitric/,
-    label: 'a preferência por um perfil cítrico',
-  },
-  {
-    requested: /\bherbal\b/,
-    canonical: /\bherbal\b/,
-    label: 'a preferência por um perfil herbal',
-  },
-  {
-    requested: /\bsuave\b/,
-    canonical: /\bsuav/,
-    label: 'a preferência por uma experiência suave',
-  },
-  {
-    requested: /\bintenso\b/,
-    canonical: /\bintens/,
-    label: 'a preferência por uma experiência intensa',
-  },
-  {
-    requested: /\bhortela\b/,
-    canonical: /\bhortela\b/,
-    label: 'a preferência por hortelã',
-  },
-  {
-    requested: /\blimao\b/,
-    canonical: /\blimao\b/,
-    label: 'a preferência por limão',
-  },
-] as const
+const shippingTopic = /\b(?:frete|entreg\w*|envios?)\b/
+const freeShippingQuestion = /\b(?:gratis|gratuit\w*|limite|subtotal)\b/
+const shippingFeeQuestion = /\b(?:taxa|valor|preco|cust\w*|quanto fica)\b/
+const unverifiedShipping = 'Não consegui verificar a política de frete com as fontes disponíveis.'
 
-function recommendationReasons(
-  product: Product,
-  context: CommercialPresentationContext,
+export function createChatResponseComposer(
+  profile: StoreResponseProfile,
+  faqDocuments: ReadonlyMap<string, FaqDocument>,
 ) {
-  const reasons: string[] = []
-  const input = context.searchInput
-  let concernReason: string | undefined
-
-  if (product.applicationArea === 'hair') {
-    const matchedScalp = input.scalpTypes?.find(
-      (type) =>
-        product.scalpTypes.includes(type) || product.scalpTypes.includes('todos'),
-    )
-    if (matchedScalp) {
-      reasons.push(
-        `tem posicionamento comercial para ${scalpLabels[matchedScalp]}`,
-      )
-    }
-
-    const matchedConcern = input.hairConcerns?.find((concern) =>
-      product.concerns.includes(concern),
-    )
-    if (matchedConcern) {
-      concernReason = `está alinhado com ${concernLabels[matchedConcern]}`
-    }
-  }
-
-  const requestedSensory = normalize(context.sensoryTerms.join(' '))
-  const productText = canonicalProductText(product)
-  const sensory = sensoryEvidence.find(
-    (evidence) =>
-      evidence.requested.test(requestedSensory) &&
-      evidence.canonical.test(productText),
+  const { storeName, presentation } = profile
+  const evidence = commercialEvidenceSchema.safeParse({
+    shipping: profile.shipping,
+    reviewedFaqs: profile.reviewedFaqs,
+  })
+  const pricing = evidence.data?.shipping
+  const shippingLabel = presentation?.shippingLabel ?? 'frete'
+  const freeEvidence = pricing && pricingEvidenceStatus(
+    faqDocuments, pricing.freeShippingFaq, pricing.rules,
   )
-  if (sensory) reasons.push(`combina com ${sensory.label}`)
-
-  if (
-    input.maxPrice !== undefined &&
-    product.price <= input.maxPrice
-  ) {
-    reasons.push(
-      `custa ${formatCurrency(product.price)}, dentro do limite de ${formatCurrency(input.maxPrice)}`,
-    )
-  }
-
-  if (concernReason) reasons.push(concernReason)
-
-  return reasons.slice(0, 3)
-}
-
-export function composeRecommendationMessage(
-  product: Product,
-  context: CommercialPresentationContext,
-  faqAnswer = '',
-) {
-  const reasons = recommendationReasons(product, context)
-  const explanation =
-    reasons.length > 0
-      ? ` Essa opção ${joinNatural(reasons)}.`
-      : ` A descrição comercial do catálogo é: ${product.shortDescription}`
-  return `Pelo que você me contou, eu escolheria ${product.name}.${explanation} Os detalhes de preço e estoque estão no cartão.${faqAnswer ? `\n\n${faqAnswer}` : ''}`
-}
-
-function lowerFirst(value: string) {
-  return value.length === 0 ? value : `${value[0]?.toLocaleLowerCase('pt-BR')}${value.slice(1)}`
-}
-
-function withoutTerminalPunctuation(value: string) {
-  return value.replace(/[.!?]+$/, '')
-}
-
-export function composeComparisonMessage(
-  products: readonly [Product, Product],
-  faqAnswer = '',
-) {
-  const [first, second] = products
-  const comparison = `${first.name} custa ${formatCurrency(first.price)} e traz ${withoutTerminalPunctuation(lowerFirst(first.shortDescription))}. ${second.name} custa ${formatCurrency(second.price)} e traz ${withoutTerminalPunctuation(lowerFirst(second.shortDescription))}`
-  return `As duas opções têm propostas diferentes: ${comparison}. Assim você pode comparar os perfis sem tratar nenhuma delas como clinicamente superior. Os dados completos estão nos cartões.${faqAnswer ? `\n\n${faqAnswer}` : ''}`
-}
-
-function sentences(value: string) {
-  return value
-    .replace(/^No cenário demonstrativo da HidraSplash,\s*/i, 'Aqui no HidraSplash, ')
-    .replace(/^Na demonstração,\s*/i, 'Na simulação, ')
-    .replace(/^No fluxo fictício,\s*/i, 'Na simulação, ')
-    .replace(/^Para fins de demonstração,\s*/i, 'Na simulação, ')
-    .replace(
-      /^O cenário demonstrativo apresenta um prazo total de\s*/i,
-      'Na simulação, o prazo apresentado é de ',
-    )
-    .split(/(?<=[.!?])\s+/)
-    .map((sentence) => sentence.trim())
-    .filter(Boolean)
-}
-
-function validatedShippingSummary(documents: ReadonlyMap<string, FaqDocument>) {
-  const delivery = documents.get('faq-001')
-  const free = documents.get('faq-002')
-  const standard = documents.get('faq-003')
-  const freeIsValid = Boolean(
-    free?.content.includes('maior que R$ 100,00') &&
-      free.content.includes('R$ 100,00 exatos não recebe frete grátis'),
+  const standardEvidence = pricing && pricingEvidenceStatus(
+    faqDocuments, pricing.standardShippingFaq, pricing.rules,
   )
-  const standardIsValid = Boolean(
-    standard?.content.includes('até R$ 100,00') &&
-      standard.content.includes('R$ 12,90'),
-  )
-  const deliveryIsValid = Boolean(
-    delivery?.content.includes('nenhuma mercadoria') &&
-      delivery.content.includes('entregue'),
-  )
-
-  const parts: string[] = []
-  const consumed = new Set<string>()
-  if (freeIsValid && standardIsValid) {
-    parts.push(
-      'Para subtotais de até R$ 100,00, o frete demonstrativo fica em R$ 12,90. Acima de R$ 100,00, ele é grátis — R$ 100,00 exatos ainda paga o frete padrão.',
-    )
-    consumed.add('faq-002')
-    consumed.add('faq-003')
-  }
-  if (deliveryIsValid) {
-    parts.push(
-      'Como esta é uma simulação, nenhuma mercadoria é separada, despachada ou entregue de verdade.',
-    )
-    consumed.add('faq-001')
-  }
-  return { parts, consumed }
-}
-
-export function composeFaqAnswer({
-  question,
-  sourceIds,
-  faqDocuments,
-}: FaqCompositionInput) {
-  const selected = new Map<string, FaqDocument>()
-  for (const sourceId of sourceIds) {
+  const pricingConflict = freeEvidence === 'conflicting' || standardEvidence === 'conflicting'
+  const reviewedFaqs = new Map<string, { category: FaqDocument['category']; answer: string }>()
+  for (const [sourceId, digest] of Object.entries(evidence.data?.reviewedFaqs ?? {})) {
     const document = faqDocuments.get(sourceId)
-    if (document) selected.set(sourceId, document)
-  }
-
-  const output: string[] = []
-  const seen = new Set<string>()
-  const normalizedQuestion = normalize(question)
-  const shippingRequested = /\b(?:frete|entrega|entregas|envio)\b/.test(
-    normalizedQuestion,
-  )
-  const shipping = shippingRequested
-    ? validatedShippingSummary(selected)
-    : { parts: [] as string[], consumed: new Set<string>() }
-
-  for (const part of shipping.parts) {
-    output.push(part)
-    seen.add(normalize(part))
-  }
-
-  for (const [sourceId, document] of selected) {
-    if (shipping.consumed.has(sourceId)) continue
-    for (const sentence of sentences(document.content)) {
-      const key = normalize(sentence)
-      if (seen.has(key)) continue
-      seen.add(key)
-      output.push(sentence)
+    if (
+      document?.sourceId === sourceId &&
+      document.classification === 'fictional-demo' &&
+      createHash('sha256').update(document.content).digest('hex') === digest
+    ) {
+      reviewedFaqs.set(sourceId, {
+        category: document.category,
+        answer: presentation?.presentFaq?.(document) ?? document.content,
+      })
     }
   }
 
-  return output.join(' ')
+  return {
+    recommendation(product: Product, context: CommercialPresentationContext, faqAnswer: string) {
+      const reasons = presentation?.recommendationReasons?.(product, context)
+      const primary = [...(reasons?.primary ?? [])]
+      const price = priceToCents(product.price)
+      const budget = context.searchInput.maxPrice
+      const budgetCents = budget === undefined ? undefined : priceToCents(budget)
+      if (price !== undefined && budgetCents !== undefined && price <= budgetCents) {
+        primary.push(
+          `custa ${formatCommercialCents(price)}, dentro do limite de ${formatCommercialCents(budgetCents)}`,
+        )
+      }
+      const explanation = joinNatural([...primary, ...(reasons?.secondary ?? [])].slice(0, 3))
+      const description = presentation?.describeProduct?.(product)
+      const detail = explanation
+        ? ` Essa opção ${explanation}.`
+        : description ? ` A opção tem ${description}.` : ''
+      return `Pelo que você me contou, eu escolheria ${product.name}.${detail} Os detalhes de preço e estoque estão no cartão.${faqAnswer ? `\n\n${faqAnswer}` : ''}`
+    },
+
+    comparison(products: readonly [Product, Product], faqAnswer: string) {
+      const details = products.map((product) => {
+        const description = presentation?.describeProduct?.(product)
+        const price = priceToCents(product.price)
+        const priceText = price === undefined ? 'está no catálogo' : `custa ${formatCommercialCents(price)}`
+        return `${product.name} ${priceText}${description ? ` e tem ${description}` : ''}.`
+      })
+      const notice = presentation?.comparisonNotice
+      return `Veja as duas opções: ${details.join(' ')}${notice ? ` ${notice}` : ''} Os dados completos estão nos cartões.${faqAnswer ? `\n\n${faqAnswer}` : ''}`
+    },
+
+    faq(question: string, sourceIds: readonly string[]) {
+      const selected = new Set(sourceIds)
+      const selectedFree = Boolean(pricing && selected.has(pricing.freeShippingFaq.sourceId))
+      const selectedStandard = Boolean(pricing && selected.has(pricing.standardShippingFaq.sourceId))
+      const includeFree = selectedFree && !pricingConflict && freeEvidence === 'verified'
+      const includeStandard =
+        selectedStandard && !pricingConflict && standardEvidence === 'verified'
+      const normalizedQuestion = normalize(question)
+      const asksShipping = shippingTopic.test(normalizedQuestion)
+      const output: string[] = []
+      const retrievedFaqs = [...selected].flatMap((sourceId) => {
+        const document = reviewedFaqs.get(sourceId)
+        return document ? [document] : []
+      })
+      const hasFulfillment = retrievedFaqs.some(({ category }) => category === 'frete')
+
+      if (pricing && (includeFree || includeStandard)) {
+        const statements = shippingStatements(pricing.rules, shippingLabel)
+        if (includeStandard) output.push(statements.standard)
+        if (includeFree) output.push(statements.free)
+        const notice = presentation?.shippingNotice
+        if (!hasFulfillment && notice) output.push(notice)
+      }
+      if (
+        (selectedFree && !includeFree) || (selectedStandard && !includeStandard) ||
+        (asksShipping && (
+          (!includeFree && freeShippingQuestion.test(normalizedQuestion)) ||
+          (!includeStandard && shippingFeeQuestion.test(normalizedQuestion)) ||
+          (!includeFree && !includeStandard && !hasFulfillment)
+        ))
+      ) {
+        output.push(unverifiedShipping)
+      }
+
+      const seen = new Set(output.map(normalize))
+      for (const { answer } of retrievedFaqs) {
+        for (const part of answer.split(/(?<=[.!?])\s+/)) {
+          const sentence = part.trim()
+          const key = normalize(sentence)
+          if (!key || seen.has(key)) continue
+          seen.add(key)
+          output.push(sentence)
+        }
+      }
+      return output.join(' ') || (sourceIds.length > 0
+        ? 'Não consegui verificar a política solicitada nas fontes disponíveis.'
+        : '')
+    },
+
+    quote(product: Pick<Product, 'name' | 'price'>) {
+      if (!pricing || pricingConflict || freeEvidence !== 'verified') return undefined
+      const unitPriceCents = priceToCents(product.price)
+      if (unitPriceCents === undefined) return undefined
+      let shippingCents: number
+      let totalCents: number
+      try {
+        ({ shippingCents, totalCents } = calculateCommercialTotals(
+          [{ unitPriceCents, quantity: 1 }],
+          pricing.rules,
+        ))
+      } catch {
+        return undefined
+      }
+      if (shippingCents > 0 && standardEvidence !== 'verified') return undefined
+      const sourceIds = shippingCents === 0
+        ? [pricing.freeShippingFaq.sourceId]
+        : [pricing.freeShippingFaq.sourceId, pricing.standardShippingFaq.sourceId]
+      const shippingText = shippingCents === 0 ? 'grátis' : `de ${formatCommercialCents(shippingCents)}`
+      const notice = presentation?.quoteNotice ??
+        'Esta cotação não efetuou compra nem adicionou o produto ao carrinho.'
+      return {
+        sourceIds,
+        message: `Claro! ${product.name} custa ${formatCommercialCents(unitPriceCents)} no catálogo atual de ${storeName}. Para uma unidade, o ${shippingLabel} seria ${shippingText}, então o total ficaria em ${formatCommercialCents(totalCents)}. ${notice}`,
+      }
+    },
+  }
 }

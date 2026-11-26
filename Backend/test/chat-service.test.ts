@@ -10,6 +10,7 @@ import type {
   AgentToolCall,
 } from '../src/agent/agent-model-port.js'
 import { AgentModelError } from '../src/agent/agent-model-port.js'
+import type { StoreResponseProfile } from '../src/agent/chat-response-composer.js'
 import {
   ChatServiceError,
   createChatService,
@@ -30,6 +31,11 @@ import {
 } from '../src/contracts/chat.js'
 import { loadFaqDocuments } from '../src/knowledge/faq-content-loader.js'
 import { createFaqSearchIndex, type FaqSearchIndex } from '../src/knowledge/faq-search.js'
+import {
+  papelariaFaqDocuments,
+  papelariaProduct,
+  papelariaResponseProfile,
+} from './fixtures/papelaria-response-profile.js'
 
 const backendRoot = dirname(dirname(fileURLToPath(import.meta.url)))
 const catalogRoot = join(backendRoot, 'content', 'catalog')
@@ -100,6 +106,7 @@ async function buildService(
     catalog?: CatalogRepository
     faqIndex?: FaqSearchIndex
     faqDocuments?: Awaited<ReturnType<typeof loadFaqDocuments>>
+    responseProfile?: StoreResponseProfile
     timeoutMs?: number
   } = {},
 ) {
@@ -111,6 +118,7 @@ async function buildService(
     faqIndex: overrides.faqIndex ?? base.faqIndex,
     faqDocuments: overrides.faqDocuments ?? base.faqDocuments,
     model,
+    responseProfile: overrides.responseProfile,
     timeoutMs: overrides.timeoutMs,
   })
 }
@@ -1135,6 +1143,72 @@ test('contextual quote revalidates removal, stock, price and required FAQ source
     )
     assert.deepEqual(response.sourceIds, [])
   })
+})
+
+test('the injected store profile drives an early quote and the existing comparison flow', async () => {
+  const { catalog: base } = await canonical()
+  const first = base.findById(9)
+  const second = base.findById(13)
+  assert.ok(first && second)
+  const products = [
+    papelariaProduct(first, 'Caderno pautado', 79.99),
+    papelariaProduct(second, 'Caderno pontilhado', 80),
+  ]
+  const catalog: CatalogRepository = {
+    ...base,
+    listAll: () => products,
+    findById: (id) => products.find((product) => product.id === id),
+  }
+  const service = await buildService(
+    createQueueModel([
+      (input) => {
+        const policy = input.messages[0]
+        assert.equal(policy?.role, 'system')
+        assert.match(policy?.content ?? '', /Papelaria Horizonte/)
+        assert.doesNotMatch(policy?.content ?? '', /HidraSplash|couro cabeludo/)
+        return assistant(null, [
+          toolCall('details-9', 'get_product_details', { productId: 9 }),
+          toolCall('details-13', 'get_product_details', { productId: 13 }),
+        ])
+      },
+      assistant('Preço inventado, frete e compra garantidos.'),
+    ]),
+    {
+      catalog,
+      faqDocuments: papelariaFaqDocuments,
+      faqIndex: createFaqSearchIndex(papelariaFaqDocuments),
+      responseProfile: papelariaResponseProfile,
+    },
+  )
+  const quote = await execute(service, {
+    message: 'Quanto fica o total do produto 9 com frete?',
+  })
+  assert.equal(quote.type, 'text')
+  assert.deepEqual(quote.sourceIds, ['faq-701', 'faq-702'])
+  assert.match(quote.message, /Papelaria Horizonte.*R\$ 8,50.*R\$ 88,49/)
+
+  const comparison = await execute(service, { message: 'Compare os produtos 9 e 13.' })
+  assert.equal(comparison.type, 'comparison')
+  if (comparison.type === 'comparison') assert.deepEqual(comparison.productIds, [9, 13])
+  assert.match(comparison.message, /Caderno pautado.*R\$ 79,99.*Caderno pontilhado.*R\$ 80,00/)
+  for (const response of [quote, comparison]) {
+    assert.doesNotMatch(response.message, /HidraSplash|clínic|cosmétic|R\$ 12,90|preço inventado/i)
+  }
+})
+
+test('duplicated FAQ evidence prevents a deterministic quote without calling the model', async () => {
+  const [free, standard] = papelariaFaqDocuments
+  const service = await buildService(neverCalledModel(() => assert.fail()), {
+    responseProfile: papelariaResponseProfile,
+    faqDocuments: [free, standard, { ...standard, content: 'A política mudou.' }],
+  })
+  const response = await execute(service, {
+    message: 'Quanto fica o total do produto 13 com frete?',
+  })
+  assert.equal(response.type, 'text')
+  assert.equal(response.type === 'text' ? response.reason : undefined, 'unable_to_verify')
+  assert.deepEqual(response.sourceIds, [])
+  assert.doesNotMatch(response.message, /R\$|HidraSplash/)
 })
 
 test('changing category does not inherit incompatible scalp or sensory preferences', async () => {

@@ -9,7 +9,6 @@ import type {
 } from '../catalog/product-schema.js'
 import { priceToCents } from '../commercial/demo-commercial-rules.js'
 import {
-  CHAT_MAX_SOURCES,
   chatProductCardSchema,
   chatRequestSchema,
   chatResponseSchema,
@@ -24,6 +23,7 @@ import type { AgentMessage, AgentModelPort } from './agent-model-port.js'
 import {
   createChatResponseComposer,
   formatCommercialCents,
+  type FaqComposition,
   type StoreResponseProfile,
 } from './chat-response-composer.js'
 import { createConsultativeSystemInstruction } from './consultative-agent-policy.js'
@@ -767,10 +767,8 @@ function controlledProductInformation(
   request: ChatRequest,
   result: ToolOrchestratorResult,
   catalog: CatalogRepository,
-  sourceIds: readonly string[],
-  requestId: string,
   describeIngredients: NonNullable<StoreResponseProfile['presentation']>['describeIngredients'],
-): ChatResponse | undefined {
+): string | undefined {
   const normalized = normalize(request.message)
   const productId = explicitInformationalProductId(request.message)
   if (
@@ -786,56 +784,14 @@ function controlledProductInformation(
     describeIngredients &&
     /\b(?:ingredientes?|formula|formulacao|composicao|contem|leva)\b/.test(normalized)
   ) {
-    return chatResponseSchema.parse({
-      type: 'text',
-      message: `${product.name}: ${describeIngredients(product)}`,
-      sourceIds,
-      requestId,
-    })
+    return `${product.name}: ${describeIngredients(product)}`
   }
   if (/\b(?:preco|custa|valor|estoque|disponivel|disponibilidade)\b/.test(normalized)) {
     const price = priceToCents(product.price)
     if (price === undefined) return undefined
-    return chatResponseSchema.parse({
-      type: 'text',
-      message: `${product.name}: preço atual de ${formatCommercialCents(price)} e estoque atual de ${product.stock} unidade(s).`,
-      sourceIds,
-      requestId,
-    })
+    return `${product.name}: preço atual de ${formatCommercialCents(price)} e estoque atual de ${product.stock} unidade(s).`
   }
   return undefined
-}
-
-function resolveFaqSourceIds(
-  result: ToolOrchestratorResult,
-  faqDocuments: ReadonlyMap<string, FaqDocument>,
-) {
-  const resolved: string[] = []
-  for (const sourceId of result.faqSourceIds) {
-    if (
-      resolved.length >= CHAT_MAX_SOURCES ||
-      resolved.includes(sourceId) ||
-      !faqDocuments.has(sourceId)
-    ) {
-      continue
-    }
-    resolved.push(sourceId)
-  }
-  return resolved
-}
-
-function mixedFaqAnswer(
-  question: string,
-  plan: ChatGroundingPlan,
-  result: ToolOrchestratorResult,
-  sourceIds: readonly string[],
-  composer: ResponseComposer,
-) {
-  if (plan.groundingRequirement !== 'both') return ''
-  if (result.grounding.faq === 'not_found') {
-    return 'A política solicitada não está documentada nas fontes disponíveis.'
-  }
-  return composer.faq(question, sourceIds)
 }
 
 export function toProductCard(
@@ -916,37 +872,32 @@ function handleNonCompleted(result: ToolOrchestratorResult): never {
 }
 
 function controlledTextResponse(
-  question: string,
   requestId: string,
   result: ToolOrchestratorResult,
   plan: ChatGroundingPlan,
-  faqDocuments: ReadonlyMap<string, FaqDocument>,
-  composer: ResponseComposer,
+  faqAnswer: FaqComposition | undefined,
   needsClarification: boolean,
 ): ChatResponse {
-  const sourceIds = resolveFaqSourceIds(result, faqDocuments)
-
   if (needsClarification) {
+    const mixedFaq = plan.groundingRequirement === 'both' ? faqAnswer : undefined
     return chatResponseSchema.parse({
       type: 'text',
-      message:
-        'Preciso confirmar a restrição comercial informada antes de selecionar um produto.',
+      message: `Preciso confirmar a restrição comercial informada antes de selecionar um produto.${mixedFaq ? ` Sobre a outra dúvida: ${mixedFaq.message}` : ''}`,
       reason: 'clarification',
-      sourceIds,
+      sourceIds: mixedFaq?.sourceIds ?? [],
       requestId,
     })
   }
   if (
     plan.groundingRequirement === 'both' &&
     result.grounding.product === 'not_found' &&
-    result.grounding.faq === 'found'
+    faqAnswer
   ) {
-    const faqAnswer = composer.faq(question, sourceIds)
     return chatResponseSchema.parse({
       type: 'text',
-      message: `Não encontrei um produto elegível para a solicitação.${faqAnswer ? ` Sobre a outra dúvida: ${faqAnswer}` : ''}`,
-      reason: 'not_found',
-      sourceIds,
+      message: `Não encontrei um produto elegível para a solicitação. Sobre a outra dúvida: ${faqAnswer.message}`,
+      reason: faqAnswer.status === 'unable_to_verify' ? 'unable_to_verify' : 'not_found',
+      sourceIds: faqAnswer.sourceIds,
       requestId,
     })
   }
@@ -970,7 +921,7 @@ function controlledTextResponse(
       message:
         'Não encontrei produto ou política documentada que responda com segurança a esta solicitação.',
       reason: 'not_found',
-      sourceIds,
+      sourceIds: [],
       requestId,
     })
   }
@@ -980,26 +931,24 @@ function controlledTextResponse(
       message:
         'Encontrei dados de produto, mas a política solicitada não está documentada nas fontes disponíveis.',
       reason: 'not_found',
-      sourceIds,
+      sourceIds: [],
       requestId,
     })
   }
-  if (sourceIds.length > 0) {
-    const faqAnswer = composer.faq(question, sourceIds)
-    if (faqAnswer) {
-      return chatResponseSchema.parse({
-        type: 'text',
-        message: faqAnswer,
-        sourceIds,
-        requestId,
-      })
-    }
+  if (faqAnswer) {
+    return chatResponseSchema.parse({
+      type: 'text',
+      message: faqAnswer.message,
+      ...(faqAnswer.status === 'unable_to_verify' ? { reason: 'unable_to_verify' } : {}),
+      sourceIds: faqAnswer.sourceIds,
+      requestId,
+    })
   }
   if (plan.groundingRequirement === 'not_required' && result.status === 'completed') {
     return chatResponseSchema.parse({
       type: 'text',
       message: result.message,
-      sourceIds,
+      sourceIds: [],
       requestId,
     })
   }
@@ -1008,7 +957,7 @@ function controlledTextResponse(
     message:
       'Consultei os dados disponíveis, mas não houve uma seleção inequívoca para exibir cartões. Posso refinar a busca com mais uma preferência.',
     reason: 'clarification',
-    sourceIds,
+    sourceIds: [],
     requestId,
   })
 }
@@ -1023,15 +972,7 @@ export function createChatService(
     storeName: profile?.storeName,
     domainInstructions: profile?.domainInstructions,
   })
-  const faqDocuments = new Map<string, FaqDocument>()
-  const duplicateSourceIds = new Set<string>()
-  for (const document of options.faqDocuments) {
-    const { sourceId } = document
-    if (faqDocuments.delete(sourceId)) duplicateSourceIds.add(sourceId)
-    if (!duplicateSourceIds.has(sourceId)) faqDocuments.set(sourceId, document)
-  }
-
-  const composer = createChatResponseComposer(profile, faqDocuments)
+  const composer = createChatResponseComposer(profile, options.faqDocuments)
   const faqTool = createSearchFaqTool(options.faqIndex)
 
   return {
@@ -1193,23 +1134,38 @@ export function createChatService(
         handleNonCompleted(result)
       }
 
-      const sourceIds = resolveFaqSourceIds(result, faqDocuments)
       if (consultationQuestion) {
         return controlledConsultativeQuestion(
           consultationQuestion,
           execution.requestId,
         )
       }
+      const faqAnswer = result.grounding.faq === 'found'
+        ? composer.faq(request.message, result.faqSourceIds)
+        : undefined
+      const mixedFaq = plan.groundingRequirement === 'both' ? faqAnswer : undefined
+      const mixedFaqText = mixedFaq?.message ?? (
+        plan.groundingRequirement === 'both' && result.grounding.faq === 'not_found'
+          ? 'A política solicitada não está documentada nas fontes disponíveis.'
+          : ''
+      )
+      const mixedSourceIds = mixedFaq?.sourceIds ?? []
       if (plan.presentationIntent === 'text') {
         const productInformation = controlledProductInformation(
           request,
           result,
           options.catalog,
-          sourceIds,
-          execution.requestId,
           profile.presentation?.describeIngredients,
         )
-        if (productInformation) return productInformation
+        if (productInformation) {
+          return chatResponseSchema.parse({
+            type: 'text',
+            message: mixedFaqText ? `${productInformation}\n\n${mixedFaqText}` : productInformation,
+            ...(mixedFaq?.status === 'unable_to_verify' ? { reason: 'unable_to_verify' } : {}),
+            sourceIds: mixedSourceIds,
+            requestId: execution.requestId,
+          })
+        }
       }
 
       const authorizedIds = new Set(result.recommendationProductIds)
@@ -1266,25 +1222,15 @@ export function createChatService(
         return card ? [{ product, card }] : []
       })
       const products = selectedProducts.map(({ card }) => card)
-      const faqAnswer = mixedFaqAnswer(
-        request.message,
-        plan,
-        result,
-        sourceIds,
-        composer,
-      )
-
       if (selectedIds.length === 1 && products.length === 1) {
         const product = products[0]
         const canonicalProduct = selectedProducts[0]?.product
         if (!canonicalProduct) {
           return controlledTextResponse(
-            request.message,
             execution.requestId,
             result,
             plan,
-            faqDocuments,
-            composer,
+            faqAnswer,
             commercial.needsClarification,
           )
         }
@@ -1296,11 +1242,11 @@ export function createChatService(
               searchInput: commercial.searchInput,
               sensoryTerms: commercial.sensoryTerms,
             },
-            faqAnswer,
+            mixedFaqText,
           ),
           productIds: [product?.id],
           products: [product],
-          sourceIds,
+          sourceIds: mixedSourceIds,
           requestId: execution.requestId,
         })
       }
@@ -1312,12 +1258,10 @@ export function createChatService(
         const canonicalProducts = selectedProducts.map(({ product }) => product)
         if (canonicalProducts.length !== 2) {
           return controlledTextResponse(
-            request.message,
             execution.requestId,
             result,
             plan,
-            faqDocuments,
-            composer,
+            faqAnswer,
             commercial.needsClarification,
           )
         }
@@ -1325,22 +1269,20 @@ export function createChatService(
           type: 'comparison',
           message: composer.comparison(
             canonicalProducts as [Product, Product],
-            faqAnswer,
+            mixedFaqText,
           ),
           productIds: [products[0]?.id, products[1]?.id],
           products: [products[0], products[1]],
-          sourceIds,
+          sourceIds: mixedSourceIds,
           requestId: execution.requestId,
         })
       }
 
       return controlledTextResponse(
-        request.message,
         execution.requestId,
         result,
         plan,
-        faqDocuments,
-        composer,
+        faqAnswer,
         commercial.needsClarification,
       )
     },

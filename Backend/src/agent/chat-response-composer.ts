@@ -7,6 +7,7 @@ import {
   priceToCents,
   type CommercialShippingRules,
 } from '../commercial/demo-commercial-rules.js'
+import { CHAT_MAX_SOURCES } from '../contracts/chat.js'
 import type { FaqDocument } from '../knowledge/faq-document-schema.js'
 import type { ConsultativeAgentProfile } from './consultative-agent-policy.js'
 import type { SearchProductsInput } from './tools/product-tools.js'
@@ -14,6 +15,12 @@ import type { SearchProductsInput } from './tools/product-tools.js'
 export interface CommercialPresentationContext {
   readonly searchInput: SearchProductsInput
   readonly sensoryTerms: readonly string[]
+}
+
+export interface FaqComposition {
+  readonly message: string
+  readonly sourceIds: readonly string[]
+  readonly status: 'complete' | 'partial' | 'unable_to_verify'
 }
 
 const faqSourceIdSchema = z.string().regex(/^faq-\d{3}$/)
@@ -97,13 +104,14 @@ function expectedPricingContent(
 }
 
 function pricingEvidenceStatus(
-  documents: ReadonlyMap<string, FaqDocument>,
+  documents: ReadonlyMap<string, FaqDocument | null>,
   reference: z.infer<typeof pricingFaqReferenceSchema>,
   rules: CommercialShippingRules,
 ) {
   const document = documents.get(reference.sourceId)
-  if (!document) return 'missing'
+  if (document === undefined) return 'missing'
   return (
+    document !== null &&
     document.sourceId === reference.sourceId &&
     document.category === 'frete' &&
     document.classification === 'fictional-demo' &&
@@ -132,11 +140,19 @@ const shippingTopic = /\b(?:frete|entreg\w*|envios?)\b/
 const freeShippingQuestion = /\b(?:gratis|gratuit\w*|limite|subtotal)\b/
 const shippingFeeQuestion = /\b(?:taxa|valor|preco|cust\w*|quanto fica)\b/
 const unverifiedShipping = 'Não consegui verificar a política de frete com as fontes disponíveis.'
+const unverifiedFaq = 'Não consegui verificar a política solicitada nas fontes disponíveis.'
 
 export function createChatResponseComposer(
   profile: StoreResponseProfile,
-  faqDocuments: ReadonlyMap<string, FaqDocument>,
+  documents: readonly FaqDocument[],
 ) {
+  const faqDocuments = new Map<string, FaqDocument | null>()
+  for (const document of documents) {
+    const { sourceId } = document
+    // Keep a conflicting entry even if the same ID appears again.
+    faqDocuments.set(sourceId, faqDocuments.has(sourceId) ? null : document)
+  }
+
   const { storeName, presentation } = profile
   const evidence = commercialEvidenceSchema.safeParse({
     shipping: profile.shipping,
@@ -197,21 +213,48 @@ export function createChatResponseComposer(
       return `Veja as duas opções: ${details.join(' ')}${notice ? ` ${notice}` : ''} Os dados completos estão nos cartões.${faqAnswer ? `\n\n${faqAnswer}` : ''}`
     },
 
-    faq(question: string, sourceIds: readonly string[]) {
-      const selected = new Set(sourceIds)
-      const selectedFree = Boolean(pricing && selected.has(pricing.freeShippingFaq.sourceId))
-      const selectedStandard = Boolean(pricing && selected.has(pricing.standardShippingFaq.sourceId))
-      const includeFree = selectedFree && !pricingConflict && freeEvidence === 'verified'
-      const includeStandard =
-        selectedStandard && !pricingConflict && standardEvidence === 'verified'
+    faq(question: string, retrievedSourceIds: readonly string[]): FaqComposition {
+      const selected = new Set(retrievedSourceIds)
+      const freeId = pricing?.freeShippingFaq.sourceId
+      const standardId = pricing?.standardShippingFaq.sourceId
+      const sourceIds: string[] = []
+      const articleAnswers: string[] = []
+      const seen = new Set<string>()
+      let hasFulfillment = false
+      let rejectedArticle = false
+
+      for (const sourceId of selected) {
+        if (sourceIds.length === CHAT_MAX_SOURCES) break
+        if (sourceId === freeId || sourceId === standardId) {
+          const status = sourceId === freeId ? freeEvidence : standardEvidence
+          if (!pricingConflict && status === 'verified') sourceIds.push(sourceId)
+          continue
+        }
+
+        const article = reviewedFaqs.get(sourceId)
+        if (!article?.answer.trim()) {
+          rejectedArticle = true
+          continue
+        }
+        const previousLength = articleAnswers.length
+        for (const part of article.answer.split(/(?<=[.!?])\s+/)) {
+          const sentence = part.trim()
+          const key = normalize(sentence)
+          if (!key || seen.has(key)) continue
+          seen.add(key)
+          articleAnswers.push(sentence)
+        }
+        if (articleAnswers.length > previousLength) {
+          sourceIds.push(sourceId)
+          if (article.category === 'frete') hasFulfillment = true
+        }
+      }
+
+      const includeFree = freeId !== undefined && sourceIds.includes(freeId)
+      const includeStandard = standardId !== undefined && sourceIds.includes(standardId)
       const normalizedQuestion = normalize(question)
       const asksShipping = shippingTopic.test(normalizedQuestion)
       const output: string[] = []
-      const retrievedFaqs = [...selected].flatMap((sourceId) => {
-        const document = reviewedFaqs.get(sourceId)
-        return document ? [document] : []
-      })
-      const hasFulfillment = retrievedFaqs.some(({ category }) => category === 'frete')
 
       if (pricing && (includeFree || includeStandard)) {
         const statements = shippingStatements(pricing.rules, shippingLabel)
@@ -220,30 +263,34 @@ export function createChatResponseComposer(
         const notice = presentation?.shippingNotice
         if (!hasFulfillment && notice) output.push(notice)
       }
-      if (
-        (selectedFree && !includeFree) || (selectedStandard && !includeStandard) ||
+      const shippingGap =
+        (freeId !== undefined && selected.has(freeId) && !includeFree) ||
+        (standardId !== undefined && selected.has(standardId) && !includeStandard) ||
         (asksShipping && (
           (!includeFree && freeShippingQuestion.test(normalizedQuestion)) ||
           (!includeStandard && shippingFeeQuestion.test(normalizedQuestion)) ||
           (!includeFree && !includeStandard && !hasFulfillment)
         ))
-      ) {
-        output.push(unverifiedShipping)
-      }
-
-      const seen = new Set(output.map(normalize))
-      for (const { answer } of retrievedFaqs) {
-        for (const part of answer.split(/(?<=[.!?])\s+/)) {
-          const sentence = part.trim()
-          const key = normalize(sentence)
-          if (!key || seen.has(key)) continue
-          seen.add(key)
-          output.push(sentence)
+      output.push(...articleAnswers)
+      if (sourceIds.length === 0) {
+        return {
+          message: shippingGap ? unverifiedShipping : unverifiedFaq,
+          sourceIds,
+          status: 'unable_to_verify',
         }
       }
-      return output.join(' ') || (sourceIds.length > 0
-        ? 'Não consegui verificar a política solicitada nas fontes disponíveis.'
-        : '')
+      if (shippingGap && rejectedArticle) {
+        output.push('Não consegui verificar a política de frete nem todas as demais condições nas fontes disponíveis.')
+      } else if (shippingGap) {
+        output.push(unverifiedShipping)
+      } else if (rejectedArticle) {
+        output.push('Não consegui verificar todas as condições solicitadas nas fontes disponíveis.')
+      }
+      return {
+        message: output.join(' '),
+        sourceIds,
+        status: shippingGap || rejectedArticle ? 'partial' : 'complete',
+      }
     },
 
     quote(product: Pick<Product, 'name' | 'price'>) {

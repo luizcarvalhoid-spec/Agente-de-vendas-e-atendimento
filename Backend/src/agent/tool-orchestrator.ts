@@ -9,6 +9,7 @@ import type {
 } from './agent-model-port.js'
 import { AgentModelError } from './agent-model-port.js'
 import { createConsultativeSystemInstruction } from './consultative-agent-policy.js'
+import { hidrasplashConsultativeProfile } from './hidrasplash-consultative-profile.js'
 import {
   createAgentToolExecutionContext,
   type AgentToolRegistry,
@@ -199,6 +200,7 @@ export interface ToolOrchestratorEvent {
 export interface CreateToolOrchestratorOptions {
   readonly model: AgentModelPort
   readonly tools: AgentToolRegistry
+  /** Backend-owned instructions, composed independently of tool and conversation data. */
   readonly systemInstruction?: () => string
   readonly timeoutMs?: number
   readonly maxModelCalls?: number
@@ -247,11 +249,15 @@ function uniquePush<T extends number | string>(target: T[], values: readonly T[]
   }
 }
 
+const hidrasplashSystemInstruction = createConsultativeSystemInstruction(
+  hidrasplashConsultativeProfile,
+)
+
 export function createToolOrchestrator(
   options: CreateToolOrchestratorOptions,
 ): ToolOrchestrator {
   const systemInstruction =
-    options.systemInstruction ?? createConsultativeSystemInstruction
+    options.systemInstruction ?? (() => hidrasplashSystemInstruction)
   const timeoutMs = options.timeoutMs ?? TOOL_ORCHESTRATOR_TIMEOUT_MS
   const maxModelCalls =
     options.maxModelCalls ?? TOOL_ORCHESTRATOR_MAX_MODEL_CALLS

@@ -267,6 +267,26 @@ export type OpenRouterErrorCode =
   | 'OPENROUTER_INVALID_JSON'
   | 'OPENROUTER_INVALID_RESPONSE'
 
+export type ChatCompletionResponseValidationFailure =
+  | 'BODY_TOO_LARGE'
+  | 'INVALID_JSON'
+  | 'UNEXPECTED_EVENT_STREAM'
+  | 'INVALID_ENVELOPE'
+  | 'INVALID_CHOICE'
+  | 'INVALID_ASSISTANT_MESSAGE'
+  | 'INVALID_TOOL_CALL'
+  | 'INVALID_TOOL_ARGUMENT_FIELD'
+  | 'INVALID_USAGE'
+  | 'INVALID_PROVIDER_METADATA'
+  | 'MISSING_PRIMARY_CHOICE'
+  | 'EMPTY_ASSISTANT_MESSAGE'
+  | 'DUPLICATE_TOOL_CALL_IDS'
+  | 'DIRECT_REFUSAL_OR_TRUNCATION'
+  | 'ROUTING_SELECTION_UNVERIFIED'
+  | 'ROUTING_PROVIDER_CONFLICT'
+  | 'ROUTING_MODEL_CONFLICT'
+  | 'ROUTING_ATTEMPT_CONFLICT'
+
 const errorMessages: Record<OpenRouterErrorCode, string> = {
   OPENROUTER_CONFIGURATION_ERROR:
     'A integração OpenRouter não está configurada corretamente.',
@@ -302,17 +322,20 @@ export class OpenRouterClientError extends Error {
   readonly code: OpenRouterErrorCode
   readonly statusCode?: number
   readonly transportStarted: boolean
+  readonly responseValidationFailure?: ChatCompletionResponseValidationFailure
 
   constructor(
     code: OpenRouterErrorCode,
     statusCode?: number,
     transportStarted = statusCode !== undefined,
+    responseValidationFailure?: ChatCompletionResponseValidationFailure,
   ) {
     super(errorMessages[code])
     this.name = 'OpenRouterClientError'
     this.code = code
     this.statusCode = statusCode
     this.transportStarted = transportStarted
+    this.responseValidationFailure = responseValidationFailure
   }
 }
 
@@ -455,6 +478,24 @@ function clientError(
   return new OpenRouterClientError(code, statusCode, transportStarted)
 }
 
+function invalidResponse(
+  failure: ChatCompletionResponseValidationFailure,
+  code: 'OPENROUTER_INVALID_RESPONSE' | 'OPENROUTER_INVALID_JSON' = 'OPENROUTER_INVALID_RESPONSE',
+) {
+  return new OpenRouterClientError(code, undefined, true, failure)
+}
+
+function responseSchemaFailure(path: readonly PropertyKey[]): ChatCompletionResponseValidationFailure {
+  // Zod paths and messages can carry response data. Return only fixed categories.
+  if (path[0] === 'provider' || path[0] === 'openrouter_metadata') return 'INVALID_PROVIDER_METADATA'
+  if (path[0] === 'usage') return 'INVALID_USAGE'
+  if (path[0] !== 'choices') return 'INVALID_ENVELOPE'
+  if (path[2] !== 'message') return 'INVALID_CHOICE'
+  if (path[3] !== 'tool_calls') return 'INVALID_ASSISTANT_MESSAGE'
+  if (path[5] === 'function' && path[6] === 'arguments') return 'INVALID_TOOL_ARGUMENT_FIELD'
+  return 'INVALID_TOOL_CALL'
+}
+
 function classifyHttpError(statusCode: number) {
   if (statusCode === 401) {
     return clientError('OPENROUTER_UNAUTHORIZED', statusCode)
@@ -540,7 +581,7 @@ function validateToolResponse(
 
   const toolCallIds = toolCalls.map((toolCall) => toolCall.id)
   if (new Set(toolCallIds).size !== toolCallIds.length) {
-    throw clientError('OPENROUTER_INVALID_RESPONSE', undefined, true)
+    throw invalidResponse('DUPLICATE_TOOL_CALL_IDS')
   }
 
   if (input.toolChoice === 'none' && toolCalls.length > 0) {
@@ -572,16 +613,16 @@ function parseProviderResponse(
   const routingResponse = direct ? undefined : providerResponseSchema.safeParse(rawResponse)
   const parsed = routingResponse ?? directResponseSchema.safeParse(rawResponse)
   if (!parsed.success) {
-    throw clientError('OPENROUTER_INVALID_RESPONSE', undefined, true)
+    throw invalidResponse(responseSchemaFailure(parsed.error.issues[0]?.path ?? []))
   }
 
   const choice = parsed.data.choices.find((candidate) => candidate.index === 0)
   if (!choice) {
-    throw clientError('OPENROUTER_INVALID_RESPONSE', undefined, true)
+    throw invalidResponse('MISSING_PRIMARY_CHOICE')
   }
   if (direct && (choice.message.refusal != null ||
       choice.finish_reason === 'length' || choice.finish_reason === 'content_filter')) {
-    throw clientError('OPENROUTER_INVALID_RESPONSE', undefined, true)
+    throw invalidResponse('DIRECT_REFUSAL_OR_TRUNCATION')
   }
 
   const toolCalls: OpenRouterToolCall[] = (choice.message.tool_calls ?? []).map(
@@ -596,7 +637,7 @@ function parseProviderResponse(
   )
   const hasText = Boolean(choice.message.content?.trim())
   if (!hasText && toolCalls.length === 0) {
-    throw clientError('OPENROUTER_INVALID_RESPONSE', undefined, true)
+    throw invalidResponse('EMPTY_ASSISTANT_MESSAGE')
   }
 
   validateToolResponse(input, toolCalls)
@@ -607,13 +648,17 @@ function parseProviderResponse(
   const selected = available?.filter((endpoint) => endpoint.selected) ?? []
   const selectedEndpoint = selected[0]
   const reportedProvider = routingEvidence?.provider
-  const conflictingSelection = available !== undefined && (
-    selected.length !== 1 ||
-    (reportedProvider !== undefined && selectedEndpoint?.provider !== reportedProvider) ||
-    (selectedEndpoint?.model !== undefined && selectedEndpoint.model !== parsed.data.model)
-  )
-  if (evaluation && (conflictingSelection || (metadata?.attempt !== undefined && metadata.attempt !== 1))) {
-    throw clientError('OPENROUTER_INVALID_RESPONSE', undefined, true)
+  if (evaluation && available !== undefined) {
+    if (selected.length !== 1) throw invalidResponse('ROUTING_SELECTION_UNVERIFIED')
+    if (reportedProvider !== undefined && selectedEndpoint?.provider !== reportedProvider) {
+      throw invalidResponse('ROUTING_PROVIDER_CONFLICT')
+    }
+    if (selectedEndpoint?.model !== undefined && selectedEndpoint.model !== parsed.data.model) {
+      throw invalidResponse('ROUTING_MODEL_CONFLICT')
+    }
+  }
+  if (evaluation && metadata?.attempt !== undefined && metadata.attempt !== 1) {
+    throw invalidResponse('ROUTING_ATTEMPT_CONFLICT')
   }
   // A lista do roteador documenta nomes de provedor, sem garantir um slug.
   const providerId = evaluation ? reportedProvider :
@@ -696,7 +741,7 @@ export async function readResponseBodyWithinLimit(
 
       bytesRead += chunk.value.byteLength
       if (bytesRead > byteLimit) {
-        throw clientError('OPENROUTER_INVALID_RESPONSE', undefined, true)
+        throw invalidResponse('BODY_TOO_LARGE')
       }
 
       responseText += decoder.decode(chunk.value, { stream: true })
@@ -885,7 +930,11 @@ export function createChatCompletionsClient(options: {
         try {
           rawResponse = JSON.parse(responseText)
         } catch {
-          throw clientError('OPENROUTER_INVALID_JSON', undefined, true)
+          const mediaType = response.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase()
+          throw invalidResponse(
+            mediaType === 'text/event-stream' ? 'UNEXPECTED_EVENT_STREAM' : 'INVALID_JSON',
+            'OPENROUTER_INVALID_JSON',
+          )
         }
 
         return parseProviderResponse(rawResponse, validatedInput, evaluationRouting !== undefined, protocol.kind !== 'openrouter')

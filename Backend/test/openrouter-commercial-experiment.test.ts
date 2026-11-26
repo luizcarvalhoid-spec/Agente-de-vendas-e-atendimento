@@ -162,15 +162,20 @@ test('reserva maior que o orçamento interno bloqueia antes de consultar a chave
   assert.equal(await store.status(commercialUseId), 'available')
 })
 
-test('a R2 aceita saldo acima de USD 1, usa um único marcador novo e preserva o anterior', async (t) => {
+test('a R3 aceita saldo acima de USD 1, consome apenas o marcador novo e preserva R1 e R2', async (t) => {
   const { run, bodies, requests, directory, store } = await fixture(t, {
     key: { limit_remaining: 4.90 },
     post: (ordinal) => ordinal === 1 ? search(ordinal) : completion('Essa opção entrega uma sensação de frescor.'),
   })
-  const previousId = '070d6000000000000000000000000001'
-  const previousPath = join(directory, `${previousId}.used`)
+  const previousIds = [
+    '070d6000000000000000000000000001',
+    '070d6000000000000000000000000002',
+  ]
   const previousMarker = '{"version":1,"state":"consumed"}\n'
-  await writeFile(previousPath, previousMarker, { flag: 'wx', mode: 0o600 })
+  for (const id of previousIds) {
+    await writeFile(join(directory, `${id}.used`), previousMarker, { flag: 'wx', mode: 0o600 })
+  }
+  assert.equal(commercialUseId, '070d6000000000000000000000000003')
   assert.equal(await store.status(commercialUseId), 'available')
   const results = await Promise.allSettled([run(), run()])
   const success = results.find((result) => result.status === 'fulfilled')
@@ -191,9 +196,12 @@ test('a R2 aceita saldo acima de USD 1, usa um único marcador novo e preserva o
   }
   assert(success && success.value.status !== 'dry-run')
   assert.equal(success.value.status, 'completed')
-  assert.equal(success.value.experiment, 'EVAL-07D.6-R2')
+  assert.equal(success.value.experiment, 'EVAL-07D.6-R3')
   assert.equal(await store.status(commercialUseId), 'consumed')
-  assert.equal(await readFile(previousPath, 'utf8'), previousMarker)
+  for (const id of previousIds) {
+    assert.equal(await store.status(id), 'consumed')
+    assert.equal(await readFile(join(directory, `${id}.used`), 'utf8'), previousMarker)
+  }
   assert.equal(success.value.reservedUsd, 0.00689)
   assert.equal(success.value.executedTools, 1)
   assert(success.value.productIds.length > 0)
@@ -243,18 +251,34 @@ test('chave injetada por ambiente é reconhecida offline sem carregar .env ou ex
   assert.equal(result.stderr, '')
 })
 
-test('CLI anuncia R2 e rejeita a autorização antiga antes de usar a rede', async () => {
+test('CLI aceita apenas a autorização R3 e dry-run não acessa a API', async () => {
   const script = fileURLToPath(new URL('../src/scripts/eval-commercial-openrouter.ts', import.meta.url))
   const guard = 'data:text/javascript,globalThis.fetch%3D()%3D%3Eprocess.exit(97)'
   const args = ['--import', guard, '--import', import.meta.resolve('tsx'), script]
   const exec = promisify(execFile)
-  assert.match((await exec(process.execPath, [...args, '--help'])).stdout, /--authorize EVAL-07D\.6-R2 /)
-  await assert.rejects(exec(process.execPath, [...args, '--live', '--authorize', 'EVAL-07D.6', '--provider', 'azure', '--confirm-zdr-only']), (error: unknown) => {
-    const { code, stderr } = error as { code: number; stderr: string }
-    assert.equal(code, 1)
-    assert.equal(stderr.trim(), 'NO-GO LIVE_AUTHORIZATION_REQUIRED')
-    return true
-  })
+  const env = { ...process.env }
+  delete env.OPENROUTER_API_KEY
+  assert.match((await exec(process.execPath, [...args, '--help'], { env })).stdout, /--authorize EVAL-07D\.6-R3 /)
+  for (const [authorization, expectedCode] of [
+    ['EVAL-07D.6', 'LIVE_AUTHORIZATION_REQUIRED'],
+    ['EVAL-07D.6-R1', 'LIVE_AUTHORIZATION_REQUIRED'],
+    ['EVAL-07D.6-R2', 'LIVE_AUTHORIZATION_REQUIRED'],
+    // A CLI reconhece R3 e para no requisito de terminal, antes de qualquer execução.
+    ['EVAL-07D.6-R3', 'PRIVATE_TERMINAL_REQUIRED'],
+  ]) {
+    await assert.rejects(exec(process.execPath, [
+      ...args, '--live', '--authorize', authorization, '--provider', 'azure', '--confirm-zdr-only',
+    ], { env }), (error: unknown) => {
+      const { code, stderr } = error as { code: number; stderr: string }
+      assert.equal(code, 1)
+      assert.equal(stderr.trim(), `NO-GO ${expectedCode}`)
+      return true
+    })
+  }
+  const dryRun = await exec(process.execPath, [...args, '--dry-run'], { env })
+  assert.match(dryRun.stdout, /EVAL-07D\.6-R3/)
+  assert.match(dryRun.stdout, /Solicitações autenticadas e tentativas de modelo 0 0/)
+  assert.equal(dryRun.stderr, '')
 })
 
 test('HTTP inválido, provedor ausente, excesso de tokens e ferramentas repetidas não fazem retry', async (t) => {
@@ -358,6 +382,7 @@ test('resposta inválida antes da observação tem diagnóstico fixo e não exec
       assert.equal(result.observedProvider, undefined)
       assert.equal(result.executedTools, 0)
       assert.equal(result.toolCalls, 0)
+      assert.equal(result.response, undefined)
       assert.equal(bodies.length, 1)
       assert(!JSON.stringify(result).includes(fakeKey))
     })

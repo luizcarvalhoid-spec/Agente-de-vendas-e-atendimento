@@ -5,7 +5,7 @@ import { AgentModelError, type AgentModelPort } from '../agent/agent-model-port.
 import { createChatService } from '../agent/chat-service.js'
 import { createOpenRouterAgentModel } from '../agent/openrouter/openrouter-agent-model.js'
 import {
-  awaitWithAbort, createOpenRouterClient, OPENROUTER_CHAT_COMPLETIONS_ENDPOINT, readResponseBodyWithinLimit,
+  awaitWithAbort, createOpenRouterClient, matchesChatCompletionModelId, OPENROUTER_CHAT_COMPLETIONS_ENDPOINT, readResponseBodyWithinLimit,
   type ChatCompletionResponseValidationFailure,
 } from '../agent/chat-completions-client.js'
 import { createProductSearchIndex } from '../agent/tools/product-tools.js'
@@ -18,9 +18,11 @@ import { externalEvalWorstCaseCost, ExternalEvalCostController } from './externa
 
 export const commercialQuestion = 'Quero um shampoo anticaspa para couro cabeludo oleoso, com sensação refrescante, até R$ 50. Qual você recomenda?'
 export const commercialModel = 'openai/gpt-6-luna'
-export const commercialExperimentId = 'EVAL-07D.6-R3'
-export const commercialUseId = '070d6000000000000000000000000003'
+const pinnedCanonicalModel = 'openai/gpt-6-luna-20260922'
+export const commercialExperimentId = 'EVAL-07D.6-R4'
+export const commercialUseId = '070d6000000000000000000000000004'
 export const commercialProvider = 'azure'
+const modelIdentityURL = `https://openrouter.ai/api/v1/model/${commercialModel}`
 const modelCatalogURL = `https://openrouter.ai/api/v1/models/${commercialModel}/endpoints`
 const zdrCatalogURL = 'https://openrouter.ai/api/v1/endpoints/zdr'
 const currentKeyURL = 'https://openrouter.ai/api/v1/key'
@@ -58,6 +60,10 @@ const endpointSchema = z.object({
   }),
 })
 const noRetainingEndpoint = endpointSchema.extend({ safety_retention: z.literal(false) })
+const modelIdentitySchema = z.object({ data: z.object({
+  id: z.literal(commercialModel),
+  canonical_slug: z.literal(pinnedCanonicalModel),
+}) })
 const modelCatalog = z.object({ data: z.object({ endpoints: z.array(z.unknown()) }) })
 const zdrCatalog = z.object({ data: z.array(z.unknown()) })
 
@@ -80,7 +86,8 @@ const advertisedIdentity = z.object({ model_id: z.unknown(), tag: z.unknown(), p
 function azureEntries(endpoints: unknown[], modelSpecific: boolean) {
   return endpoints.filter((entry) => {
     const identity = advertisedIdentity.safeParse(entry).data
-    if (!identity || (!modelSpecific && typeof identity.model_id === 'string' && identity.model_id !== commercialModel)) return false
+    if (!identity || (!modelSpecific && typeof identity.model_id === 'string' &&
+        !matchesChatCompletionModelId(identity.model_id, commercialModel, pinnedCanonicalModel))) return false
     const tag = typeof identity.tag === 'string' ? identity.tag.trim().toLowerCase() : ''
     const name = typeof identity.provider_name === 'string' ? identity.provider_name.trim().toLowerCase() : ''
     return tag === commercialProvider || tag.startsWith(commercialProvider + '/') || name === commercialProvider
@@ -171,6 +178,11 @@ export async function runCommercialExperiment({ live, signal }: Options, deps: D
   const useStore = await deps.createUseStore().catch(() => { throw new CommercialExperimentError('USE_STORE_UNAVAILABLE') })
   const priorUse = await useStore.status(commercialUseId)
   if (priorUse !== 'available') throw new CommercialExperimentError(priorUse === 'consumed' ? 'EXPERIMENT_ALREADY_CONSUMED' : 'USE_STORE_UNAVAILABLE')
+  const identity = modelIdentitySchema.safeParse(await fetchOpenRouterJson(
+    deps.transport, modelIdentityURL, signal, 'PUBLIC_MODEL_IDENTITY_UNAVAILABLE',
+  )).data?.data
+  if (!identity) throw new CommercialExperimentError('MODEL_ALIAS_UNVERIFIED')
+  const verifiedCanonicalModelId = identity.canonical_slug
   const pricing = await verifyPricing(deps.transport, signal)
   const reservedUsd = reserve(pricing)
   if (!Number.isFinite(reservedUsd) || reservedUsd <= 0 || reservedUsd > experimentBudgetUsd) throw new CommercialExperimentError('BUDGET_INSUFFICIENT')
@@ -195,6 +207,7 @@ export async function runCommercialExperiment({ live, signal }: Options, deps: D
   let finalModelText: string | undefined
   const client = createOpenRouterClient({
     model: commercialModel, apiKey: credential, timeoutMs: limits.timeoutMs, maxOutputTokens: limits.maxOutputTokensPerCall,
+    verifiedCanonicalModelId,
     evaluationRouting: {
       providerId: live.provider, allowFallbacks: false, requireParameters: true, dataCollection: 'deny',
       zeroDataRetention: true, reasoningEffort: 'none', serviceTier: 'default',
@@ -210,9 +223,10 @@ export async function runCommercialExperiment({ live, signal }: Options, deps: D
   })
   const model = createOpenRouterAgentModel(client, {
     expectedModelId: commercialModel,
+    verifiedCanonicalModelId,
     onResponseValidationFailure(failure) { responseValidationFailure = failure },
     onObservation(observation) {
-      returnedModel = /^[a-z0-9.-]+\/[a-z0-9._:-]+$/i.test(observation.returnedModelId) && !observation.returnedModelId.includes(credential)
+      returnedModel = matchesChatCompletionModelId(observation.returnedModelId, commercialModel, verifiedCanonicalModelId)
         ? observation.returnedModelId
         : undefined
       observedProvider = observation.providerId === live.provider || observation.providerId === 'Azure'

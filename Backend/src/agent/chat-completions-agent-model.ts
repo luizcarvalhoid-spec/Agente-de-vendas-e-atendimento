@@ -8,6 +8,7 @@ import {
 import { registerExternalAgentModel } from './agent-model-origin.js'
 import {
   OpenRouterClientError,
+  matchesChatCompletionModelId,
   openRouterFunctionToolSchema,
   type ChatCompletionResponseValidationFailure,
   type OpenRouterClient,
@@ -30,6 +31,7 @@ export interface ChatCompletionsModelObservation {
 
 export interface ChatCompletionsAgentModelOptions {
   readonly expectedModelId?: string
+  readonly verifiedCanonicalModelId?: string
   readonly expectedProviderId?: string
   readonly defaultMaxOutputTokens?: number
   readonly onObservation?: (
@@ -136,7 +138,7 @@ export function createChatCompletionsAgentModel(
       const modelIdentityMatches =
         options.expectedModelId === undefined
           ? undefined
-          : result.model === options.expectedModelId
+          : matchesChatCompletionModelId(result.model, options.expectedModelId, options.verifiedCanonicalModelId)
       const providerIdentityMatches =
         options.expectedProviderId === undefined ||
         result.providerId === undefined

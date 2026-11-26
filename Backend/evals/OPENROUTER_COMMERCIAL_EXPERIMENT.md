@@ -4,9 +4,38 @@ O comando roda o ChatService, o catálogo fictício e as ferramentas comerciais
 no processo do terminal. A rodada pergunta por um shampoo anticaspa para
 couro cabeludo oleoso, com sensação refrescante e preço de até R$ 50.
 
+## Resultado da R4 em 26/11/2026
+
+Primeiro teste comercial real aprovado do agente. O terminal executou o
+`ChatService` com o catálogo fictício e o cliente OpenRouter.
+
+| Evidência | Resultado |
+| --- | --- |
+| Modelo solicitado | `openai/gpt-6-luna` |
+| Modelo retornado | `openai/gpt-6-luna` |
+| Provedor observado | Azure |
+| Status técnico | `completed` |
+| Avaliação comercial | `passed` |
+| Chamadas ao modelo | 2 |
+| Ferramentas executadas | 1 |
+| Produto recomendado | ID 13 |
+| Tokens de entrada | 5.204 |
+| Tokens de saída | 172 |
+| Custo estimado local | US$ 0,00073651 |
+| Cobrança efetiva | Não verificada |
+| Endpoint exato | Não verificado |
+
+O aceite cobre tool calling e recomendação fundamentada para esse cenário.
+A validação do fluxo HTTP, da jornada em navegador e de outros cenários
+com o modelo real permanece pendente. A autorização de uso único da R4
+foi consumida.
+[PR #60](https://github.com/luizcarvalhoid-spec/Agente-de-vendas-e-atendimento/pull/60) · [Fase 05](../../docs/05-agente-openrouter.md) · [Fase 08](../../docs/08-observabilidade-evals.md)
+
+## Operação e limites
+
 Em `Backend`, o modo padrão verifica o catálogo local e mostra a reserva
-histórica de USD 0,00689 para a entrada `azure` publicada na D.4. O dry-run não consulta a OpenRouter, lê
-credenciais ou cria o marcador de uso único.
+histórica de USD 0,00689 para a entrada `azure` publicada na D.4. O dry-run
+funciona sem consulta à OpenRouter, credenciais ou criação de marcador.
 
 ```sh
 pnpm eval:commercial-openrouter --dry-run
@@ -32,12 +61,8 @@ formato. A validade e os limites reais serão conferidos na etapa live.
 O live exige autorização separada e um terminal Linux privado, sem gravação
 da sessão. Use `--confirm-zdr-only` somente após conferir a política efetiva
 da conta ou guardrail da chave dedicada para modelos OpenAI, com ZDR only e
-sem Safety Retention. Para a rodada autorizada, execute o comando abaixo
-no processo com a chave injetada.
-
-```sh
-pnpm eval:commercial-openrouter --live --authorize EVAL-07D.6-R4 --provider azure --confirm-zdr-only
-```
+sem Safety Retention. A R4 já foi executada. Outra rodada exige uma nova
+autorização e um novo marcador de uso único.
 
 O seletor `azure` cobre a família. O CLI exige uma única entrada Azure
 para o modelo em cada catálogo público, com o tag publicado `azure`,
@@ -104,7 +129,7 @@ mensagens do validador.
 
 O catálogo público relaciona o ID solicitado `openai/gpt-6-luna` ao
 `canonical_slug` `openai/gpt-6-luna-20260922`. Isso comprova a relação no
-catálogo. O valor de `model` no JSON entregue ao cliente segue
+catálogo. O valor de `model` no JSON entregue ao cliente na R2 segue
 desconhecido. No código da R2, metadados de seleção e
 resposta com slugs diferentes falhavam antes da observação. Um slug
 canônico coerente nos metadados chegava à comparação literal do adaptador e

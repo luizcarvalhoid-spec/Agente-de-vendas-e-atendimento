@@ -35,11 +35,11 @@
 
 ## 8.4 — Conjunto de avaliações qualitativas
 
-- [ ] Criar cerca de **30 cenários** versionados: anticaspa genérico, perfil completo, sensibilidade, orçamento, comparação, carrinho, FAQ, falta de fonte, tentativas de manipular prompt e falhas de API.
-- [ ] Para cada cenário, registrar condições iniciais, comportamento esperado e verificações: produto permitido, exclusões, ferramenta certa, justificativa, ausência de invenções.
-- [ ] Construir script manual ou semiautomatizado para executar cenários reais com OpenRouter em ambiente controlado.
-- [ ] Consolidar taxa de acerto **medida**, casos falhos, modelo avaliado, data e limitações; não prometer 100% de acerto.
-- [ ] Separar testes determinísticos (CI) de evals com LLM (manuais/opt-in por custo e variabilidade).
+- [ ] Ampliar os oito cenários iniciais para cerca de **30 cenários** versionados, seguindo a cobertura planejada. [Dataset inicial](../Backend/evals/datasets/README.md)
+- [x] Registrar estado inicial, comportamento esperado por turno, assertions objetivas e critérios de revisão nos oito cenários iniciais. [Contrato de datasets](../Backend/evals/README.md)
+- [x] Executar um primeiro teste comercial real e controlado com OpenRouter. A R4 aprovou um cenário pelo terminal. [Registro da R4](../Backend/evals/OPENROUTER_COMMERCIAL_EXPERIMENT.md#resultado-da-r4-em-26112026)
+- [ ] Ampliar a avaliação real opt-in e registrar taxa de acerto medida, casos falhos, modelo, data e limitações. Registrar a revisão humana nas dimensões aplicáveis.
+- [x] Separar a execução determinística offline de execuções opt-in com LLM real. [Executor offline](../Backend/evals/README.md#executor-offline-eval-03)
 
 **Aceite:** relatório reproduzível mostra o que foi testado, critérios e resultados reais, inclusive falhas.  
 **Commit:** `test(evals): add sales assistant scenarios`.
@@ -53,12 +53,33 @@
 **Aceite:** há demonstração técnica do funcionamento e não apenas afirmação de que a IA “é inteligente”.  
 **Commit:** `docs: publish agent evaluation approach`.
 
-## Auditoria de progresso (12/11/2026)
+## Auditoria de progresso (26/11/2026)
 
-- **8.1 parcial:** o [PR #22](https://github.com/luizcarvalhoid-spec/Agente-de-vendas-e-atendimento/pull/22) incluiu eventos operacionais sanitizados, limites e reconciliação de uso. Não equivale à telemetria consultável exigida por 8.1; os itens permanecem pendentes para aceite.
-- **8.2 não entregue:** painel técnico ainda não implementado.
-- **8.3 coberta offline:** as suítes para contratos, catálogo, FAQ, falhas, ferramentas, carrinho e jornada usam modelos/transportes falsos. O [PR #28](https://github.com/luizcarvalhoid-spec/Agente-de-vendas-e-atendimento/pull/28) registrou 378 testes backend e 129 frontend aprovados; o [PR #35](https://github.com/luizcarvalhoid-spec/Agente-de-vendas-e-atendimento/pull/35) registrou 439 testes backend aprovados. São resultados de momentos diferentes, não somáveis.
-- **8.4 em preparação:** há [12 cenários de MVP](../Backend/test/fixtures/mvp-journey-cases.json) e [15 jornadas de humanização](./agent-humanization-evaluation.md), ambos offline e com objetivos diferentes. Não declarar 27 casos únicos nem avaliação real de LLM. Falta dataset consolidado de cerca de 30 casos com `id`, `input`, estado inicial e verificações objetivas; uma rubrica (incluindo eventual nota de 1 a 10), executor controlado, modelo/data, custos e relatório de acertos/falhas reais.
-- **8.5 pendente:** evidências de uso real, capturas e vídeo não foram registradas como concluídas.
+- **8.1 parcial.** O backend emite eventos sanitizados e reconcilia uso. A R4 registrou uso e custo estimado no terminal. A telemetria consultável por requisição e o aceite completo da 8.1 seguem pendentes. [PR #22](https://github.com/luizcarvalhoid-spec/Agente-de-vendas-e-atendimento/pull/22)
+- **8.2 pendente.** O painel técnico ainda precisa ser implementado e validado.
+- **8.3 coberta offline.** As suítes para contratos, catálogo, FAQ, falhas, ferramentas, carrinho e jornada usam modelos ou transportes falsos. Os 12 cenários de MVP e as 15 jornadas de humanização são suítes complementares aos datasets iniciais. [Cenários do MVP](../Backend/test/fixtures/mvp-journey-cases.json) · [Jornadas de humanização](./agent-humanization-evaluation.md)
+- **8.4 parcial.** A infraestrutura está mesclada. A R4 aprovou um cenário comercial real com GPT-6 Luna via OpenRouter (Azure). O registro da rodada contém evidência técnica e comercial. A avaliação humana por dimensão permanece pendente. [Registro da R4](../Backend/evals/OPENROUTER_COMMERCIAL_EXPERIMENT.md#resultado-da-r4-em-26112026)
+- **8.5 parcial.** O resultado sanitizado da R4 já está registrado. Capturas do painel, vídeo e seleção de casos para o portfólio seguem pendentes.
 
-**Próxima tarefa sugerida:** construir a especificação do dataset e a rubrica de notas **antes** de automatizar a execução, para que um `eval.py` futuro não transforme similaridade textual ou impressões subjetivas em nota sem critério. Executar modelos reais somente com autorização de custo e sem credenciais em artefatos versionados.
+### EVAL-01 a EVAL-08 mescladas
+
+| Etapa | Entrega |
+| --- | --- |
+| **EVAL-01** | Contrato versionado em Zod e loader JSON, com expectativas por turno e assertions tipadas. [PR #37](https://github.com/luizcarvalhoid-spec/Agente-de-vendas-e-atendimento/pull/37) |
+| **EVAL-02** | Oito cenários iniciais em quatro datasets universais e da HidraSplash. [PR #38](https://github.com/luizcarvalhoid-spec/Agente-de-vendas-e-atendimento/pull/38) |
+| **EVAL-03** | Executor determinístico offline multi-turno com traces sanitizados. [PR #39](https://github.com/luizcarvalhoid-spec/Agente-de-vendas-e-atendimento/pull/39) |
+| **EVAL-04** | Motor de assertions e pontuação objetiva de 1 a 10, com sinalização de evidência insuficiente. [PR #40](https://github.com/luizcarvalhoid-spec/Agente-de-vendas-e-atendimento/pull/40) |
+| **EVAL-05** | Relatórios objetivos offline em JSON e Markdown. [PR #41](https://github.com/luizcarvalhoid-spec/Agente-de-vendas-e-atendimento/pull/41) |
+| **EVAL-06** | Rubrica e fluxo local de revisão humana independente por dimensão, com fixtures sintéticas. [PR #42](https://github.com/luizcarvalhoid-spec/Agente-de-vendas-e-atendimento/pull/42) · [Rubrica e revisão](../Backend/evals/HUMAN_REVIEW.md) |
+| **EVAL-07** | Preflight, integração externa simulada e controles de autorização do canário protegido. O experimento comercial em terminal registrou a execução real da R4. [Integração simulada](../Backend/evals/EXTERNAL_EVAL.md) · [Canário protegido](../Backend/evals/OPENROUTER_LUNA_CANARY.md) · [PR #60](https://github.com/luizcarvalhoid-spec/Agente-de-vendas-e-atendimento/pull/60) |
+| **EVAL-08** | Quatro baselines objetivos versionados e comparação de regressões com checagem de compatibilidade. [PR #43](https://github.com/luizcarvalhoid-spec/Agente-de-vendas-e-atendimento/pull/43) · [Baselines](../Backend/evals/BASELINES.md) |
+
+Nos quatro baselines, **33 de 35 assertions passaram** e duas falhas conhecidas
+do cenário de prompt injection foram preservadas. Esses números descrevem o
+modelo determinístico offline. A R4 tem seu próprio resultado comercial
+`passed` para um cenário, com endpoint exato e cobrança efetiva ainda não
+verificados.
+
+**Aceite geral da fase 08 pendente.** Falta ampliar a cobertura dos datasets e
+das avaliações reais, registrar revisões humanas e concluir telemetria,
+painel e evidências de portfólio.

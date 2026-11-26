@@ -11,6 +11,7 @@ Os documentos gerais das fases permanecem no roadmap:
 
 - [Fase 04 — FAQ fictícia e RAG](../docs/04-faq-rag.md)
 - [Fase 05 — Agente com OpenRouter e ferramentas](../docs/05-agente-openrouter.md)
+- [Fase 08 — Observabilidade e avaliações](../docs/08-observabilidade-evals.md)
 
 ## Arquitetura e fluxo
 
@@ -122,6 +123,20 @@ Os testes usam modelos, transportes e relógios falsos; a suíte não precisa de
 credencial e não chama a OpenRouter. Casos específicos cobrem recuperação FAQ,
 ferramentas, orquestração, contrato HTTP, cancelamento e controles de custo.
 
+O executor de avaliações offline usa quatro datasets com oito cenários
+iniciais, assertions objetivas, relatórios JSON e Markdown e baselines
+versionados. A revisão humana tem rubrica própria e fluxo de submissão local.
+[Executor e relatórios](../Backend/evals/README.md) · [Revisão humana](../Backend/evals/HUMAN_REVIEW.md) · [Baselines](../Backend/evals/BASELINES.md)
+
+## Primeiro teste comercial real
+
+Em 26/11/2026, a R4 aprovou uma recomendação comercial no terminal com
+`openai/gpt-6-luna` via OpenRouter e Azure como provedor observado.
+O `ChatService` concluiu o cenário com duas chamadas ao modelo, uma
+ferramenta executada e recomendação do produto de ID 13. O aceite cobre
+o tool calling e a recomendação fundamentada nesse cenário.
+[Resultado e limites da R4](../Backend/evals/OPENROUTER_COMMERCIAL_EXPERIMENT.md#resultado-da-r4-em-26112026)
+
 ## Smoke manual e possível custo
 
 O roteiro manual está em
@@ -145,6 +160,6 @@ proteções locais, não representam cobrança final. Ele não é executado por
   instância.
 - A busca lexical depende de vocabulário e não oferece compreensão semântica
   geral.
-- A implementação e os testes offline estão concluídos, mas o comportamento e
-  o tool calling com um modelo real da OpenRouter ainda não foram comprovados
-  por smoke documentado.
+- A integração do modelo real pela rota `POST /api/chat` e a jornada em
+  navegador ainda precisam de aceite operacional. Também falta ampliar a
+  avaliação real para outros cenários e registrar a revisão humana.

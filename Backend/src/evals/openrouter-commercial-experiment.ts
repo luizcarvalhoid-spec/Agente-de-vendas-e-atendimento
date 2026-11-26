@@ -6,6 +6,7 @@ import { createChatService } from '../agent/chat-service.js'
 import { createOpenRouterAgentModel } from '../agent/openrouter/openrouter-agent-model.js'
 import {
   awaitWithAbort, createOpenRouterClient, OPENROUTER_CHAT_COMPLETIONS_ENDPOINT, readResponseBodyWithinLimit,
+  type ChatCompletionResponseValidationFailure,
 } from '../agent/chat-completions-client.js'
 import { createProductSearchIndex } from '../agent/tools/product-tools.js'
 import { loadCatalogRepository } from '../catalog/catalog-repository.js'
@@ -189,6 +190,7 @@ export async function runCommercialExperiment({ live, signal }: Options, deps: D
   let returnedModel: string | undefined
   let observedProvider: string | undefined
   let firstFailure: string | undefined
+  let responseValidationFailure: ChatCompletionResponseValidationFailure | undefined
   let termination: string | undefined
   let finalModelText: string | undefined
   const client = createOpenRouterClient({
@@ -208,6 +210,7 @@ export async function runCommercialExperiment({ live, signal }: Options, deps: D
   })
   const model = createOpenRouterAgentModel(client, {
     expectedModelId: commercialModel,
+    onResponseValidationFailure(failure) { responseValidationFailure = failure },
     onObservation(observation) {
       returnedModel = /^[a-z0-9.-]+\/[a-z0-9._:-]+$/i.test(observation.returnedModelId) && !observation.returnedModelId.includes(credential)
         ? observation.returnedModelId
@@ -284,6 +287,7 @@ export async function runCommercialExperiment({ live, signal }: Options, deps: D
   const answer = response?.message ?? (termination === 'INSUFFICIENT_GROUNDING' ? finalModelText : undefined)
   return {
     ...base, status: firstFailure ? 'interrupted' as const : 'completed' as const, reason: firstFailure,
+    ...(responseValidationFailure === undefined ? {} : { responseValidationFailure }),
     commercialStatus: firstFailure ? 'not_evaluated' as const : commercialFailures.length ? 'failed' as const : 'passed' as const,
     commercialFailures,
     response: firstFailure || !answer ? undefined : sanitizeEvalText(answer.replaceAll(credential, '[REDACTED]'))

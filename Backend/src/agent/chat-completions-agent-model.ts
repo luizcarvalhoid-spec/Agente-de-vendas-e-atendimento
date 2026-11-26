@@ -9,6 +9,7 @@ import { registerExternalAgentModel } from './agent-model-origin.js'
 import {
   OpenRouterClientError,
   openRouterFunctionToolSchema,
+  type ChatCompletionResponseValidationFailure,
   type OpenRouterClient,
   type OpenRouterMessage,
 } from './chat-completions-client.js'
@@ -34,6 +35,7 @@ export interface ChatCompletionsAgentModelOptions {
   readonly onObservation?: (
     observation: ChatCompletionsModelObservation,
   ) => void
+  readonly onResponseValidationFailure?: (failure: ChatCompletionResponseValidationFailure) => void
 }
 
 function toOpenRouterMessage(message: AgentMessage): OpenRouterMessage {
@@ -115,6 +117,13 @@ export function createChatCompletionsAgentModel(
       } catch (error) {
         if (error instanceof AgentModelError) throw error
         if (error instanceof OpenRouterClientError) {
+          if (error.responseValidationFailure !== undefined) {
+            try {
+              options.onResponseValidationFailure?.(error.responseValidationFailure)
+            } catch {
+              // Observabilidade nunca altera o resultado do adaptador.
+            }
+          }
           throw new AgentModelError(
             mapErrorCode(error),
             error.transportStarted,

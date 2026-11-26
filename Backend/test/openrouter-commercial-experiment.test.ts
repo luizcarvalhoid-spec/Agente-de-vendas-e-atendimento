@@ -7,6 +7,7 @@ import { after, before, test, type TestContext } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 
+import { OPENROUTER_MAX_RESPONSE_BYTES } from '../src/agent/chat-completions-client.js'
 import { loadCatalogRepository } from '../src/catalog/catalog-repository.js'
 import { CanaryAuthorizationUseStore } from '../src/evals/external-canary-use-store.js'
 import {
@@ -275,6 +276,155 @@ test('HTTP inválido, provedor ausente, excesso de tokens e ferramentas repetida
   const repeated = await fixture(t, { post: search })
   assert.equal((await repeated.run()).status, 'interrupted')
   assert.equal(repeated.bodies.length, 2)
+})
+
+const canonicalModel = 'openai/gpt-6-luna-20260922'
+const diagnosticCall = functionCall('search_products', { query: 'shampoo anticaspa', maxPrice: 50 })
+
+function toolCompletion(toolCalls: readonly unknown[] = [diagnosticCall]) {
+  const payload = syntheticCompletion(null, { model: commercialModel, usage, finishReason: 'tool_calls' })
+  return {
+    ...payload,
+    provider: 'Azure',
+    choices: payload.choices.map((choice) => ({
+      ...choice,
+      native_finish_reason: 'completed',
+      message: { ...choice.message, tool_calls: toolCalls },
+    })),
+  }
+}
+
+const routingMetadata = (model: string = commercialModel, provider = 'Azure', selected = true, attempt: unknown = 1) => ({
+  attempt, endpoints: { available: [{ model, provider, selected }] },
+})
+
+test('JSON não streaming com conteúdo nulo e tool_calls chega às ferramentas com metadados coerentes', async (t) => {
+  const { run, bodies } = await fixture(t, { post: (ordinal) => ordinal === 1
+    ? Response.json({ ...toolCompletion(), openrouter_metadata: routingMetadata(), streamed: true })
+    : completion('A opção encontrada atende ao perfil informado.', {}, 'Azure') })
+  const result = await run()
+  assert(result.status !== 'dry-run')
+  assert.equal(result.status, 'completed', result.reason)
+  assert.equal(result.observedProvider, 'Azure')
+  assert.equal(result.returnedModel, commercialModel)
+  assert.equal(result.responseValidationFailure, undefined)
+  assert.equal(result.executedTools, 1)
+  assert.equal(bodies.length, 2)
+  assert(bodies.every((body) => body.stream === false))
+})
+
+test('resposta inválida antes da observação tem diagnóstico fixo e não executa ferramentas', async (t) => {
+  const valid = toolCompletion()
+  const firstChoice = valid.choices[0]
+  assert(firstChoice)
+  const cases = [
+    ['INVALID_JSON', () => new Response(fakeKey)],
+    ['UNEXPECTED_EVENT_STREAM', () => new Response(`data: ${JSON.stringify(valid)}\n\n`, {
+      headers: { 'content-type': 'text/event-stream; charset=utf-8' },
+    })],
+    ['BODY_TOO_LARGE', () => new Response('x'.repeat(OPENROUTER_MAX_RESPONSE_BYTES + 1))],
+    ['INVALID_ENVELOPE', () => Response.json({ ...valid, model: null })],
+    ['INVALID_CHOICE', () => Response.json({ ...valid, choices: [{ ...firstChoice, finish_reason: 0 }] })],
+    ['MISSING_PRIMARY_CHOICE', () => Response.json({ ...valid, choices: [{ ...firstChoice, index: 1 }] })],
+    ['INVALID_ASSISTANT_MESSAGE', () => Response.json({ ...valid, choices: [{
+      ...firstChoice, message: { role: 'assistant', tool_calls: [diagnosticCall] },
+    }] })],
+    ['EMPTY_ASSISTANT_MESSAGE', () => Response.json(toolCompletion([]))],
+    ['INVALID_TOOL_CALL', () => Response.json(toolCompletion([{ ...diagnosticCall, type: fakeKey }]))],
+    ['INVALID_TOOL_ARGUMENT_FIELD', () => Response.json(toolCompletion([{
+      ...diagnosticCall, function: { ...diagnosticCall.function, arguments: { private: fakeKey } },
+    }]))],
+    ['DUPLICATE_TOOL_CALL_IDS', () => Response.json(toolCompletion([diagnosticCall, diagnosticCall]))],
+    ['INVALID_USAGE', () => Response.json({ ...valid, usage: { ...usage, total_tokens: null } })],
+    ['INVALID_PROVIDER_METADATA', () => Response.json({ ...valid, openrouter_metadata: { endpoints: [] } })],
+    ['ROUTING_SELECTION_UNVERIFIED', () => Response.json({ ...valid,
+      openrouter_metadata: routingMetadata(commercialModel, 'Azure', false) })],
+    ['ROUTING_PROVIDER_CONFLICT', () => Response.json({ ...valid,
+      openrouter_metadata: routingMetadata(commercialModel, 'azure') })],
+    ['ROUTING_MODEL_CONFLICT', () => Response.json({ ...valid, model: canonicalModel,
+      openrouter_metadata: routingMetadata() })],
+    ['ROUTING_ATTEMPT_CONFLICT', () => Response.json({ ...valid,
+      openrouter_metadata: routingMetadata(commercialModel, 'Azure', true, 2) })],
+  ] as const
+  for (const [category, post] of cases) {
+    await t.test(category, async (subtest) => {
+      const { run, bodies } = await fixture(subtest, { post })
+      const result = await run()
+      assert(result.status !== 'dry-run')
+      assert.equal(result.status, 'interrupted')
+      assert.equal(result.reason, 'INVALID_MODEL_RESPONSE')
+      assert.equal(result.responseValidationFailure, category)
+      assert.equal(result.returnedModel, undefined)
+      assert.equal(result.observedProvider, undefined)
+      assert.equal(result.executedTools, 0)
+      assert.equal(result.toolCalls, 0)
+      assert.equal(bodies.length, 1)
+      assert(!JSON.stringify(result).includes(fakeKey))
+    })
+  }
+})
+
+test('slug canônico coerente nos metadados chega à comparação literal e fica registrado', async (t) => {
+  const { run, bodies } = await fixture(t, { post: () => Response.json({
+    ...toolCompletion(), model: canonicalModel, openrouter_metadata: routingMetadata(canonicalModel),
+  }) })
+  const result = await run()
+  assert(result.status !== 'dry-run')
+  assert.equal(result.status, 'interrupted')
+  assert.equal(result.reason, 'MODEL_IDENTITY_MISMATCH')
+  assert.equal(result.returnedModel, canonicalModel)
+  assert.equal(result.observedProvider, 'Azure')
+  assert.equal(result.responseValidationFailure, undefined)
+  assert.equal(result.executedTools, 0)
+  assert.equal(bodies.length, 1)
+})
+
+test('provedor ausente tem falha própria mesmo com Azure selecionado nos metadados', async (t) => {
+  const { run, bodies } = await fixture(t, { post: () => Response.json({
+    ...toolCompletion(), provider: undefined, openrouter_metadata: routingMetadata(),
+  }) })
+  const result = await run()
+  assert(result.status !== 'dry-run')
+  assert.equal(result.status, 'interrupted')
+  assert.equal(result.reason, 'PROVIDER_UNVERIFIED')
+  assert.equal(result.returnedModel, commercialModel)
+  assert.equal(result.observedProvider, undefined)
+  assert.equal(result.responseValidationFailure, undefined)
+  assert.equal(result.executedTools, 0)
+  assert.equal(bodies.length, 1)
+})
+
+test('nome de ferramenta não ofertada tem código próprio', async (t) => {
+  const { run, bodies } = await fixture(t, { post: () => Response.json(toolCompletion([functionCall('unknown_tool', {})])) })
+  const result = await run()
+  assert(result.status !== 'dry-run')
+  assert.equal(result.reason, 'TOOL_CALLING_INCOMPATIBLE')
+  assert.equal(result.responseValidationFailure, undefined)
+  assert.equal(result.executedTools, 0)
+  assert.equal(bodies.length, 1)
+})
+
+test('JSON inválido ou argumentos fora do schema da ferramenta são rejeitados no orquestrador', async (t) => {
+  for (const args of ['{', '{"maxPrice":"inválido"}']) {
+    const invalidCall = { ...diagnosticCall, function: { ...diagnosticCall.function, arguments: args } }
+    const { run, bodies } = await fixture(t, { post: (ordinal, body) => {
+      if (ordinal === 1) return Response.json(toolCompletion([invalidCall]))
+      const messages = body.messages as { role: string; content: string }[]
+      const tool = messages.find((message) => message.role === 'tool')
+      assert(tool)
+      assert.equal(JSON.parse(tool.content).error.code, 'INVALID_ARGUMENTS')
+      return completion('Não encontrei uma opção adequada.')
+    } })
+    const result = await run()
+    assert(result.status !== 'dry-run')
+    assert.equal(result.status, 'completed', result.reason)
+    assert.equal(result.commercialStatus, 'failed')
+    assert.equal(result.toolCalls, 1)
+    assert.equal(result.executedTools, 0)
+    assert.equal(result.returnedModel, commercialModel)
+    assert.equal(result.responseValidationFailure, undefined)
+    assert.equal(bodies.length, 2)
+  }
 })
 
 test('timeout da comunicação e interrupção do operador terminam a rodada', async (t) => {

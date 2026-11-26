@@ -93,6 +93,7 @@ async function main() {
     }
     console.log({
       statusTecnico: result.status, motivoTecnico: result.reason,
+      ...(result.responseValidationFailure === undefined ? {} : { validacaoResposta: result.responseValidationFailure }),
       avaliacaoComercial: result.commercialStatus, motivosComerciais: result.commercialFailures,
       modeloSolicitado: result.requestedModel, modeloRetornado: result.returnedModel ?? unknown,
       rotaSolicitada: result.requestedProvider, provedorObservado: result.observedProvider ?? unknown,

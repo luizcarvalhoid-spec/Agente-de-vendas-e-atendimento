@@ -77,6 +77,63 @@ retornam código 1. O custo local é estimado. A cobrança efetiva fica
 pendente de conciliação no painel da OpenRouter. O único arquivo persistido
 pelo CLI é o marcador de uso único.
 
+## Diagnóstico offline da R2
+
+A atividade da OpenRouter registrou Azure, HTTP upstream 200 e motivo
+normalizado `tool_calls` com motivo nativo `completed`. O CLI interrompeu
+na primeira tentativa com `INVALID_MODEL_RESPONSE`, sem ferramenta
+executada e sem identidade retornada. A observação do modelo só ocorre
+depois de o cliente validar o corpo e os metadados. Assim, o primeiro
+bloqueio mais provável está nessa etapa. O registro de atividade não
+permite identificar qual validação falhou.
+
+| Etapa | Falha observável |
+| --- | --- |
+| Corpo HTTP com sucesso | Excesso de bytes ou falha de leitura como JSON produzem `INVALID_MODEL_RESPONSE`. Se o JSON falhar com mídia SSE, o diagnóstico indica `UNEXPECTED_EVENT_STREAM`. |
+| Envelope Chat Completions | ID, modelo, data, escolhas, mensagem, uso informado e metadados são validados. Ausência da escolha de índice zero ou de texto e ferramentas também é rejeitada. `content: null` com ferramentas válidas é aceito. |
+| Estrutura das ferramentas | Tipo, ID, nome, quantidade e campo de argumentos são validados. IDs duplicados falham. Uma função não ofertada produz `TOOL_CALLING_INCOMPATIBLE`. |
+| Argumentos da ferramenta | O cliente exige uma string dentro do limite. O orquestrador interpreta a string como JSON e valida o schema da função. JSON interno inválido ou dados incompatíveis produzem `INVALID_ARGUMENTS` como resultado da ferramenta, com execução bloqueada. |
+| Metadados de roteamento | Quando a lista de endpoints está presente, exige uma única seleção e consistência literal com o provedor e o modelo retornados quando comparáveis. A tentativa informada deve ser 1. |
+| Identidade após validação | O adaptador registra a observação antes de rejeitar uma divergência de identidade. A rodada comercial reporta `MODEL_IDENTITY_MISMATCH` ou `PROVIDER_UNVERIFIED` para uma resposta estruturalmente válida com essas divergências. |
+| Orquestrador | Uma mensagem final sem texto, se chegar de outro adaptador, ou uma exceção inesperada ao processar uma chamada também pode terminar em `INVALID_MODEL_RESPONSE`. Lotes inválidos e limites têm motivos próprios. |
+
+`validacaoResposta` informa somente a primeira categoria de validação
+observada pelo cliente. O campo não inclui valores recebidos, caminhos ou
+mensagens do validador.
+
+O catálogo público relaciona o ID solicitado `openai/gpt-6-luna` ao
+`canonical_slug` `openai/gpt-6-luna-20260922`. Isso comprova a relação no
+catálogo. O valor de `model` no JSON entregue ao cliente segue
+desconhecido. As fixtures reproduzem dois casos. Metadados de seleção e
+resposta com slugs diferentes falham antes da observação. Um slug
+canônico coerente nos metadados chega à comparação literal do adaptador e
+gera `MODEL_IDENTITY_MISMATCH`, com a identidade observada.
+[Metadados públicos do modelo](https://openrouter.ai/api/v1/model/openai/gpt-6-luna)
+
+O POST inclui `stream: false`, conferido nas fixtures. A OpenRouter
+documenta `stream` no pedido de Chat Completions e `streamed` nos metadados
+da geração, sem esclarecer se esse segundo campo distingue o trecho
+upstream da entrega ao cliente. Os metadados da R2 não comprovam que o
+cliente recebeu SSE. Um fluxo upstream agregado em JSON e uma entrega
+inesperada de SSE permanecem hipóteses. A fixture JSON com `streamed: true`
+continua válida. A fixture SSE é rejeitada.
+[Chat Completions](https://openrouter.ai/docs/api/api-reference/chat/create-a-chat-completion) ·
+[Metadados da geração](https://openrouter.ai/docs/api/api-reference/generations/get-generation) ·
+[Contrato de ferramentas](https://openrouter.ai/docs/guides/features/tool-calling)
+
+Reproduza as verificações em `Backend` com transporte em memória.
+
+```sh
+node --import tsx --test test/openrouter-commercial-experiment.test.ts test/openrouter-client.test.ts test/tool-orchestrator.test.ts test/openai-direct.test.ts
+```
+
+Antes de autorizar outra rodada, revisar a categoria mais provável com
+evidência sanitizada sobre o tipo de mídia e a consistência dos campos de
+roteamento. Se a divergência de slugs for confirmada, validar uma regra
+restrita ao par de IDs comprovado com as mesmas exigências de Azure, ZDR
+e ausência de fallback. Os marcadores consumidos da R1 e R2 devem ser
+preservados.
+
 O caminho é um experimento por usuário local. A autorização digitada e
 a declaração de privacidade são responsabilização do operador. O canário
 operacional continua com seu próprio gate Ed25519 e isolamento.

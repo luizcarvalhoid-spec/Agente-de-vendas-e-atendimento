@@ -10,6 +10,7 @@ import type {
   AgentToolCall,
 } from '../src/agent/agent-model-port.js'
 import { AgentModelError } from '../src/agent/agent-model-port.js'
+import type { StoreResponseProfile } from '../src/agent/chat-response-composer.js'
 import {
   ChatServiceError,
   createChatService,
@@ -30,6 +31,11 @@ import {
 } from '../src/contracts/chat.js'
 import { loadFaqDocuments } from '../src/knowledge/faq-content-loader.js'
 import { createFaqSearchIndex, type FaqSearchIndex } from '../src/knowledge/faq-search.js'
+import {
+  papelariaFaqDocuments,
+  papelariaProduct,
+  papelariaResponseProfile,
+} from './fixtures/papelaria-response-profile.js'
 
 const backendRoot = dirname(dirname(fileURLToPath(import.meta.url)))
 const catalogRoot = join(backendRoot, 'content', 'catalog')
@@ -100,6 +106,7 @@ async function buildService(
     catalog?: CatalogRepository
     faqIndex?: FaqSearchIndex
     faqDocuments?: Awaited<ReturnType<typeof loadFaqDocuments>>
+    responseProfile?: StoreResponseProfile
     timeoutMs?: number
   } = {},
 ) {
@@ -111,6 +118,7 @@ async function buildService(
     faqIndex: overrides.faqIndex ?? base.faqIndex,
     faqDocuments: overrides.faqDocuments ?? base.faqDocuments,
     model,
+    responseProfile: overrides.responseProfile,
     timeoutMs: overrides.timeoutMs,
   })
 }
@@ -1137,6 +1145,96 @@ test('contextual quote revalidates removal, stock, price and required FAQ source
   })
 })
 
+test('the injected store profile drives an early quote and the existing comparison flow', async () => {
+  const { catalog: base } = await canonical()
+  const first = base.findById(9)
+  const second = base.findById(13)
+  assert.ok(first && second)
+  const products = [
+    papelariaProduct(first, 'Caderno pautado', 79.99),
+    papelariaProduct(second, 'Caderno pontilhado', 80),
+  ]
+  const catalog: CatalogRepository = {
+    ...base,
+    listAll: () => products,
+    findById: (id) => products.find((product) => product.id === id),
+  }
+  const service = await buildService(
+    createQueueModel([
+      (input) => {
+        const policy = input.messages[0]
+        assert.equal(policy?.role, 'system')
+        assert.match(policy?.content ?? '', /Papelaria Horizonte/)
+        assert.doesNotMatch(policy?.content ?? '', /HidraSplash|couro cabeludo/)
+        return assistant(null, [
+          toolCall('details-9', 'get_product_details', { productId: 9 }),
+          toolCall('details-13', 'get_product_details', { productId: 13 }),
+        ])
+      },
+      assistant('Preço inventado, frete e compra garantidos.'),
+    ]),
+    {
+      catalog,
+      faqDocuments: papelariaFaqDocuments,
+      faqIndex: createFaqSearchIndex(papelariaFaqDocuments),
+      responseProfile: papelariaResponseProfile,
+    },
+  )
+  const quote = await execute(service, {
+    message: 'Quanto fica o total do produto 9 com frete?',
+  })
+  assert.equal(quote.type, 'text')
+  assert.deepEqual(quote.sourceIds, ['faq-701', 'faq-702'])
+  assert.match(quote.message, /Papelaria Horizonte.*R\$ 8,50.*R\$ 88,49/)
+
+  const comparison = await execute(service, { message: 'Compare os produtos 9 e 13.' })
+  assert.equal(comparison.type, 'comparison')
+  if (comparison.type === 'comparison') assert.deepEqual(comparison.productIds, [9, 13])
+  assert.match(comparison.message, /Caderno pautado.*R\$ 79,99.*Caderno pontilhado.*R\$ 80,00/)
+  for (const response of [quote, comparison]) {
+    assert.doesNotMatch(response.message, /HidraSplash|clínic|cosmétic|R\$ 12,90|preço inventado/i)
+  }
+})
+
+test('early quotes distinguish conflicting references from true absence without calling the model', async (t) => {
+  const [free, standard] = papelariaFaqDocuments
+  const standardConflict = { ...standard, content: 'A política de frete padrão mudou na demonstração.' }
+  const duplicateStandard = [free, standard, standardConflict]
+  for (const [label, price, faqDocuments, succeeds] of [
+    ['standard duplicate below the threshold', 79.99, duplicateStandard, false],
+    ['standard duplicate at the inclusive threshold', 80, duplicateStandard, false],
+    ['standard duplicate above the threshold', 80.01, duplicateStandard, false],
+    ['free shipping duplicate', 80, [free, { ...free, content: 'A política de gratuidade mudou.' }, standard], false],
+    ['third occurrence cannot reauthorize the ID', 80, [...duplicateStandard, standard], false],
+    ['standard FAQ absent for a free quote', 80, [free], true],
+  ] as const) {
+    await t.test(label, async () => {
+      const catalog = await catalogWithProduct13((product) => papelariaProduct(product, 'Caderno', price))
+      let modelCalls = 0
+      const service = await buildService(neverCalledModel(() => modelCalls += 1), {
+        catalog,
+        responseProfile: papelariaResponseProfile,
+        faqDocuments,
+      })
+      const response = await execute(service, {
+        message: 'Quanto fica o total do produto 13 com frete?',
+      })
+      assert.equal(modelCalls, 0)
+      assert.equal(response.type, 'text')
+      if (response.type !== 'text') return
+      if (succeeds) {
+        assert.match(response.message, /seria grátis.*total ficaria em R\$ 80,00/)
+        assert.deepEqual(response.sourceIds, ['faq-701'])
+        assert.equal(response.reason, undefined)
+      } else {
+        assert.equal(response.reason, 'unable_to_verify')
+        assert.deepEqual(response.sourceIds, [])
+        assert.doesNotMatch(response.message, /R\$|grátis/)
+      }
+    })
+  }
+})
+
 test('changing category does not inherit incompatible scalp or sensory preferences', async () => {
   const service = await buildService(
     createQueueModel([
@@ -1404,6 +1502,116 @@ test('FAQ found returns canonical content and source IDs', async () => {
   assert.equal(response.type, 'text')
   assert.ok(response.sourceIds.length > 0)
   assert.equal(response.message.includes('inventado'), false)
+})
+
+test('ChatService exposes only verified FAQ citations across commercial responses', async (t) => {
+  const { faqDocuments: canonicalDocuments } = await canonical()
+  const shipping = canonicalDocuments.find(({ sourceId }) => sourceId === 'faq-002')
+  const delivery = canonicalDocuments.find(({ sourceId }) => sourceId === 'faq-004')
+  assert.ok(shipping && delivery)
+  const conflictedDocuments = [
+    ...canonicalDocuments,
+    { ...shipping, content: `${shipping.content} Frete grátis para qualquer pedido.` },
+  ]
+  const faqCall = toolCall('faq', 'search_faq', { query: 'frete grátis ou prazo de entrega' })
+  const details = (productId: number) =>
+    toolCall(`details-${productId}`, 'get_product_details', { productId })
+  for (const example of [
+    {
+      label: 'FAQ only with no verified source',
+      message: 'Como funciona o frete grátis?',
+      calls: [faqCall],
+      sources: [shipping],
+      responseType: 'text',
+      reason: 'unable_to_verify',
+    },
+    {
+      label: 'FAQ only with independently verified delivery',
+      message: 'Qual é o prazo de entrega e como funciona o frete grátis?',
+      calls: [faqCall],
+      sources: [shipping, delivery],
+      responseType: 'text',
+    },
+    {
+      label: 'product information plus a policy',
+      message: 'Qual é o estoque do produto 13 e qual é o prazo de entrega e a regra de frete grátis?',
+      calls: [details(13), faqCall],
+      sources: [shipping, delivery],
+      responseType: 'text',
+      expectedText: /14 unidade/,
+    },
+    {
+      label: 'product information with no verified policy',
+      message: 'Qual é o estoque do produto 13 e como funciona o frete grátis?',
+      calls: [details(13), faqCall],
+      sources: [shipping],
+      responseType: 'text',
+      reason: 'unable_to_verify',
+      expectedText: /14 unidade/,
+    },
+    {
+      label: 'recommendation plus a policy',
+      message: 'Quero shampoo anticaspa para couro oleoso, com frescor, até R$ 50, e saber o prazo de entrega e a regra de frete grátis.',
+      calls: [anticaspaSearch(50), faqCall],
+      sources: [shipping, delivery],
+      responseType: 'recommendation',
+      productIds: [13],
+    },
+    {
+      label: 'comparison plus a policy',
+      message: 'Compare os produtos 9 e 13 e diga o prazo de entrega e se há frete grátis.',
+      calls: [details(9), details(13), faqCall],
+      sources: [shipping, delivery],
+      responseType: 'comparison',
+      productIds: [9, 13],
+    },
+    {
+      label: 'no eligible product with an independently verified policy',
+      message: 'Quero shampoo anticaspa até R$ 1 e saber o prazo de entrega e a regra de frete grátis.',
+      calls: [anticaspaSearch(1), faqCall],
+      sources: [shipping, delivery],
+      responseType: 'text',
+      reason: 'not_found',
+      expectedText: /não encontrei um produto elegível/i,
+    },
+    {
+      label: 'no eligible product and no verified policy',
+      message: 'Quero shampoo anticaspa até R$ 1 e saber como funciona o frete grátis.',
+      calls: [anticaspaSearch(1), faqCall],
+      sources: [shipping],
+      responseType: 'text',
+      reason: 'unable_to_verify',
+      expectedText: /não encontrei um produto elegível/i,
+    },
+  ] as const) {
+    await t.test(example.label, async () => {
+      const faqIndex: FaqSearchIndex = {
+        size: example.sources.length,
+        searchFaq: () => example.sources.map((document) => ({ ...document, score: 1 })),
+      }
+      const service = await buildService(
+        createQueueModel([
+          assistant(null, example.calls),
+          assistant('Frete grátis para qualquer pedido.'),
+        ]),
+        { faqIndex, faqDocuments: conflictedDocuments },
+      )
+      const response = await execute(service, { message: example.message })
+      assert.equal(response.type, example.responseType)
+      assert.deepEqual(response.sourceIds, example.sources.includes(delivery) ? ['faq-004'] : [])
+      assert.match(response.message, /não consegui verificar a política de frete/i)
+      assert.doesNotMatch(response.message, /R\$ 100,00|R\$ 12,90|grátis para qualquer pedido/i)
+      if (example.sources.includes(delivery)) assert.match(response.message, /4 a 8 dias úteis/)
+      if ('expectedText' in example && example.expectedText) {
+        assert.match(response.message, example.expectedText)
+      }
+      if (response.type === 'text') {
+        assert.equal(response.reason, 'reason' in example ? example.reason : undefined)
+      } else if ('productIds' in example) {
+        assert.deepEqual(response.productIds, example.productIds)
+      }
+    })
+  }
 })
 
 test('FAQ not_found returns an honest controlled absence', async () => {

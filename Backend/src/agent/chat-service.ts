@@ -7,12 +7,8 @@ import type {
   ProductSubcategory,
   ScalpType,
 } from '../catalog/product-schema.js'
+import { priceToCents } from '../commercial/demo-commercial-rules.js'
 import {
-  calculateDemoCommercialTotals,
-  demoPriceToCents,
-} from '../commercial/demo-commercial-rules.js'
-import {
-  CHAT_MAX_SOURCES,
   chatProductCardSchema,
   chatRequestSchema,
   chatResponseSchema,
@@ -25,10 +21,13 @@ import type { FaqDocument } from '../knowledge/faq-document-schema.js'
 import type { FaqSearchIndex } from '../knowledge/faq-search.js'
 import type { AgentMessage, AgentModelPort } from './agent-model-port.js'
 import {
-  composeComparisonMessage,
-  composeFaqAnswer,
-  composeRecommendationMessage,
+  createChatResponseComposer,
+  formatCommercialCents,
+  type FaqComposition,
+  type StoreResponseProfile,
 } from './chat-response-composer.js'
+import { createConsultativeSystemInstruction } from './consultative-agent-policy.js'
+import { hidrasplashResponseProfile } from './hidrasplash-response-profile.js'
 import {
   createBudgetedAgentModel,
   type UsageBudgetExecution,
@@ -96,10 +95,13 @@ export interface CreateChatServiceOptions {
   readonly faqIndex: FaqSearchIndex
   readonly faqDocuments: readonly FaqDocument[]
   readonly model: AgentModelPort
+  readonly responseProfile?: StoreResponseProfile
   readonly timeoutMs?: number
   readonly maxModelCalls?: number
   readonly maxOutputTokens?: number
 }
+
+type ResponseComposer = ReturnType<typeof createChatResponseComposer>
 
 interface EffectiveCommercialContext {
   constraints: ProductEligibilityConstraints
@@ -609,49 +611,6 @@ function createConversation(
   ]
 }
 
-function clinicalSafetyResponse(
-  request: ChatRequest,
-  requestId: string,
-): ChatResponse | undefined {
-  const normalized = normalize(request.message)
-  const adverseReaction =
-    /\b(?:reac(?:ao|oes)|dores?|doendo|ardor|ardendo|inch(?:aco|acos|ado|ada|ados|adas)|feridas?|sangramento|sangrando|secrec(?:ao|oes)|sintomas? intensos?|piorando|piora)\b/.test(
-      normalized,
-    )
-  const productContext = normalize(
-    [...historicalUserMessages(request), request.message].join(' '),
-  )
-  const unsupportedGuarantee =
-    /\b(?:shampoo|cosmetico|produto|pele|couro|cabelo|caspa|alergia|dermatolog)/.test(
-      productContext,
-    ) &&
-    /\b(?:garant(?:e|ia|ido|ida)|curar|cura|segur(?:o|a|os|as)|seguranca dermatologica|hipoalergen(?:ico|ica)|sem alergia|nao causa alergia|eficacia terapeutica)\b/.test(
-      normalized,
-    )
-
-  if (adverseReaction) {
-    return chatResponseSchema.parse({
-      type: 'text',
-      message:
-        'Não posso diagnosticar essa reação nem indicar outro cosmético como solução. Diante de dor, inchaço, ardor, feridas, sangramento, secreção ou sintomas intensos, persistentes ou em piora, procure um profissional de saúde externo.',
-      reason: 'unable_to_verify',
-      sourceIds: [],
-      requestId,
-    })
-  }
-  if (unsupportedGuarantee) {
-    return chatResponseSchema.parse({
-      type: 'text',
-      message:
-        'Não posso garantir cura, eficácia terapêutica, segurança dermatológica ou ausência de alergias. Os produtos e ingredientes desta demonstração têm posicionamento cosmético e formulação sintética de teste, sem avaliação clínica.',
-      reason: 'unable_to_verify',
-      sourceIds: [],
-      requestId,
-    })
-  }
-  return undefined
-}
-
 function controlledConsultativeQuestion(
   message: string,
   requestId: string,
@@ -707,7 +666,7 @@ function requestsMultipleQuoteUnits(message: string) {
   )
 }
 
-function isDemonstrativeQuoteIntent(message: string) {
+function isQuoteIntent(message: string) {
   const normalized = normalize(message)
   const asksTotal = /\b(?:total|valor final)\b/.test(normalized)
   const referencesRecommendation =
@@ -724,43 +683,17 @@ function isDemonstrativeQuoteIntent(message: string) {
   )
 }
 
-function formatDemoCurrency(cents: number) {
-  return `R$ ${(cents / 100).toFixed(2).replace('.', ',')}`
-}
-
-function hasCanonicalShippingPolicies(
-  faqDocuments: ReadonlyMap<string, FaqDocument>,
-  requiresStandardShipping: boolean,
-) {
-  const freeShipping = faqDocuments.get('faq-002')
-  if (
-    freeShipping?.classification !== 'fictional-demo' ||
-    !freeShipping.content.includes('maior que R$ 100,00') ||
-    !freeShipping.content.includes('R$ 100,00 exatos não recebe frete grátis')
-  ) {
-    return false
-  }
-  if (!requiresStandardShipping) return true
-
-  const standardShipping = faqDocuments.get('faq-003')
-  return Boolean(
-    standardShipping?.classification === 'fictional-demo' &&
-      standardShipping.content.includes('até R$ 100,00') &&
-      standardShipping.content.includes('R$ 12,90'),
-  )
-}
-
 function contextualQuoteResponse(
   request: ChatRequest,
   requestId: string,
   catalog: CatalogRepository,
-  faqDocuments: ReadonlyMap<string, FaqDocument>,
+  composer: ResponseComposer,
 ): ChatResponse | undefined {
-  if (!isDemonstrativeQuoteIntent(request.message)) return undefined
+  if (!isQuoteIntent(request.message)) return undefined
 
   if (requestsMultipleQuoteUnits(request.message)) {
     return controlledConsultativeQuestion(
-      'A cotação demonstrativa atual calcula uma unidade por vez. Informe um único produto para cotar uma unidade com frete.',
+      'A cotação calcula uma unidade por vez. Informe um único produto para cotar uma unidade com frete.',
       requestId,
     )
   }
@@ -768,7 +701,7 @@ function contextualQuoteResponse(
   const explicitIds = explicitInformationalProductIds(request.message)
   if (explicitIds.length > 1) {
     return controlledConsultativeQuestion(
-      'Qual dos produtos você quer usar nessa cotação demonstrativa? Informe um único ID de produto.',
+      'Qual dos produtos você quer usar nessa cotação? Informe um único ID de produto.',
       requestId,
     )
   }
@@ -787,7 +720,7 @@ function contextualQuoteResponse(
     (explicitId === undefined && contextualIds.length !== 1)
   ) {
     return controlledConsultativeQuestion(
-      'Qual produto você quer usar nessa cotação demonstrativa? Informe um único ID de produto.',
+      'Qual produto você quer usar nessa cotação? Informe um único ID de produto.',
       requestId,
     )
   }
@@ -799,63 +732,43 @@ function contextualQuoteResponse(
     return chatResponseSchema.parse({
       type: 'text',
       message:
-        'Não consegui revalidar esse produto com estoque no catálogo demonstrativo atual. Informe outro ID para uma nova cotação.',
+        'Não consegui revalidar esse produto com estoque no catálogo atual. Informe outro ID para uma nova cotação.',
       reason: 'not_found',
       sourceIds: [],
       requestId,
     })
   }
 
-  const unitPriceCents = demoPriceToCents(product.price)
-  if (unitPriceCents === undefined) {
+  if (priceToCents(product.price) === undefined) {
     return chatResponseSchema.parse({
       type: 'text',
       message:
-        'Não foi possível validar o preço atual desse produto para uma cotação demonstrativa.',
+        'Não foi possível validar o preço atual desse produto para uma cotação.',
       reason: 'unable_to_verify',
       sourceIds: [],
       requestId,
     })
   }
-  const totals = calculateDemoCommercialTotals([
-    { unitPriceCents, quantity: 1 },
-  ])
-  const requiredSourceIds =
-    totals.shippingCents === 0
-      ? ['faq-002']
-      : ['faq-002', 'faq-003']
-  if (
-    !hasCanonicalShippingPolicies(faqDocuments, totals.shippingCents !== 0)
-  ) {
+  const quote = composer.quote(product)
+  if (!quote) {
     return chatResponseSchema.parse({
       type: 'text',
-      message:
-        'Consegui validar o produto, mas não a política de frete necessária para calcular o total demonstrativo.',
+      message: 'Consegui validar o produto, mas não a política de frete necessária para calcular o total.',
       reason: 'unable_to_verify',
       sourceIds: [],
       requestId,
     })
   }
 
-  const shippingText =
-    totals.shippingCents === 0
-      ? 'o frete demonstrativo seria grátis'
-      : `o frete demonstrativo seria de ${formatDemoCurrency(totals.shippingCents)}`
-  return chatResponseSchema.parse({
-    type: 'text',
-    message: `Claro! ${product.name} custa ${formatDemoCurrency(unitPriceCents)} no catálogo atual. Para uma unidade, ${shippingText}, então o total demonstrativo ficaria em ${formatDemoCurrency(totals.totalCents)}. Esta é apenas uma simulação fictícia, sem compra, cobrança, reserva ou entrega real. O produto não foi adicionado ao carrinho.`,
-    sourceIds: requiredSourceIds,
-    requestId,
-  })
+  return chatResponseSchema.parse({ type: 'text', ...quote, requestId })
 }
 
 function controlledProductInformation(
   request: ChatRequest,
   result: ToolOrchestratorResult,
   catalog: CatalogRepository,
-  sourceIds: readonly string[],
-  requestId: string,
-): ChatResponse | undefined {
+  describeIngredients: NonNullable<StoreResponseProfile['presentation']>['describeIngredients'],
+): string | undefined {
   const normalized = normalize(request.message)
   const productId = explicitInformationalProductId(request.message)
   if (
@@ -867,60 +780,18 @@ function controlledProductInformation(
   const product = catalog.findById(productId)
   if (!product) return undefined
 
-  if (/\b(?:ingredientes?|formula|formulacao|composicao|contem|leva)\b/.test(normalized)) {
-    const ingredients = product.ingredients?.map((ingredient) => ingredient.name)
-    const description =
-      ingredients && ingredients.length > 0
-        ? `Os ingredientes demonstrativos registrados são: ${ingredients.join(', ')}.`
-        : 'Não há uma formulação individual publicada para este item demonstrativo.'
-    return chatResponseSchema.parse({
-      type: 'text',
-      message: `${product.name}: ${description} A formulação é sintética e não comprova segurança clínica, ausência de alergias ou adequação dermatológica.`,
-      sourceIds,
-      requestId,
-    })
+  if (
+    describeIngredients &&
+    /\b(?:ingredientes?|formula|formulacao|composicao|contem|leva)\b/.test(normalized)
+  ) {
+    return `${product.name}: ${describeIngredients(product)}`
   }
   if (/\b(?:preco|custa|valor|estoque|disponivel|disponibilidade)\b/.test(normalized)) {
-    return chatResponseSchema.parse({
-      type: 'text',
-      message: `${product.name}: preço demonstrativo canônico de R$ ${product.price.toFixed(2).replace('.', ',')} e estoque atual de ${product.stock} unidade(s).`,
-      sourceIds,
-      requestId,
-    })
+    const price = priceToCents(product.price)
+    if (price === undefined) return undefined
+    return `${product.name}: preço atual de ${formatCommercialCents(price)} e estoque atual de ${product.stock} unidade(s).`
   }
   return undefined
-}
-
-function resolveFaqSourceIds(
-  result: ToolOrchestratorResult,
-  faqDocuments: ReadonlyMap<string, FaqDocument>,
-) {
-  const resolved: string[] = []
-  for (const sourceId of result.faqSourceIds) {
-    if (
-      resolved.length >= CHAT_MAX_SOURCES ||
-      resolved.includes(sourceId) ||
-      !faqDocuments.has(sourceId)
-    ) {
-      continue
-    }
-    resolved.push(sourceId)
-  }
-  return resolved
-}
-
-function mixedFaqAnswer(
-  question: string,
-  plan: ChatGroundingPlan,
-  result: ToolOrchestratorResult,
-  sourceIds: readonly string[],
-  faqDocuments: ReadonlyMap<string, FaqDocument>,
-) {
-  if (plan.groundingRequirement !== 'both') return ''
-  if (result.grounding.faq === 'not_found') {
-    return 'A política solicitada não está documentada nesta demonstração.'
-  }
-  return composeFaqAnswer({ question, sourceIds, faqDocuments })
 }
 
 export function toProductCard(
@@ -1001,40 +872,32 @@ function handleNonCompleted(result: ToolOrchestratorResult): never {
 }
 
 function controlledTextResponse(
-  question: string,
   requestId: string,
   result: ToolOrchestratorResult,
   plan: ChatGroundingPlan,
-  faqDocuments: ReadonlyMap<string, FaqDocument>,
+  faqAnswer: FaqComposition | undefined,
   needsClarification: boolean,
 ): ChatResponse {
-  const sourceIds = resolveFaqSourceIds(result, faqDocuments)
-
   if (needsClarification) {
+    const mixedFaq = plan.groundingRequirement === 'both' ? faqAnswer : undefined
     return chatResponseSchema.parse({
       type: 'text',
-      message:
-        'Preciso confirmar a restrição comercial informada antes de selecionar um produto demonstrativo.',
+      message: `Preciso confirmar a restrição comercial informada antes de selecionar um produto.${mixedFaq ? ` Sobre a outra dúvida: ${mixedFaq.message}` : ''}`,
       reason: 'clarification',
-      sourceIds,
+      sourceIds: mixedFaq?.sourceIds ?? [],
       requestId,
     })
   }
   if (
     plan.groundingRequirement === 'both' &&
     result.grounding.product === 'not_found' &&
-    result.grounding.faq === 'found'
+    faqAnswer
   ) {
-    const faqAnswer = composeFaqAnswer({
-      question,
-      sourceIds,
-      faqDocuments,
-    })
     return chatResponseSchema.parse({
       type: 'text',
-      message: `Não encontrei um produto demonstrativo elegível para a solicitação.${faqAnswer ? ` Sobre a outra dúvida: ${faqAnswer}` : ''}`,
-      reason: 'not_found',
-      sourceIds,
+      message: `Não encontrei um produto elegível para a solicitação. Sobre a outra dúvida: ${faqAnswer.message}`,
+      reason: faqAnswer.status === 'unable_to_verify' ? 'unable_to_verify' : 'not_found',
+      sourceIds: faqAnswer.sourceIds,
       requestId,
     })
   }
@@ -1046,7 +909,7 @@ function controlledTextResponse(
     return chatResponseSchema.parse({
       type: 'text',
       message:
-        'Não encontrei um produto demonstrativo elegível nem uma política documentada para esta solicitação.',
+        'Não encontrei um produto elegível nem uma política documentada para esta solicitação.',
       reason: 'not_found',
       sourceIds: [],
       requestId,
@@ -1056,9 +919,9 @@ function controlledTextResponse(
     return chatResponseSchema.parse({
       type: 'text',
       message:
-        'Não encontrei produto ou política documentada que responda com segurança a esta solicitação demonstrativa.',
+        'Não encontrei produto ou política documentada que responda com segurança a esta solicitação.',
       reason: 'not_found',
-      sourceIds,
+      sourceIds: [],
       requestId,
     })
   }
@@ -1066,41 +929,35 @@ function controlledTextResponse(
     return chatResponseSchema.parse({
       type: 'text',
       message:
-        'Encontrei dados de produto, mas a política solicitada não está documentada nesta demonstração.',
+        'Encontrei dados de produto, mas a política solicitada não está documentada nas fontes disponíveis.',
       reason: 'not_found',
-      sourceIds,
+      sourceIds: [],
       requestId,
     })
   }
-  if (sourceIds.length > 0) {
-    const faqAnswer = composeFaqAnswer({
-      question,
-      sourceIds,
-      faqDocuments,
+  if (faqAnswer) {
+    return chatResponseSchema.parse({
+      type: 'text',
+      message: faqAnswer.message,
+      ...(faqAnswer.status === 'unable_to_verify' ? { reason: 'unable_to_verify' } : {}),
+      sourceIds: faqAnswer.sourceIds,
+      requestId,
     })
-    if (faqAnswer) {
-      return chatResponseSchema.parse({
-        type: 'text',
-        message: faqAnswer,
-        sourceIds,
-        requestId,
-      })
-    }
   }
   if (plan.groundingRequirement === 'not_required' && result.status === 'completed') {
     return chatResponseSchema.parse({
       type: 'text',
       message: result.message,
-      sourceIds,
+      sourceIds: [],
       requestId,
     })
   }
   return chatResponseSchema.parse({
     type: 'text',
     message:
-      'Consultei os dados demonstrativos, mas não houve uma seleção inequívoca para exibir cartões. Posso refinar a busca com mais uma preferência.',
+      'Consultei os dados disponíveis, mas não houve uma seleção inequívoca para exibir cartões. Posso refinar a busca com mais uma preferência.',
     reason: 'clarification',
-    sourceIds,
+    sourceIds: [],
     requestId,
   })
 }
@@ -1108,9 +965,14 @@ function controlledTextResponse(
 export function createChatService(
   options: CreateChatServiceOptions,
 ): ChatService {
-  const faqDocuments = new Map(
-    options.faqDocuments.map((document) => [document.sourceId, document]),
-  )
+  const profile = options.responseProfile === undefined
+    ? hidrasplashResponseProfile
+    : options.responseProfile
+  const systemInstruction = createConsultativeSystemInstruction({
+    storeName: profile?.storeName,
+    domainInstructions: profile?.domainInstructions,
+  })
+  const composer = createChatResponseComposer(profile, options.faqDocuments)
   const faqTool = createSearchFaqTool(options.faqIndex)
 
   return {
@@ -1139,19 +1001,28 @@ export function createChatService(
         }
       }
 
-      const clinicalResponse = clinicalSafetyResponse(
-        request,
-        execution.requestId,
+      const clinicalBoundary = profile.presentation?.clinicalBoundary?.(
+        request.message,
+        historicalUserMessages(request),
       )
-      if (clinicalResponse) {
-        return completeEarly(clinicalResponse, 'clinical_boundary')
+      if (clinicalBoundary) {
+        return completeEarly(
+          chatResponseSchema.parse({
+            type: 'text',
+            message: clinicalBoundary,
+            reason: 'unable_to_verify',
+            sourceIds: [],
+            requestId: execution.requestId,
+          }),
+          'clinical_boundary',
+        )
       }
 
       const quoteResponse = contextualQuoteResponse(
         request,
         execution.requestId,
         options.catalog,
-        faqDocuments,
+        composer,
       )
       if (quoteResponse) {
         return completeEarly(quoteResponse, 'contextual_quote')
@@ -1200,6 +1071,7 @@ export function createChatService(
       const orchestrator = createToolOrchestrator({
         model,
         tools: registry,
+        systemInstruction: () => systemInstruction,
         timeoutMs: options.timeoutMs,
         maxModelCalls: options.maxModelCalls,
         maxOutputTokens: options.maxOutputTokens,
@@ -1262,22 +1134,38 @@ export function createChatService(
         handleNonCompleted(result)
       }
 
-      const sourceIds = resolveFaqSourceIds(result, faqDocuments)
       if (consultationQuestion) {
         return controlledConsultativeQuestion(
           consultationQuestion,
           execution.requestId,
         )
       }
+      const faqAnswer = result.grounding.faq === 'found'
+        ? composer.faq(request.message, result.faqSourceIds)
+        : undefined
+      const mixedFaq = plan.groundingRequirement === 'both' ? faqAnswer : undefined
+      const mixedFaqText = mixedFaq?.message ?? (
+        plan.groundingRequirement === 'both' && result.grounding.faq === 'not_found'
+          ? 'A política solicitada não está documentada nas fontes disponíveis.'
+          : ''
+      )
+      const mixedSourceIds = mixedFaq?.sourceIds ?? []
       if (plan.presentationIntent === 'text') {
         const productInformation = controlledProductInformation(
           request,
           result,
           options.catalog,
-          sourceIds,
-          execution.requestId,
+          profile.presentation?.describeIngredients,
         )
-        if (productInformation) return productInformation
+        if (productInformation) {
+          return chatResponseSchema.parse({
+            type: 'text',
+            message: mixedFaqText ? `${productInformation}\n\n${mixedFaqText}` : productInformation,
+            ...(mixedFaq?.status === 'unable_to_verify' ? { reason: 'unable_to_verify' } : {}),
+            sourceIds: mixedSourceIds,
+            requestId: execution.requestId,
+          })
+        }
       }
 
       const authorizedIds = new Set(result.recommendationProductIds)
@@ -1334,40 +1222,31 @@ export function createChatService(
         return card ? [{ product, card }] : []
       })
       const products = selectedProducts.map(({ card }) => card)
-      const faqAnswer = mixedFaqAnswer(
-        request.message,
-        plan,
-        result,
-        sourceIds,
-        faqDocuments,
-      )
-
       if (selectedIds.length === 1 && products.length === 1) {
         const product = products[0]
         const canonicalProduct = selectedProducts[0]?.product
         if (!canonicalProduct) {
           return controlledTextResponse(
-            request.message,
             execution.requestId,
             result,
             plan,
-            faqDocuments,
+            faqAnswer,
             commercial.needsClarification,
           )
         }
         return chatResponseSchema.parse({
           type: 'recommendation',
-          message: composeRecommendationMessage(
+          message: composer.recommendation(
             canonicalProduct,
             {
               searchInput: commercial.searchInput,
               sensoryTerms: commercial.sensoryTerms,
             },
-            faqAnswer,
+            mixedFaqText,
           ),
           productIds: [product?.id],
           products: [product],
-          sourceIds,
+          sourceIds: mixedSourceIds,
           requestId: execution.requestId,
         })
       }
@@ -1379,33 +1258,31 @@ export function createChatService(
         const canonicalProducts = selectedProducts.map(({ product }) => product)
         if (canonicalProducts.length !== 2) {
           return controlledTextResponse(
-            request.message,
             execution.requestId,
             result,
             plan,
-            faqDocuments,
+            faqAnswer,
             commercial.needsClarification,
           )
         }
         return chatResponseSchema.parse({
           type: 'comparison',
-          message: composeComparisonMessage(
+          message: composer.comparison(
             canonicalProducts as [Product, Product],
-            faqAnswer,
+            mixedFaqText,
           ),
           productIds: [products[0]?.id, products[1]?.id],
           products: [products[0], products[1]],
-          sourceIds,
+          sourceIds: mixedSourceIds,
           requestId: execution.requestId,
         })
       }
 
       return controlledTextResponse(
-        request.message,
         execution.requestId,
         result,
         plan,
-        faqDocuments,
+        faqAnswer,
         commercial.needsClarification,
       )
     },

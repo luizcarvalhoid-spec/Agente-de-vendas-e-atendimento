@@ -18,8 +18,8 @@ import { externalEvalWorstCaseCost, ExternalEvalCostController } from './externa
 
 export const commercialQuestion = 'Quero um shampoo anticaspa para couro cabeludo oleoso, com sensação refrescante, até R$ 50. Qual você recomenda?'
 export const commercialModel = 'openai/gpt-6-luna'
-export const commercialExperimentId = 'EVAL-07D.6-R2'
-export const commercialUseId = '070d6000000000000000000000000002'
+export const commercialExperimentId = 'EVAL-07D.6-R3'
+export const commercialUseId = '070d6000000000000000000000000003'
 export const commercialProvider = 'azure'
 const modelCatalogURL = `https://openrouter.ai/api/v1/models/${commercialModel}/endpoints`
 const zdrCatalogURL = 'https://openrouter.ai/api/v1/endpoints/zdr'

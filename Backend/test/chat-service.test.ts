@@ -17,6 +17,7 @@ import {
   type ChatService,
 } from '../src/agent/chat-service.js'
 import { planChatGrounding } from '../src/agent/chat-grounding-planner.js'
+import { hidrasplashCustomerDomain } from '../src/agent/hidrasplash-customer-needs.js'
 import { createProductSearchIndex } from '../src/agent/tools/product-tools.js'
 import { createUsageBudgetController } from '../src/agent/usage-budget-controller.js'
 import {
@@ -193,7 +194,7 @@ test('planner keeps conversation narrow and grounds indirect commercial intents'
 
   for (const [message, expected] of cases) {
     assert.equal(
-      planChatGrounding(parseRequest({ message })).groundingRequirement,
+      planChatGrounding(message, hidrasplashCustomerDomain.vocabulary).groundingRequirement,
       expected,
     )
   }
@@ -1338,6 +1339,19 @@ test('unknown ingredient restrictions are not ignored to manufacture cards', asy
   })
   assert.equal(response.type, 'text')
   if (response.type === 'text') assert.equal(response.reason, 'clarification')
+})
+
+test('a mandatory attribute that can only be ranked softly prevents a recommendation', async () => {
+  const service = await buildService(createQueueModel([
+    assistant(null, [anticaspaSearch(50)]),
+    assistant('Recomendo este produto de qualquer forma.'),
+  ]))
+  const response = await execute(service, {
+    message: 'Quero shampoo anticaspa para couro oleoso até R$ 50. Tem que ter fragrância cítrica.',
+  })
+  assert.equal(response.type, 'text')
+  if (response.type === 'text') assert.equal(response.reason, 'clarification')
+  assert.equal('products' in response, false)
 })
 
 test('unknown cart IDs are rejected before any model call', async () => {

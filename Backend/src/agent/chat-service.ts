@@ -1,18 +1,11 @@
 import type { CatalogRepository } from '../catalog/catalog-repository.js'
 import { toCatalogImageUrl } from '../catalog/catalog-repository.js'
-import type {
-  Product,
-  ProductCategory,
-  ProductConcern,
-  ProductSubcategory,
-  ScalpType,
-} from '../catalog/product-schema.js'
+import type { Product } from '../catalog/product-schema.js'
 import { priceToCents } from '../commercial/demo-commercial-rules.js'
 import {
   chatProductCardSchema,
   chatRequestSchema,
   chatResponseSchema,
-  type ChatPreferences,
   type ChatProductCard,
   type ChatRequest,
   type ChatResponse,
@@ -36,10 +29,19 @@ import {
   observeChatOperation,
   type ChatOperationalObserver,
 } from '../observability/chat-operational-events.js'
+import type { ChatGroundingPlan } from './chat-grounding-planner.js'
 import {
-  planChatGrounding,
-  type ChatGroundingPlan,
-} from './chat-grounding-planner.js'
+  explicitRejectedProductIds,
+  historicalUserMessages,
+  interpretCustomerNeeds,
+  normalize,
+} from './customer-needs.js'
+import {
+  consultativeQuestion,
+  hasSelectionDiscriminator,
+  hidrasplashCustomerDomain,
+  translateHidrasplashNeeds,
+} from './hidrasplash-customer-needs.js'
 import {
   createToolOrchestrator,
   type ToolOrchestratorResult,
@@ -52,9 +54,7 @@ import {
   createGetProductDetailsTool,
   createProductEligibilityPolicy,
   createSearchProductsTool,
-  type ProductEligibilityConstraints,
   type ProductSearchIndex,
-  type SearchProductsInput,
 } from './tools/product-tools.js'
 import { createSearchFaqTool } from './tools/search-faq-tool.js'
 
@@ -103,463 +103,7 @@ export interface CreateChatServiceOptions {
 
 type ResponseComposer = ReturnType<typeof createChatResponseComposer>
 
-interface EffectiveCommercialContext {
-  constraints: ProductEligibilityConstraints
-  searchInput: SearchProductsInput
-  sensoryTerms: readonly string[]
-  rejectedProductIds: ReadonlySet<number>
-  needsClarification: boolean
-  cart: readonly { productId: number; quantity: number }[]
-}
-
-function normalize(value: string) {
-  return value
-    .normalize('NFKD')
-    .replace(/\p{Diacritic}/gu, '')
-    .toLocaleLowerCase('pt-BR')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
-function extractBudget(value: string) {
-  const normalized = normalize(value)
-  const patterns = [
-    /\bate\s+(?:r\$\s*)?(\d{1,6}(?:[.,]\d{1,2})?)/g,
-    /\bno maximo\s+(?:r\$\s*)?(\d{1,6}(?:[.,]\d{1,2})?)/g,
-    /\borcamento(?: de)?\s+(?:r\$\s*)?(\d{1,6}(?:[.,]\d{1,2})?)/g,
-    /\blimite(?: agora)?(?: e| de)?\s+(?:r\$\s*)?(\d{1,6}(?:[.,]\d{1,2})?)/g,
-  ]
-  const values: number[] = []
-  for (const pattern of patterns) {
-    for (const match of normalized.matchAll(pattern)) {
-      const parsed = Number(match[1]?.replace(',', '.'))
-      if (Number.isFinite(parsed) && parsed >= 0 && !values.includes(parsed)) {
-        values.push(parsed)
-      }
-    }
-  }
-  return values.length === 1
-    ? { value: values[0], ambiguous: false }
-    : { value: undefined, ambiguous: values.length > 1 }
-}
-
-function latestHistoricalBudget(request: ChatRequest) {
-  for (let index = request.history.length - 1; index >= 0; index -= 1) {
-    const message = request.history[index]
-    if (message?.role !== 'user') continue
-    const budget = extractBudget(message.content)
-    if (budget.value !== undefined) return budget.value
-  }
-  return undefined
-}
-
-function historicalUserMessages(request: ChatRequest) {
-  return request.history
-    .filter((message) => message.role === 'user')
-    .map((message) => message.content)
-}
-
-function latestHistoricalValue<T>(
-  request: ChatRequest,
-  infer: (message: string) => T | undefined,
-) {
-  const messages = historicalUserMessages(request)
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const value = infer(messages[index] ?? '')
-    if (value !== undefined) return value
-  }
-  return undefined
-}
-
-function inferCategory(message: string): ProductCategory | undefined {
-  const normalized = normalize(message)
-  if (/\b(?:shampoo|anticaspa)\b/.test(normalized)) return 'shampoos'
-  if (/\bcondicionador\b/.test(normalized)) return 'condicionadores'
-  if (/\bmascara\b/.test(normalized)) return 'mascaras'
-  if (/\bfinalizador\b/.test(normalized)) return 'finalizadores'
-  if (/\bsabonete\b/.test(normalized)) return 'sabonetes'
-  if (/\boleo corporal\b/.test(normalized)) return 'oleos-corporais'
-  return undefined
-}
-
-function inferSubcategory(message: string): ProductSubcategory | undefined {
-  const normalized = normalize(message)
-  if (/\banticaspa\b/.test(normalized)) return 'anticaspa'
-  if (/\bantiqueda\b/.test(normalized)) return 'antiqueda'
-  if (/\bantirresiduos\b/.test(normalized)) return 'antirresiduos'
-  if (/\bhidratacao\b/.test(normalized)) return 'hidratacao'
-  if (/\bnutricao\b/.test(normalized)) return 'nutricao'
-  return undefined
-}
-
-function relevantHistoricalProductMessages(request: ChatRequest) {
-  const messages = historicalUserMessages(request)
-  let start = 0
-  let category: ProductCategory | undefined
-  let subcategory: ProductSubcategory | undefined
-  for (let index = 0; index < messages.length; index += 1) {
-    const message = messages[index] ?? ''
-    const nextCategory = inferCategory(message)
-    const nextSubcategory = inferSubcategory(message)
-    if (
-      (nextCategory !== undefined &&
-        category !== undefined &&
-        nextCategory !== category) ||
-      (nextSubcategory !== undefined &&
-        subcategory !== undefined &&
-        nextSubcategory !== subcategory)
-    ) {
-      start = index
-    }
-    category = nextCategory ?? category
-    subcategory = nextSubcategory ?? subcategory
-  }
-  return messages.slice(start)
-}
-
-function latestRelevantHistoricalValue<T>(
-  request: ChatRequest,
-  infer: (message: string) => T | undefined,
-) {
-  const messages = relevantHistoricalProductMessages(request)
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const value = infer(messages[index] ?? '')
-    if (value !== undefined) return value
-  }
-  return undefined
-}
-
-function inferScalpTypes(message: string): readonly ScalpType[] | undefined {
-  const normalized = normalize(message)
-  const types: ScalpType[] = []
-  if (/\bcouro(?: cabeludo)? oleoso\b/.test(normalized)) types.push('oleoso')
-  if (/\bcouro(?: cabeludo)? seco\b/.test(normalized)) types.push('seco')
-  if (/\bcouro(?: cabeludo)? normal\b/.test(normalized)) types.push('normal')
-  if (/\bcouro(?: cabeludo)? sensivel\b/.test(normalized)) types.push('sensivel')
-  return types.length > 0 ? types : undefined
-}
-
-function inferEllipticalScalpTypes(
-  message: string,
-  hasSafeScalpContext: boolean,
-): readonly ScalpType[] | undefined {
-  if (!hasSafeScalpContext) return undefined
-  const match = normalize(message).match(
-    /^(?:e|eh|meu couro e|meu couro eh)\s+(oleoso|seco|normal|sensivel)\b/,
-  )
-  return match?.[1] ? [match[1] as ScalpType] : undefined
-}
-
-function latestHistoricalScalpTypes(request: ChatRequest) {
-  let hasSafeScalpContext = false
-  let latest: readonly ScalpType[] | undefined
-  for (const message of relevantHistoricalProductMessages(request)) {
-    hasSafeScalpContext ||=
-      inferSubcategory(message) === 'anticaspa' ||
-      /\bcouro(?: cabeludo)?\b/.test(normalize(message))
-    latest =
-      inferScalpTypes(message) ??
-      inferEllipticalScalpTypes(message, hasSafeScalpContext) ??
-      latest
-  }
-  return latest
-}
-
-function inferHairConcerns(message: string): readonly ProductConcern[] | undefined {
-  const normalized = normalize(message)
-  const concerns: ProductConcern[] = []
-  if (/\b(?:caspa|anticaspa)\b/.test(normalized)) concerns.push('caspa')
-  if (/\b(?:oleosidade|oleoso)\b/.test(normalized)) concerns.push('oleosidade')
-  if (/\b(?:ressecamento|ressecado)\b/.test(normalized)) concerns.push('ressecamento')
-  if (/\b(?:sensibilidade|sensivel)\b/.test(normalized)) concerns.push('sensibilidade')
-  return concerns.length > 0 ? concerns : undefined
-}
-
-const sensoryTerms = [
-  'frescor',
-  'refrescante',
-  'citrico',
-  'herbal',
-  'suave',
-  'intenso',
-  'coco',
-  'camomila',
-  'aloe',
-  'hortela',
-  'limao',
-  'hidratante',
-  'confortavel',
-] as const
-
-function inferSensoryTerms(message: string): readonly string[] | undefined {
-  const normalized = normalize(message)
-  const found = sensoryTerms.filter((term) =>
-    new RegExp(`\\b${term}\\b`).test(normalized),
-  )
-  return found.length > 0 ? found : undefined
-}
-
-function extractAvoidedIngredientTerms(message: string) {
-  const normalized = normalize(message).replace(/[^a-z0-9 -]+/g, ' ')
-  const match = normalized.match(
-    /\b(?:nao quero|evitar|sem|incompativel com)\s+([a-z0-9-]+(?:\s+[a-z0-9-]+){0,3})\s*$/,
-  )
-  const term = match?.[1]
-  if (
-    !term ||
-    /^(?:o\s+)?produto\s+(?:id\s*)?\d{1,6}$/.test(term)
-  ) {
-    return []
-  }
-  return [term]
-}
-
-function resolveCommercialContext(
-  request: ChatRequest,
-  productIndex: ProductSearchIndex,
-): EffectiveCommercialContext {
-  const preferences: ChatPreferences = request.preferences ?? {}
-  const currentBudget = extractBudget(request.message)
-  const historicalBudget = latestHistoricalBudget(request)
-  const structuredBudget = preferences.maxPrice
-  const conflictingCurrentBudget =
-    structuredBudget !== undefined &&
-    currentBudget.value !== undefined &&
-    structuredBudget !== currentBudget.value
-  const maxPrice =
-    conflictingCurrentBudget
-      ? Math.min(structuredBudget, currentBudget.value ?? structuredBudget)
-      : structuredBudget ?? currentBudget.value ?? historicalBudget
-
-  const ingredientTerms = [
-    ...(preferences.avoidIngredients ?? []),
-    ...extractAvoidedIngredientTerms(request.message),
-  ]
-  const ingredientResolution = productIndex.resolveIngredientTerms(
-    [...new Set(ingredientTerms)],
-  )
-  const historicalCategory = latestHistoricalValue(request, inferCategory)
-  const historicalSubcategory = latestRelevantHistoricalValue(
-    request,
-    inferSubcategory,
-  )
-  const currentCategory = preferences.category ?? inferCategory(request.message)
-  const currentSubcategory =
-    preferences.subcategory ?? inferSubcategory(request.message)
-  const categoryChanged =
-    currentCategory !== undefined &&
-    historicalCategory !== undefined &&
-    currentCategory !== historicalCategory
-  const objectiveChanged =
-    currentSubcategory !== undefined &&
-    historicalSubcategory !== undefined &&
-    currentSubcategory !== historicalSubcategory
-  const productGoalChanged = categoryChanged || objectiveChanged
-  const category = currentCategory ?? historicalCategory
-  const subcategory =
-    currentSubcategory ?? (categoryChanged ? undefined : historicalSubcategory)
-
-  const historyHasSafeScalpContext =
-    historicalSubcategory === 'anticaspa' ||
-    relevantHistoricalProductMessages(request).some((message) =>
-      /\bcouro(?: cabeludo)?\b/.test(normalize(message)),
-    )
-  const currentScalpTypes =
-    inferScalpTypes(request.message) ??
-    inferEllipticalScalpTypes(request.message, historyHasSafeScalpContext)
-  const historicalScalpTypes = latestHistoricalScalpTypes(request)
-  const scalpTypes =
-    preferences.scalpTypes ??
-    currentScalpTypes ??
-    (productGoalChanged ? undefined : historicalScalpTypes)
-  const currentHairConcerns = inferHairConcerns(request.message)
-  const historicalHairConcerns = latestRelevantHistoricalValue(
-    request,
-    inferHairConcerns,
-  )
-  const hairConcerns =
-    preferences.hairConcerns ??
-    currentHairConcerns ??
-    (productGoalChanged ? undefined : historicalHairConcerns)
-  const currentSensoryTerms = inferSensoryTerms(request.message)
-  const historicalSensoryTerms = latestRelevantHistoricalValue(
-    request,
-    inferSensoryTerms,
-  )
-  const effectiveSensoryTerms =
-    currentSensoryTerms ??
-    (productGoalChanged ? undefined : historicalSensoryTerms) ??
-    []
-  const rejectedProductIds = explicitRejectedProductIds(request.message)
-  if (
-    /\b(?:outra opcao|outro produto|produto diferente|algo diferente|nao gostei|prefiro outra)\b/.test(
-      normalize(request.message),
-    )
-  ) {
-    for (const productId of request.recommendationContext?.productIds ?? []) {
-      rejectedProductIds.add(productId)
-    }
-  }
-
-  const constraints: ProductEligibilityConstraints = {
-    ...(category !== undefined ? { category } : {}),
-    ...(subcategory !== undefined ? { subcategory } : {}),
-    ...(maxPrice !== undefined ? { maxPrice } : {}),
-    requireInStock: true,
-    ...(ingredientResolution.resolvedIds.length > 0
-      ? { incompatibleIngredientIds: [...ingredientResolution.resolvedIds] }
-      : {}),
-  }
-
-  const searchInput: SearchProductsInput = {
-    query: [request.message, ...effectiveSensoryTerms].join(' '),
-    ...(category !== undefined ? { category } : {}),
-    ...(subcategory !== undefined ? { subcategory } : {}),
-    ...(maxPrice !== undefined ? { maxPrice } : {}),
-    requireInStock: true,
-    ...(preferences.hairTypes !== undefined
-      ? { hairTypes: preferences.hairTypes }
-      : {}),
-    ...(scalpTypes !== undefined ? { scalpTypes: [...scalpTypes] } : {}),
-    ...(hairConcerns !== undefined
-      ? { hairConcerns: [...hairConcerns] }
-      : {}),
-    ...(preferences.skinTypes !== undefined
-      ? { skinTypes: preferences.skinTypes }
-      : {}),
-    ...(preferences.bodyConcerns !== undefined
-      ? { bodyConcerns: preferences.bodyConcerns }
-      : {}),
-    ...(ingredientResolution.resolvedIds.length > 0
-      ? { incompatibleIngredientIds: [...ingredientResolution.resolvedIds] }
-      : {}),
-    limit: 5,
-  }
-
-  return {
-    constraints,
-    searchInput,
-    sensoryTerms: effectiveSensoryTerms,
-    rejectedProductIds,
-    needsClarification:
-      currentBudget.ambiguous ||
-      conflictingCurrentBudget ||
-      ingredientResolution.unresolvedTerms.length > 0,
-    cart: request.cart,
-  }
-}
-
-function hasSelectionDiscriminator(context: EffectiveCommercialContext) {
-  const input = context.searchInput
-  const normalized = normalize(input.query ?? '')
-  return (
-    input.hairTypes !== undefined ||
-    input.scalpTypes !== undefined ||
-    input.skinTypes !== undefined ||
-    input.bodyConcerns !== undefined ||
-    input.incompatibleIngredientIds !== undefined ||
-    /\b(?:frescor|refrescante|citrico|herbal|suave|intenso|coco|camomila|aloe|hortela|limao)\b/.test(
-      normalized,
-    )
-  )
-}
-
-function consultativeQuestion(
-  plan: ChatGroundingPlan,
-  context: EffectiveCommercialContext,
-) {
-  if (
-    plan.presentationIntent !== 'recommendation' ||
-    plan.groundingRequirement !== 'product' ||
-    context.needsClarification ||
-    hasSelectionDiscriminator(context)
-  ) {
-    return undefined
-  }
-  if (
-    context.searchInput.subcategory === 'anticaspa' ||
-    context.searchInput.hairConcerns?.includes('caspa')
-  ) {
-    return 'Seu couro cabeludo tende a ser seco, normal, oleoso ou sensível?'
-  }
-  return 'Qual preferência é mais importante para você nessa escolha: perfil de uso, sensação ou orçamento?'
-}
-
-function hasFaqTopic(message: string) {
-  const normalized = normalize(message)
-  return (
-    /\b(?:frete|envio|entreg(?:a|am|ar|ue)|transportadora|receber|prazo de entrega)\b/.test(
-      normalized,
-    ) ||
-    /\b(?:troca|trocar|devolucao|devolver|desistir|reembolso|estorno|danificado)\b/.test(
-      normalized,
-    ) ||
-    /\b(?:pagamento|forma de pagar|parcelamento|pix|cartao|boleto)\b/.test(
-      normalized,
-    ) ||
-    /\b(?:pedido|cancelar pedido|rastreamento|rastrear)\b/.test(normalized) ||
-    /\b(?:politica|privacidade|dados pessoais|atacado|fidelidade|embalagem para presente)\b/.test(
-      normalized,
-    )
-  )
-}
-
-function interruptsCommercialContinuity(message: string) {
-  const normalized = normalize(message)
-  return /\b(?:mudando de assunto|outro assunto|vamos falar de|agora sobre|nao quero mais|deixa pra la|deixe pra la|esquece|encerrar|encerra|cancelar essa busca|cancela essa busca)\b/.test(
-    normalized,
-  )
-}
-
-function isCommercialContinuation(message: string) {
-  const normalized = normalize(message)
-  if (interruptsCommercialContinuity(message)) return false
-  const budget = extractBudget(message)
-  return (
-    budget.value !== undefined ||
-    budget.ambiguous ||
-    inferSensoryTerms(message) !== undefined ||
-    inferScalpTypes(message) !== undefined ||
-    /^(?:e|eh)?\s*(?:oleoso|seco|normal|sensivel)\b/.test(normalized)
-  )
-}
-
-function hasHistoricalRecommendationIntent(request: ChatRequest) {
-  const previousUsers = request.history.filter(
-    (message) => message.role === 'user',
-  )
-  for (let index = previousUsers.length - 1; index >= 0; index -= 1) {
-    const content = previousUsers[index]?.content ?? ''
-    if (interruptsCommercialContinuity(content)) return false
-    const plan = planChatGrounding(chatRequestSchema.parse({ message: content }))
-    if (plan.presentationIntent === 'recommendation') return true
-    if (!isCommercialContinuation(content)) return false
-  }
-  return false
-}
-
-function preserveHistoricalRecommendationIntent(
-  request: ChatRequest,
-  currentPlan: ChatGroundingPlan,
-): ChatGroundingPlan {
-  if (
-    currentPlan.presentationIntent !== 'text' ||
-    currentPlan.groundingRequirement === 'not_required'
-  ) {
-    return currentPlan
-  }
-  if (!hasHistoricalRecommendationIntent(request)) {
-    return currentPlan
-  }
-  if (currentPlan.groundingRequirement === 'product') {
-    return { ...currentPlan, presentationIntent: 'recommendation' }
-  }
-  if (!isCommercialContinuation(request.message)) return currentPlan
-  return {
-    groundingRequirement: hasFaqTopic(request.message) ? 'both' : 'product',
-    presentationIntent: 'recommendation',
-  }
-}
+type EffectiveCommercialContext = ReturnType<typeof translateHidrasplashNeeds>
 
 function explicitComparisonIds(message: string, catalog: CatalogRepository) {
   const normalized = normalize(message)
@@ -597,8 +141,8 @@ function createConversation(
   context: EffectiveCommercialContext,
 ): AgentMessage[] {
   const trustedContext = {
-    preferences: {
-      ...context.searchInput,
+    preferences: context.toolPreferences && {
+      ...context.toolPreferences,
       query: undefined,
       limit: undefined,
     },
@@ -624,22 +168,6 @@ function controlledConsultativeQuestion(
   })
 }
 
-function explicitRejectedProductIds(message: string) {
-  const normalized = normalize(message)
-  const patterns = [
-    /\b(?:nao\s+(?:quero|considere|use)|sem)\s+(?:mais\s+)?(?:o\s+)?produto\s+(?:id\s*)?(\d{1,6})\b/g,
-    /\bnao\s+gostei\s+(?:mais\s+)?do\s+produto\s+(?:id\s*)?(\d{1,6})\b/g,
-    /\bnao\s+recomende\s+(?:mais\s+)?(?:o\s+)?produto\s+(?:id\s*)?(\d{1,6})\b/g,
-  ]
-  return new Set(
-    patterns.flatMap((pattern) =>
-      Array.from(normalized.matchAll(pattern), (match) => Number(match[1])).filter(
-        Number.isSafeInteger,
-      ),
-    ),
-  )
-}
-
 function explicitInformationalProductIds(message: string) {
   const normalized = normalize(message)
   const rejectedIds = explicitRejectedProductIds(normalized)
@@ -660,19 +188,20 @@ function explicitInformationalProductId(message: string) {
   return productIds.length === 1 ? productIds[0] : undefined
 }
 
-function requestsMultipleQuoteUnits(message: string) {
-  return /\b(?:[2-9]|[1-9]\d{1,5}|dois|duas|tres|quatro|cinco|seis|sete|oito|nove|dez)\s*(?:unidades?|frascos?|itens?)\b/.test(
-    normalize(message),
-  )
-}
+const quantityReference = new RegExp(
+  `\\b(?:[2-9]|[1-9]\\d{1,5}|dois|duas|tres|quatro|cinco|seis|sete|oito|nove|dez)\\s*(?:${hidrasplashCustomerDomain.quoteQuantityNouns})\\b`,
+)
+const recommendedProductReference = new RegExp(
+  `\\b(?:esse|essa|desse|dessa|deste|desta)\\s+(?:${hidrasplashCustomerDomain.quoteProductNouns})\\b.*\\b(?:recomendou|recomendado)\\b`,
+)
+const differentProductReference = new RegExp(
+  `\\b(?:outro|outra|(?:${hidrasplashCustomerDomain.quoteProductNouns}) diferente)\\b`,
+)
 
 function isQuoteIntent(message: string) {
   const normalized = normalize(message)
   const asksTotal = /\b(?:total|valor final)\b/.test(normalized)
-  const referencesRecommendation =
-    /\b(?:esse|essa|desse|dessa|deste|desta)\s+(?:produto|shampoo)\b.*\b(?:recomendou|recomendado)\b/.test(
-      normalized,
-    )
+  const referencesRecommendation = recommendedProductReference.test(normalized)
   return (
     (asksTotal && referencesRecommendation) ||
     (/\bfrete\b/.test(normalized) &&
@@ -691,7 +220,7 @@ function contextualQuoteResponse(
 ): ChatResponse | undefined {
   if (!isQuoteIntent(request.message)) return undefined
 
-  if (requestsMultipleQuoteUnits(request.message)) {
+  if (quantityReference.test(normalize(request.message))) {
     return controlledConsultativeQuestion(
       'A cotação calcula uma unidade por vez. Informe um único produto para cotar uma unidade com frete.',
       requestId,
@@ -712,9 +241,7 @@ function contextualQuoteResponse(
   )
   const rejectsPreviousReference =
     explicitId === undefined &&
-    /\b(?:outro|outra|produto diferente|shampoo diferente)\b/.test(
-      normalize(request.message),
-    )
+    differentProductReference.test(normalize(request.message))
   if (
     rejectsPreviousReference ||
     (explicitId === undefined && contextualIds.length !== 1)
@@ -782,7 +309,7 @@ function controlledProductInformation(
 
   if (
     describeIngredients &&
-    /\b(?:ingredientes?|formula|formulacao|composicao|contem|leva)\b/.test(normalized)
+    hidrasplashCustomerDomain.isFormulationQuestion(normalized)
   ) {
     return `${product.name}: ${describeIngredients(product)}`
   }
@@ -1028,11 +555,9 @@ export function createChatService(
         return completeEarly(quoteResponse, 'contextual_quote')
       }
 
-      const plan = preserveHistoricalRecommendationIntent(
-        request,
-        planChatGrounding(request),
-      )
-      const commercial = resolveCommercialContext(request, options.productIndex)
+      const needs = interpretCustomerNeeds(request, hidrasplashCustomerDomain)
+      const { plan } = needs
+      const commercial = translateHidrasplashNeeds(needs, request, options.productIndex)
       if (
         plan.presentationIntent === 'comparison' &&
         hasUnresolvedComparisonReference(request.message) &&
@@ -1238,10 +763,7 @@ export function createChatService(
           type: 'recommendation',
           message: composer.recommendation(
             canonicalProduct,
-            {
-              searchInput: commercial.searchInput,
-              sensoryTerms: commercial.sensoryTerms,
-            },
+            commercial.presentation,
             mixedFaqText,
           ),
           productIds: [product?.id],

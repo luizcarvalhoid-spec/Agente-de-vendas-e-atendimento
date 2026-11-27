@@ -1,7 +1,4 @@
 import type {
-  ChatRequest,
-} from '../contracts/chat.js'
-import type {
   ToolOrchestratorGroundingRequirement,
 } from './tool-orchestrator.js'
 
@@ -13,6 +10,11 @@ export type ChatPresentationIntent =
 export interface ChatGroundingPlan {
   groundingRequirement: ToolOrchestratorGroundingRequirement
   presentationIntent: ChatPresentationIntent
+}
+
+export interface ProductIntentVocabulary {
+  readonly productSignals: readonly RegExp[]
+  readonly requestedProduct: RegExp
 }
 
 function normalize(value: string) {
@@ -40,11 +42,9 @@ const conversationalMessages = new Set([
 ])
 
 const productSignals = [
-  /\b(?:shampoo|condicionador|mascara|finalizador|sabonete|oleo corporal|produtos?|kit)\b/,
+  /\b(?:produtos?|kit)\b/,
   /\b(?:preco|custa|custar|pagar|valor|orcamento|limite|caro|barato|bolso)\b/,
   /\b(?:estoque|disponivel|disponibilidade|pronta entrega)\b/,
-  /\b(?:ingrediente|formula|composicao|contem|leva|sem fragrancia)\b/,
-  /\b(?:caspa|oleosidade|oleoso|ressecamento|frizz|queda|couro(?: cabeludo)?|cabelo|pele)\b/,
   /\b(?:recomenda|recomendacao|indica|indicado|escolher|escolho|combina comigo|melhor opcao)\b/,
 ]
 
@@ -65,30 +65,37 @@ const comparisonSignals = [
 const recommendationSignals = [
   /\b(?:recomenda|recomendacao|indica|indicado|escolher|escolho|melhor opcao)\b/,
   /\bo que combina comigo\b/,
-  /\b(?:quero|procuro|preciso de)\b.*\b(?:shampoo|condicionador|mascara|finalizador|sabonete|oleo|produto|kit|anticaspa)\b/,
 ]
 
 function matchesAny(value: string, patterns: readonly RegExp[]) {
   return patterns.some((pattern) => pattern.test(value))
 }
 
-function hasStructuredProductContext(request: ChatRequest) {
-  return request.cart.length > 0 || request.preferences !== undefined
+export function hasFaqTopic(message: string) {
+  return matchesAny(normalize(message), faqSignals)
 }
 
-export function planChatGrounding(request: ChatRequest): ChatGroundingPlan {
-  const currentMessage = normalize(request.message)
-  const structuredProductContext = hasStructuredProductContext(request)
+export function planChatGrounding(
+  message: string,
+  vocabulary: ProductIntentVocabulary,
+  structuredProductContext = false,
+): ChatGroundingPlan {
+  const currentMessage = normalize(message)
   const comparison = matchesAny(currentMessage, comparisonSignals)
   const product =
     structuredProductContext ||
     comparison ||
-    matchesAny(currentMessage, productSignals)
+    matchesAny(currentMessage, productSignals) ||
+    matchesAny(currentMessage, vocabulary.productSignals)
   const faq =
     !/\bpronta entrega\b/.test(currentMessage) &&
     matchesAny(currentMessage, faqSignals)
-  const recommendation =
-    !comparison && matchesAny(currentMessage, recommendationSignals)
+  const requested = currentMessage.match(/\b(?:quero|procuro|preciso de)\b(.*)/)?.[1] ?? ''
+  const recommendation = !comparison && (
+    matchesAny(currentMessage, recommendationSignals) ||
+    /\b(?:produto|kit)\b/.test(requested) ||
+    vocabulary.requestedProduct.test(requested)
+  )
 
   if (
     !structuredProductContext &&

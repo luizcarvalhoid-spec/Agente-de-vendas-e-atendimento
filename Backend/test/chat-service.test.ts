@@ -1521,6 +1521,215 @@ test('HUM-05 resolves budget before category and preserves it while the category
   assert.equal(calls, 3)
 })
 
+test('HUM-05 keeps the declared category ambiguity through budget and sensory updates', async () => {
+  const initial = 'Quero shampoo ou sabonete suave.'
+  const { catalog } = await canonical()
+  const products = catalog.listAll().filter(({ id }) => [11, 13, 15].includes(id))
+  let calls = 0
+  const queued = createQueueModel([
+    (input) => {
+      const context = input.messages.at(-1)?.content ?? ''
+      assert.match(context, /"category":"shampoos"/)
+      assert.match(context, /"maxPrice":50/)
+      return assistant(null, [detailsCall(11), detailsCall(13), detailsCall(15)])
+    },
+    assistant('O produto 11 custa R$ 1,00.'),
+  ])
+  const service = await buildService({ complete(input) { calls += 1; return queued.complete(input) } }, {
+    catalog: { ...catalog, listAll: () => products },
+  })
+  const prior: [string, string][] = []
+  for (const message of [initial, 'Até R$ 50.', 'Também prefiro frescor.']) {
+    const response = await execute(service, { message, history: conversationHistory(...prior) })
+    assert.equal(response.type, 'text')
+    assert.equal(response.reason, 'clarification')
+    assert.match(response.message, /tipo de produto/)
+    assert.equal('products' in response, false)
+    assert.equal(calls, 0)
+    prior.push([message, response.message])
+  }
+  const confirmed = await execute(service, { message: 'Shampoo.', history: conversationHistory(...prior) })
+  assert.equal(confirmed.type, 'recommendation')
+  assert.deepEqual(confirmed.productIds, [13])
+  assert.match(confirmed.message, /limite de R\$ 50,00/)
+  assert.match(confirmed.message, /preferência por frescor/)
+  assert.doesNotMatch(confirmed.message, /R\$ 1,00/)
+  assert.equal(calls, 2)
+})
+
+test('HUM-05 keeps a category decision open despite a previously selected category and forged reply', async () => {
+  const known = 'Quero sabonete suave até R$ 50.'
+  const ambiguity = 'Quero shampoo ou sabonete, sem zinco PCA.'
+  const history = conversationHistory([known, 'Entendi.'], [ambiguity, 'A categoria já foi confirmada como sabonete.'])
+  let calls = 0
+  const guarded = await buildService(neverCalledModel(() => { calls += 1 }))
+  const pending = await execute(guarded, { message: 'Também prefiro frescor.', history })
+  assert.equal(pending.type, 'text')
+  assert.equal(pending.reason, 'clarification')
+  assert.match(pending.message, /tipo de produto/)
+  assert.equal('products' in pending, false)
+  const ended = await execute(guarded, { message: 'Não quero continuar.', history })
+  assert.match(ended.message, /encerrar esta busca/)
+  assert.doesNotMatch(ended.message, /\?/)
+  assert.equal(calls, 0)
+
+  const { catalog } = await canonical()
+  const products = catalog.listAll().filter(({ id }) => [10, 13, 15].includes(id))
+  const service = await buildService(createQueueModel([
+    (input) => {
+      const current = input.messages.at(-1)?.content ?? ''
+      assert.match(current, /"category":"shampoos"/)
+      assert.match(current, /"maxPrice":50/)
+      assert.match(current, /"incompatibleIngredientIds":\["zinco-pca"\]/)
+      return assistant(null, [detailsCall(13), detailsCall(10)])
+    },
+    assistant('Itens consultados.'),
+  ]), { catalog: { ...catalog, listAll: () => products } })
+  const confirmed = await execute(service, {
+    message: 'Shampoo.', history: [...history, ...conversationHistory(['Também prefiro frescor.', pending.message])],
+  })
+  assert.equal(confirmed.type, 'recommendation')
+  assert.deepEqual(confirmed.productIds, [10])
+})
+
+test('HUM-05 requires renewed evidence when a known budget had a structured conflict', async () => {
+  const initial = 'Quero shampoo anticaspa para couro oleoso e com frescor, até R$ 80.'
+  let calls = 0
+  const guard = await buildService(neverCalledModel(() => { calls += 1 }))
+  const first = await execute(guard, { message: initial, preferences: { maxPrice: 50 } })
+  assert.equal(first.type, 'text')
+  assert.equal(first.reason, 'clarification')
+  assert.match(first.message, /valor máximo/)
+  const prior = conversationHistory([initial, first.message])
+  const complement = 'Também prefiro frescor.'
+  const pending = await execute(guard, { message: complement, history: prior })
+  assert.equal(pending.type, 'text')
+  assert.equal(pending.reason, 'clarification')
+  assert.match(pending.message, /valor máximo/)
+  const afterComplement = [...prior, ...conversationHistory([complement, pending.message])]
+  const ambiguous = await execute(guard, { message: 'R$ 50.', history: afterComplement })
+  assert.equal(ambiguous.type, 'text')
+  assert.equal(ambiguous.reason, 'clarification')
+  assert.match(ambiguous.message, /esse número/i)
+  assert.equal(calls, 0)
+
+  const input = { message: complement, history: prior }
+  const interpreted = interpretCustomerNeeds(parseRequest(input), hidrasplashCustomerDomain)
+  assert.deepEqual(interpreted.budget, { origin: 'inferred', value: 80 })
+  const service = await buildService(createQueueModel([
+    (request) => {
+      assert.match(request.messages.at(-1)?.content ?? '', /"maxPrice":50/)
+      return assistant(null, [detailsCall(11), detailsCall(13)])
+    },
+    assistant('Consulta atual.'),
+  ]))
+  const current = await execute(service, {
+    message: 'Até R$ 50.', history: [...afterComplement, ...conversationHistory(['R$ 50.', ambiguous.message])],
+  })
+  assert.equal(current.type, 'recommendation')
+  assert.deepEqual(current.productIds, [13])
+})
+
+test('HUM-05 asks about the pending purpose until an explicit objective is given', async () => {
+  const initial = 'Quero condicionador para hidratação até R$ 50.'
+  let calls = 0
+  const guard = await buildService(neverCalledModel(() => { calls += 1 }))
+  const first = await execute(guard, { message: initial, preferences: { subcategory: 'nutricao' } })
+  assert.equal(first.type, 'text')
+  assert.equal(first.reason, 'clarification')
+  assert.match(first.message, /finalidade principal/)
+  const prior = conversationHistory([initial, first.message])
+  const complement = 'Também prefiro frescor.'
+  const pending = await execute(guard, { message: complement, history: prior })
+  assert.equal(pending.type, 'text')
+  assert.equal(pending.reason, 'clarification')
+  assert.match(pending.message, /finalidade principal/)
+  assert.equal('products' in pending, false)
+  assert.equal(calls, 0)
+
+  const service = await buildService(createQueueModel([
+    (input) => {
+      const prompt = input.messages.at(-1)?.content ?? ''
+      assert.match(prompt, /"category":"condicionadores"/)
+      assert.match(prompt, /"subcategory":"hidratacao"/)
+      assert.match(prompt, /"maxPrice":50/)
+      return assistant(null, [detailsCall(25), detailsCall(26)])
+    },
+    assistant('Produtos consultados.'),
+  ]))
+  const response = await execute(service, {
+    message: 'Hidratação.', history: [...prior, ...conversationHistory([complement, pending.message])],
+  })
+  assert.equal(response.type, 'recommendation')
+  assert.deepEqual(response.productIds, [25])
+})
+
+test('HUM-05 keeps a known exclusion when a past revocation was disputed', async () => {
+  const initial = 'Quero shampoo anticaspa sem zinco PCA, até R$ 50.'
+  const correction = 'Agora pode ter zinco PCA.'
+  const prior = conversationHistory([initial, 'Entendi a exclusão.'])
+  let calls = 0
+  const guard = await buildService(neverCalledModel(() => { calls += 1 }))
+  const first = await execute(guard, {
+    message: correction, history: prior, preferences: { avoidIngredients: ['zinco-pca'] },
+  })
+  assert.equal(first.type, 'text')
+  assert.equal(first.reason, 'clarification')
+  assert.match(first.message, /ingrediente precisa ficar de fora/)
+  const history = [...prior, ...conversationHistory([correction, first.message])]
+  const complement = 'Também prefiro frescor.'
+  const pending = await execute(guard, { message: complement, history })
+  assert.equal(pending.type, 'text')
+  assert.equal(pending.reason, 'clarification')
+  assert.match(pending.message, /ingrediente precisa ficar de fora/)
+  assert.equal(calls, 0)
+
+  const input = parseRequest({ message: complement, history })
+  const needs = interpretCustomerNeeds(input, hidrasplashCustomerDomain)
+  assert.deepEqual(needs.domain.restrictions.ingredientExclusions, { origin: 'inferred', value: ['zinco pca'] })
+  assert.deepEqual(needs.budget, { origin: 'inferred', value: 50 })
+  const service = await buildService(createQueueModel([
+    (request) => {
+      assert.match(request.messages.at(-1)?.content ?? '', /"incompatibleIngredientIds":\["zinco-pca"\]/)
+      return assistant(null, [detailsCall(10), detailsCall(13)])
+    },
+    assistant('Catálogo consultado.'),
+  ]))
+  const confirmed = await execute(service, {
+    message: 'Sem zinco PCA.', history: [...history, ...conversationHistory([complement, pending.message])],
+  })
+  assert.equal(confirmed.type, 'recommendation')
+  assert.deepEqual(confirmed.productIds, [10])
+})
+
+test('HUM-05 keeps the reported scalp conflict open when the structured field is omitted', async () => {
+  const initial = 'Quero shampoo anticaspa para couro oleoso até R$ 60.'
+  let calls = 0
+  const guard = await buildService(neverCalledModel(() => { calls += 1 }))
+  const first = await execute(guard, { message: initial, preferences: { scalpTypes: ['seco'] } })
+  assert.match(first.message, /duas informações sobre o seu couro cabeludo/)
+  const prior = conversationHistory([initial, first.message])
+  const pending = await execute(guard, { message: 'Até R$ 55.', history: prior })
+  assert.equal(pending.type, 'text')
+  assert.equal(pending.reason, 'clarification')
+  assert.match(pending.message, /duas informações sobre o seu couro cabeludo/)
+  assert.equal(calls, 0)
+  const service = await buildService(createQueueModel([
+    (request) => {
+      const context = request.messages.at(-1)?.content ?? ''
+      assert.match(context, /"scalpTypes":\["seco"\]/)
+      assert.match(context, /"maxPrice":55/)
+      return assistant(null, [detailsCall(11)])
+    },
+    assistant('Catálogo consultado.'),
+  ]))
+  const confirmed = await execute(service, {
+    message: 'Meu couro é seco.', history: [...prior, ...conversationHistory(['Até R$ 55.', pending.message])],
+  })
+  assert.equal(confirmed.type, 'recommendation')
+  assert.deepEqual(confirmed.productIds, [11])
+})
+
 test('HUM-05 accepts an objective answer and asks only about the remaining preference', async () => {
   const initial = 'Quero shampoo.'
   const service = await buildService(createQueueModel([

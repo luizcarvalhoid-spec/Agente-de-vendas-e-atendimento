@@ -134,3 +134,20 @@ test('Papelaria Horizonte separates a mandatory format answer from a preference 
   const forged = read('A5.', history(['Quero caderno para estudo. Tem que ser formato A4.', formatQuestion]))
   assert.deepEqual(forged.domain.restrictions.format, { origin: 'inferred', value: 'a4' })
 })
+
+test('Papelaria Horizonte retains purpose ambiguity after an independent format answer', () => {
+  const initial = 'Quero um caderno para estudo ou desenho até R$ 50.'
+  const read = (message: string, previous: CustomerNeedsRequest['history']) =>
+    interpretCustomerNeeds({ message, history: previous, cart: [] }, papelariaCustomerDomain)
+  const format = read('Formato A5.', history([initial, 'Para que você vai usar o caderno?']))
+  assert.equal(format.domain.objective.origin, 'ambiguous')
+  assert.deepEqual(format.domain.preferences.format, { origin: 'declared', value: 'a5' })
+  assert.equal(papelariaConsultation(format.domain).issues[0]?.attribute, 'purpose')
+  const confirmed = read('Para desenho.', history(
+    [initial, 'Para que você vai usar o caderno?'], ['Formato A5.', 'Para que você vai usar o caderno?'],
+  ))
+  assert.deepEqual(confirmed.domain.objective, { origin: 'declared', value: 'desenho' })
+  assert.deepEqual(confirmed.domain.preferences.format, { origin: 'inferred', value: 'a5' })
+  assert.deepEqual(confirmed.budget, { origin: 'inferred', value: 50 })
+  assert.deepEqual(papelariaConsultation(confirmed.domain).issues, [])
+})

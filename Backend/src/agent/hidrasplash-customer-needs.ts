@@ -11,12 +11,15 @@ import type { ClarificationIssue } from './clarification-strategy.js'
 import {
   asksForProductSelection,
   budgetQuestion,
-  historicalUserMessages,
+  historicalNeed,
+  matchesClarificationQuestion,
   needFrom,
   needValue,
   normalize,
   rejectedProductQuestion,
+  resolveContextNeed,
   resolveContextValues,
+  shortBudgetAnswer,
   type CustomerNeeds,
   type CustomerNeedsDomain,
   type CustomerNeedsRequest,
@@ -62,21 +65,38 @@ function inferSubcategory(message: string): ProductSubcategory | undefined {
   return undefined
 }
 
-function declaredProductGoal(message: string) {
+const categoryQuestion = 'Que tipo de produto você quer nesta busca?'
+const objectiveQuestion = 'Qual é a finalidade principal do produto nesta busca?'
+const scalpQuestion = 'Recebi duas informações sobre o seu couro cabeludo. Qual delas descreve melhor o seu caso?'
+const ingredientQuestion = 'As informações divergem sobre um ingrediente. Qual ingrediente precisa ficar de fora?'
+
+interface CustomerTurn {
+  readonly message: string
+  readonly reply?: string
+}
+
+function declaredProductGoal(message: string, reply?: string) {
   const text = normalize(message)
   const request = text.match(/(?:^|[.;:!]\s*)(?:(?:agora|na verdade,?|em vez disso,?|eu)\s+)*(?:quero|procuro|preciso de|busco|estou procurando)\s+([^.;!?]+)/)?.[1]
-  const product = request ?? (asksForProductSelection(text) ? text :
+  const barePurpose = /^(?:para )?(?:antiqueda|antirresiduos|hidratacao|nutricao)(?:\s+ou\s+(?:para )?(?:antiqueda|antirresiduos|hidratacao|nutricao))*[.!]?$/.test(text)
+  const product = request ?? (asksForProductSelection(text) || barePurpose ? text :
     text.match(/^(?:shampoo|anticaspa|condicionador|mascara|finalizador|sabonete|oleo corporal)\b[^.;!?]*/)?.[0])
-  const categories = new Set(product?.split(/\s+ou\s+/).map(inferCategory).filter((category) => category !== undefined))
-  const ambiguousCategory = categories.size > 1
-  const category = ambiguousCategory ? undefined : [...categories][0]
-  const explicitPurpose = /\b(?:agora quero|na verdade,? quero|em vez disso,? quero)\b/.test(text)
+  const alternatives = product?.split(/\s+ou\s+/) ?? []
+  const categories = new Set(alternatives.map(inferCategory).filter((category) => category !== undefined))
+  const explicitChange = /\b(?:agora quero|em vez disso,? quero)\b/.test(text)
+  const explicitPurpose = explicitChange || /\bna verdade,? quero\b/.test(text) || barePurpose
+  const objectives = new Set((categories.size === 1 || explicitPurpose ? alternatives : [])
+    .map(inferSubcategory).filter((objective) => objective !== undefined))
+  const category: Need<ProductCategory> = categories.size > 1 ||
+    (categories.size === 1 && reply !== undefined && matchesClarificationQuestion(reply, categoryQuestion))
+    ? { origin: 'ambiguous' } : needFrom([...categories][0])
+  const objective: Need<ProductSubcategory> = objectives.size > 1 ||
+    (objectives.size === 1 && reply !== undefined && matchesClarificationQuestion(reply, objectiveQuestion))
+    ? { origin: 'ambiguous' } : needFrom([...objectives][0])
   return {
     category,
-    ambiguousCategory,
-    objective: product && !ambiguousCategory && (category !== undefined || explicitPurpose)
-      ? inferSubcategory(product)
-      : undefined,
+    objective,
+    explicitChange,
   }
 }
 
@@ -101,17 +121,19 @@ function inferEllipticalScalpTypes(
   return match?.[1] ? [match[1] as ScalpType] : undefined
 }
 
-function latestHistoricalScalpTypes(messages: readonly string[]) {
+function latestHistoricalScalpTypes(turns: readonly CustomerTurn[]) {
   let hasSafeScalpContext = false
-  let latest: readonly ScalpType[] | undefined
-  for (const message of messages) {
+  let latest: Need<readonly ScalpType[]> = { origin: 'absent' }
+  for (const { message, reply } of turns) {
     hasSafeScalpContext ||=
-      declaredProductGoal(message).objective === 'anticaspa' ||
+      needValue(declaredProductGoal(message).objective) === 'anticaspa' ||
       /\bcouro(?: cabeludo)?\b/.test(normalize(message))
-    latest =
-      inferScalpTypes(readAttributeNeeds(message).rankingText) ??
-      inferEllipticalScalpTypes(message, hasSafeScalpContext) ??
-      latest
+    const types = inferScalpTypes(readAttributeNeeds(message).rankingText) ??
+      inferEllipticalScalpTypes(message, hasSafeScalpContext)
+    if (types !== undefined) {
+      latest = reply !== undefined && matchesClarificationQuestion(reply, scalpQuestion)
+        ? { origin: 'ambiguous' } : historicalNeed(needFrom(types))
+    }
   }
   return latest
 }
@@ -258,28 +280,51 @@ function interpretHidrasplashNeeds(request: CustomerNeedsRequest<ChatPreferences
   const preferences = request.preferences ?? {}
   const attributes = readAttributeNeeds(request.message)
   const rankingText = comparisonText ? `${comparisonText} ${attributes.rankingText}`.trim() : attributes.rankingText
-  const previous = historicalUserMessages(request)
+  const turns = request.history.flatMap((entry, index): CustomerTurn[] => {
+    if (entry.role !== 'user') return []
+    const next = request.history[index + 1]
+    return [{ message: entry.content, reply: next?.role === 'assistant' ? next.content : undefined }]
+  })
+  const previous = turns.map(({ message }) => message)
   const priorAttributes = previous.map(readAttributeNeeds)
-  const historicalCategory = latestHistoricalValue(previous, (message) => declaredProductGoal(message).category)
-  const historicalSubcategory = latestHistoricalValue(previous, (message) => declaredProductGoal(message).objective)
+  let historicalCategory: Need<ProductCategory> = { origin: 'absent' }
+  let historicalSubcategory: Need<ProductSubcategory> = { origin: 'absent' }
+  for (const { message, reply } of turns) {
+    const goal = declaredProductGoal(message, reply)
+    historicalCategory = resolveContextNeed(historicalCategory, historicalNeed(goal.category))
+    historicalSubcategory = resolveContextNeed(historicalSubcategory, historicalNeed(goal.objective))
+  }
   const spokenGoal = declaredProductGoal(request.message)
-  const currentCategory = preferences.category ?? spokenGoal.category ??
-    (historicalCategory === undefined ? inferCategory(comparisonText) : undefined)
-  const currentSubcategory = preferences.subcategory ?? spokenGoal.objective ??
-    (historicalSubcategory === undefined ? inferSubcategory(comparisonText) : undefined)
+  const spokenCategory = needValue(spokenGoal.category)
+  const spokenObjective = needValue(spokenGoal.objective)
+  const comparisonCategory = historicalCategory.origin === 'absent' ? inferCategory(comparisonText) : undefined
+  const comparisonSubcategory = historicalSubcategory.origin === 'absent' ? inferSubcategory(comparisonText) : undefined
 
   const historyHasSafeScalpContext =
-    historicalSubcategory === 'anticaspa' ||
+    needValue(historicalSubcategory) === 'anticaspa' ||
     previous.some((message) =>
       /\bcouro(?: cabeludo)?\b/.test(normalize(message)),
     )
   const spokenScalp = inferScalpTypes(rankingText)
   const contextualScalp = inferEllipticalScalpTypes(request.message, historyHasSafeScalpContext)
   const ingredientExclusion = readIngredientExclusion(attributes.clauses)
-  const priorExclusions = priorAttributes.map(({ clauses }) => readIngredientExclusion(clauses))
+  const priorExclusions = priorAttributes.map(({ clauses }, index) => {
+    const exclusion = readIngredientExclusion(clauses)
+    const reply = turns[index]?.reply
+    const unconfirmed = reply !== undefined && matchesClarificationQuestion(reply, ingredientQuestion)
+    return { ...exclusion, tentativeRevocation: unconfirmed ? exclusion.revoked : [],
+      revoked: unconfirmed ? [] : exclusion.revoked }
+  })
+  const currentExclusions = [...(preferences.avoidIngredients ?? []), ...ingredientExclusion.required]
+  const pendingIngredientChanges = resolveContextValues(
+    priorExclusions.map(({ required, revoked, tentativeRevocation }) =>
+      ({ add: tentativeRevocation, revoke: [...required, ...revoked] })),
+    { revoke: [...currentExclusions, ...ingredientExclusion.revoked] },
+    attributeKey,
+  )
   const ingredientExclusions = resolveContextValues(
     priorExclusions.map(({ required, revoked }) => ({ add: required, revoke: revoked })),
-    { add: [...(preferences.avoidIngredients ?? []), ...ingredientExclusion.required], revoke: ingredientExclusion.revoked },
+    { add: currentExclusions, revoke: ingredientExclusion.revoked },
     attributeKey,
   )
   const preferredIngredientExclusions = resolveContextValues(
@@ -314,32 +359,30 @@ function interpretHidrasplashNeeds(request: CustomerNeedsRequest<ChatPreferences
     (preferences.avoidIngredients ?? []).some((term) =>
       ingredientExclusion.revoked.some((removed) => attributeKey(term) === attributeKey(removed)),
     ) ? 'ingredient' :
-    preferences.category !== undefined && spokenGoal.category !== undefined &&
-      preferences.category !== spokenGoal.category ? 'category' :
-    preferences.subcategory !== undefined && spokenGoal.objective !== undefined &&
-      preferences.subcategory !== spokenGoal.objective ? 'objective' :
+    preferences.category !== undefined && spokenCategory !== undefined &&
+      preferences.category !== spokenCategory ? 'category' :
+    preferences.subcategory !== undefined && spokenObjective !== undefined &&
+      preferences.subcategory !== spokenObjective ? 'objective' :
     preferences.scalpTypes !== undefined && spokenScalp !== undefined &&
       !spokenScalp.some((type) => preferences.scalpTypes?.includes(type)) ? 'scalp' :
     undefined
-  const category: Need<ProductCategory> = preferences.category !== undefined
-    ? needFrom(preferences.category)
-    : currentCategory !== undefined
-      ? { origin: 'inferred', value: currentCategory }
-      : needFrom(undefined, historicalCategory)
+  const category = resolveContextNeed(historicalCategory, spokenGoal.category.origin === 'ambiguous'
+    ? spokenGoal.category
+    : preferences.category !== undefined ? needFrom(preferences.category)
+      : historicalNeed(needFrom(spokenCategory ?? comparisonCategory)))
+  const objective = resolveContextNeed(historicalSubcategory, spokenGoal.objective.origin === 'ambiguous'
+    ? spokenGoal.objective : needFrom(preferences.subcategory ?? spokenObjective ?? comparisonSubcategory))
 
   return {
     category,
-    ambiguousCategory: spokenGoal.ambiguousCategory,
     rankingText: removeSensoryTerms(rankingText, suppressed),
     conflictingStructured: conflictingStructuredAttribute !== undefined,
     conflictingStructuredAttribute,
-    objective: needFrom(currentSubcategory, historicalSubcategory),
+    objective,
     preferences: {
       hairTypes: needFrom(preferences.hairTypes),
-      scalpTypes: needFrom(
-        preferences.scalpTypes ?? spokenScalp,
-        contextualScalp ?? latestHistoricalScalpTypes(previous),
-      ),
+      scalpTypes: resolveContextNeed(latestHistoricalScalpTypes(turns),
+        needFrom(preferences.scalpTypes ?? spokenScalp, contextualScalp)),
       hairConcerns: needFrom(
         preferences.hairConcerns ?? inferHairConcerns(rankingText),
         historicalConcerns?.length ? historicalConcerns : undefined,
@@ -353,6 +396,7 @@ function interpretHidrasplashNeeds(request: CustomerNeedsRequest<ChatPreferences
     },
     restrictions: {
       ingredientExclusions,
+      pendingIngredientChanges,
       unsupportedRequirement,
     },
   }
@@ -368,20 +412,22 @@ export const hidrasplashCustomerDomain = {
     requestedProduct: /\b(?:shampoo|condicionador|mascara|finalizador|sabonete|oleo|anticaspa)\b/,
   },
   interpret: interpretHidrasplashNeeds,
-  goal(message: string, preferences?: ChatPreferences) {
-    const declared = declaredProductGoal(message)
+  goal(message: string, preferences?: ChatPreferences, reply?: string) {
+    const declared = declaredProductGoal(message, reply)
     return {
-      category: preferences?.category ?? declared.category,
-      objective: preferences?.subcategory ?? declared.objective,
+      category: declared.category.origin === 'ambiguous'
+        ? declared.category : resolveContextNeed(declared.category, needFrom(preferences?.category)),
+      objective: declared.objective.origin === 'ambiguous'
+        ? declared.objective : resolveContextNeed(declared.objective, needFrom(preferences?.subcategory)),
+      explicitChange: declared.explicitChange,
     }
   },
   isPreferenceFollowUp(message: string) {
     const attributes = readAttributeNeeds(message)
-    const { category, objective, ambiguousCategory } = declaredProductGoal(message)
+    const { category, objective } = declaredProductGoal(message)
     return (
-      ambiguousCategory ||
-      category !== undefined ||
-      objective !== undefined ||
+      category.origin !== 'absent' ||
+      objective.origin !== 'absent' ||
       attributes.clauses.length > 0 ||
       inferSensoryTerms(attributes.rankingText) !== undefined ||
       inferScalpTypes(attributes.rankingText) !== undefined ||
@@ -409,8 +455,9 @@ export function translateHidrasplashNeeds(
   const { budget, domain } = needs
   const category = needValue(domain.category)
   const requestedSubcategory = needValue(domain.objective)
-  const conflictingScope = domain.ambiguousCategory || (category !== undefined && requestedSubcategory !== undefined &&
-    !(SUBCATEGORIES_BY_CATEGORY[category] as readonly string[]).includes(requestedSubcategory))
+  const invalidScope = category !== undefined && requestedSubcategory !== undefined &&
+    !(SUBCATEGORIES_BY_CATEGORY[category] as readonly string[]).includes(requestedSubcategory)
+  const conflictingScope = invalidScope || domain.category.origin === 'ambiguous' || domain.objective.origin === 'ambiguous'
   const subcategory = conflictingScope ? undefined : requestedSubcategory
   const maxPrice = budget.origin === 'ambiguous' ? budget.conservativeValue : needValue(budget)
   const effectiveSensoryTerms = needValue(domain.preferences.sensory) ?? []
@@ -480,10 +527,10 @@ export function translateHidrasplashNeeds(
       limitation: 'Não consegui confirmar a exclusão desse ingrediente no catálogo. Com essa condição, não posso indicar um produto com segurança.',
     })
   }
-  if (domain.conflictingStructuredAttribute === 'ingredient') {
+  if (domain.conflictingStructuredAttribute === 'ingredient' || domain.restrictions.pendingIngredientChanges.origin !== 'absent') {
     issues.push({
       reason: 'structured_conflict', priority: 'restriction', attribute: 'ingredient',
-      question: 'As informações divergem sobre um ingrediente. Qual ingrediente precisa ficar de fora?',
+      question: ingredientQuestion,
       limitation: 'A exclusão de ingrediente ainda está em aberto, então não consigo indicar um produto com segurança.',
     })
   }
@@ -493,25 +540,32 @@ export function translateHidrasplashNeeds(
       question: budgetQuestion,
       limitation: 'O limite de preço ainda está em aberto, então não consigo indicar um produto com segurança.',
     })
+  } else if (needs.context.budgetEvidenceMissing) {
+    issues.push({
+      reason: 'budget_unconfirmed', priority: 'restriction', attribute: 'budget',
+      question: shortBudgetAnswer(request.message) === undefined ? budgetQuestion
+        : 'Esse número é o valor máximo que você quer gastar? Se for, informe o limite com “Até R$ ...”.',
+      limitation: 'Ainda preciso que você confirme o limite de preço para indicar um produto.',
+    })
   } else if (invalidBudget) {
     issues.push({
       reason: 'unverified_budget', priority: 'restriction', attribute: 'budget',
       limitation: 'Não consegui usar o limite de preço informado para verificar os produtos disponíveis.',
     })
   }
-  if (domain.conflictingStructuredAttribute === 'scalp') {
+  if (domain.conflictingStructuredAttribute === 'scalp' || domain.preferences.scalpTypes.origin === 'ambiguous') {
     issues.push({
       reason: 'structured_conflict', priority: 'ambiguity', attribute: 'scalp',
-      question: 'Recebi duas informações sobre o seu couro cabeludo. Qual delas descreve melhor o seu caso?',
+      question: scalpQuestion,
       limitation: 'As informações sobre o couro cabeludo são diferentes e preciso dessa confirmação para indicar um produto.',
     })
   } else if (conflictingScope || domain.conflictingStructuredAttribute === 'category' ||
     domain.conflictingStructuredAttribute === 'objective' || (!toolPreferences.success && !invalidBudget)) {
-    const categoryConflict = conflictingScope || domain.conflictingStructuredAttribute === 'category' ||
+    const categoryConflict = invalidScope || domain.category.origin === 'ambiguous' || domain.conflictingStructuredAttribute === 'category' ||
       (!toolPreferences.success && !invalidBudget)
     issues.push({
       reason: 'scope_conflict', priority: 'ambiguity', attribute: categoryConflict ? 'category' : 'objective',
-      question: categoryConflict ? 'Que tipo de produto você quer nesta busca?' : 'Qual é a finalidade principal do produto nesta busca?',
+      question: categoryConflict ? categoryQuestion : objectiveQuestion,
       limitation: 'O tipo ou a finalidade do produto ainda está em aberto, então não consigo fazer uma indicação segura.',
     })
   }

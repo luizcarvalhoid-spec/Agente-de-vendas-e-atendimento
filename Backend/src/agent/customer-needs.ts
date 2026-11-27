@@ -20,6 +20,14 @@ export function needValue<T>(need: Need<T>): T | undefined {
   return 'value' in need ? need.value : undefined
 }
 
+export function resolveContextNeed<T>(previous: Need<T> | undefined, current: Need<T> | undefined): Need<T> {
+  return current && current.origin !== 'absent' ? current : previous ?? { origin: 'absent' }
+}
+
+export function historicalNeed<T>(need: Need<T>): Need<T> {
+  return 'value' in need ? { origin: 'inferred', value: need.value } : need
+}
+
 interface BudgetPreference {
   readonly maxPrice?: number
 }
@@ -43,12 +51,13 @@ export interface CustomerNeedsDomain<Preferences extends BudgetPreference, Needs
   readonly vocabulary: ProductIntentVocabulary
   interpret(request: CustomerNeedsRequest<Preferences>, comparisonText?: string): Needs
   isPreferenceFollowUp(message: string): boolean
-  goal?(message: string, preferences?: Preferences): CommercialGoal
+  goal?(message: string, preferences?: Preferences, reply?: string): CommercialGoal
 }
 
 interface CommercialGoal {
-  readonly category?: string
-  readonly objective?: string
+  readonly category?: Need<string>
+  readonly objective?: Need<string>
+  readonly explicitChange?: boolean
 }
 
 export interface ContextListUpdate<T> {
@@ -96,6 +105,7 @@ export interface CustomerNeeds<Needs extends DomainNeeds> {
     readonly recommendationIds: readonly number[]
     readonly history: CustomerNeedsRequest['history']
     readonly budgetAnswerConfirmed: boolean
+    readonly budgetEvidenceMissing: boolean
   }
   readonly domain: Needs
 }
@@ -130,8 +140,7 @@ function extractBudget(value: string) {
   }
 }
 
-function updateHistoricalBudget(budget: Need<number>, message: string): Need<number> {
-  const next = extractBudget(message)
+function updateHistoricalBudget(budget: Need<number>, next: ReturnType<typeof extractBudget>): Need<number> {
   if (next.revoked) return { origin: 'absent' }
   if (next.value !== undefined) return { origin: 'inferred', value: next.value }
   if (next.ambiguous) return {
@@ -262,10 +271,12 @@ function contextStatement(message: string, vocabulary: ProductIntentVocabulary) 
 }
 
 function goalChanged(goal: CommercialGoal, next: CommercialGoal) {
-  return (
-    (goal.category !== undefined && next.category !== undefined && goal.category !== next.category) ||
-    (goal.objective !== undefined && next.objective !== undefined && goal.objective !== next.objective)
-  )
+  const changesAttribute = (previous?: Need<string>, current?: Need<string>) => {
+    if (!previous || !current || !('value' in current)) return false
+    if (previous.origin === 'ambiguous') return next.explicitChange === true
+    return 'value' in previous && previous.value !== current.value
+  }
+  return changesAttribute(goal.category, next.category) || changesAttribute(goal.objective, next.objective)
 }
 
 function resolveActiveHistory<Preferences extends BudgetPreference, Needs extends DomainNeeds>(
@@ -277,6 +288,7 @@ function resolveActiveHistory<Preferences extends BudgetPreference, Needs extend
   let history: CustomerNeedsRequest<Preferences>['history'][number][] = []
   let reset = false
   let budget: Need<number> = { origin: 'absent' }
+  let unconfirmedBudget = false
   for (let index = 0; index < request.history.length; index += 1) {
     const entry = request.history[index]
     if (entry?.role !== 'user') continue
@@ -284,6 +296,7 @@ function resolveActiveHistory<Preferences extends BudgetPreference, Needs extend
       history = []
       goal = {}
       budget = { origin: 'absent' }
+      unconfirmedBudget = false
       reset = true
       if (endsSearch(entry.content)) continue
     }
@@ -291,7 +304,7 @@ function resolveActiveHistory<Preferences extends BudgetPreference, Needs extend
     const pendingBudget = hasBudgetQuestion(budget, request.history[index - 1])
     const content = budgetAnswerStatement(statement, pendingBudget)
     const reply = request.history[index + 1]
-    if (pendingBudget && content === statement && isBudgetAnswerAttempt(statement)) {
+    if ((pendingBudget || unconfirmedBudget) && content === statement && isBudgetAnswerAttempt(statement)) {
       if (reply?.role === 'assistant' && matchesClarificationQuestion(reply.content, budgetQuestion)) history.push(reply)
       continue
     }
@@ -303,15 +316,26 @@ function resolveActiveHistory<Preferences extends BudgetPreference, Needs extend
       }
       continue
     }
-    const next = domain.goal?.(content) ?? {}
+    const next = domain.goal?.(content, undefined, reply?.role === 'assistant' ? reply.content : undefined) ?? {}
     if (goalChanged(goal, next)) {
       history = []
       goal = {}
       budget = { origin: 'absent' }
+      unconfirmedBudget = false
       reset = true
     }
-    goal = { category: next.category ?? goal.category, objective: next.objective ?? goal.objective }
-    budget = updateHistoricalBudget(budget, content)
+    goal = {
+      category: resolveContextNeed(goal.category, next.category),
+      objective: resolveContextNeed(goal.objective, next.objective),
+    }
+    const declaration = extractBudget(content)
+    budget = updateHistoricalBudget(budget, declaration)
+    // A question paired with a real ceiling can signal missing structured evidence.
+    // The question supplies neither a historical value nor enough evidence to bind a short answer.
+    if (declaration.value !== undefined || declaration.revoked) {
+      unconfirmedBudget = declaration.value !== undefined && reply?.role === 'assistant' &&
+        matchesClarificationQuestion(reply.content, budgetQuestion)
+    }
     history.push({ ...entry, content })
     // Assistant content can only suggest a referent for a user's rejection.
     if (reply?.role === 'assistant') history.push(reply)
@@ -321,6 +345,7 @@ function resolveActiveHistory<Preferences extends BudgetPreference, Needs extend
   return {
     history: changedGoal ? [] : history,
     budget: changedGoal ? { origin: 'absent' } as const : budget,
+    unconfirmedBudget: !changedGoal && unconfirmedBudget,
     changedGoal,
     reset,
   }
@@ -480,7 +505,7 @@ export function interpretCustomerNeeds<Preferences extends BudgetPreference, Nee
     ? messagePlan
     : planChatGrounding(request.message, domain.vocabulary, true)
   const { statement: declaredStatement, comparisonText } = contextStatement(request.message, domain.vocabulary)
-  const { history, budget: historicalBudget, changedGoal, reset } =
+  const { history, budget: historicalBudget, unconfirmedBudget, changedGoal, reset } =
     resolveActiveHistory(request, domain, declaredStatement)
   const pendingBudget = hasBudgetQuestion(historicalBudget, request.history.at(-1), request.preferences?.maxPrice)
   const statement = budgetAnswerStatement(declaredStatement, pendingBudget)
@@ -494,7 +519,7 @@ export function interpretCustomerNeeds<Preferences extends BudgetPreference, Nee
   const staleReference = reset && suppliedIds.length === 1 &&
     !history.some(({ role, content }) => role === 'assistant' && resolveReference?.(content) === suppliedIds[0])
   const recommendationIds = changedGoal || interrupted || staleReference ? [] : suppliedIds
-  const needsBudgetClarification = pendingBudget && isBudgetAnswerAttempt(statement)
+  const needsBudgetClarification = (pendingBudget || unconfirmedBudget) && isBudgetAnswerAttempt(statement)
   const plan: ChatGroundingPlan = interrupted
     ? { presentationIntent: 'text', groundingRequirement: 'not_required' }
     : preserveHistoricalRecommendationIntent(
@@ -503,6 +528,8 @@ export function interpretCustomerNeeds<Preferences extends BudgetPreference, Nee
       )
   const currentBudget = extractBudget(statement)
   const structuredBudget = request.preferences?.maxPrice
+  const budgetEvidenceMissing = unconfirmedBudget && currentBudget.value === undefined && !currentBudget.revoked &&
+    (structuredBudget === undefined || structuredBudget !== needValue(historicalBudget))
   const conflicts = structuredBudget !== undefined &&
     (currentBudget.revoked || (currentBudget.value !== undefined && structuredBudget !== currentBudget.value))
   const budget: Need<number> = currentBudget.ambiguous || conflicts
@@ -538,6 +565,7 @@ export function interpretCustomerNeeds<Preferences extends BudgetPreference, Nee
     context: {
       interrupted, changedGoal, unresolvedRejection, recommendationIds, history,
       budgetAnswerConfirmed: statement !== declaredStatement,
+      budgetEvidenceMissing,
     },
     domain: domain.interpret(
       {

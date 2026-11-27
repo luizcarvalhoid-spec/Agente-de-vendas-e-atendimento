@@ -26,10 +26,12 @@ function attribute<T extends string>(value: string | undefined, allowed: readonl
 function goal(text: string) {
   const message = normalize(text)
   const request = message.match(/(?:^|[.;:]\s*)(?:agora\s+)?(?:quero|procuro|preciso de)\s+([^.;!?]*)/)?.[1]
+  const purpose = request?.match(/\bpara (estudo|desenho|anotacoes)(?: ou (?:para )?(estudo|desenho|anotacoes))?\b/) ??
+    message.match(/^para (estudo|desenho|anotacoes)(?: ou (?:para )?(estudo|desenho|anotacoes))?[.!]?$/)
   return {
-    category: request && /\bcadernos?\b/.test(request) ? 'caderno' as const : undefined,
-    objective: request?.match(/\bpara (estudo|desenho|anotacoes)\b/)?.[1] ??
-      message.match(/^para (estudo|desenho|anotacoes)[.!]?$/)?.[1],
+    category: needFrom(request && /\bcadernos?\b/.test(request) ? 'caderno' : undefined),
+    objective: purpose?.[2] && purpose[2] !== purpose[1] ? { origin: 'ambiguous' } as const : needFrom(purpose?.[1]),
+    explicitChange: /^agora quero\b/.test(message),
   }
 }
 
@@ -88,8 +90,8 @@ function interpret(request: CustomerNeedsRequest) {
   })
   const current = read(request.message, request.history.at(-1))
   return {
-    category: resolveAttribute(history.map(({ category }) => ({ value: needFrom(category) })), { value: needFrom(current.category) }),
-    objective: resolveAttribute(history.map(({ objective }) => ({ value: needFrom(objective) })), { value: needFrom(current.objective) }),
+    category: resolveAttribute(history.map(({ category }) => ({ value: category })), { value: current.category }),
+    objective: resolveAttribute(history.map(({ objective }) => ({ value: objective })), { value: current.objective }),
     preferences: {
       format: resolveAttribute(history.map((turn) => ({ value: turn.preferences.format })), { value: current.preferences.format }),
       paper: resolveAttribute(history.map((turn) => ({ value: turn.preferences.paper })), { value: current.preferences.paper }),
@@ -110,8 +112,8 @@ export const papelariaCustomerDomain = {
   },
   interpret,
   goal,
-  isPreferenceFollowUp: (message: string) =>
-    /\b(?:folhas?|formato|a[456])\b|^para (?:estudo|desenho|anotacoes)[.!]?$/.test(normalize(message)),
+  isPreferenceFollowUp: (message: string) => goal(message).objective.origin !== 'absent' ||
+    /\b(?:folhas?|formato|a[456])\b/.test(normalize(message)),
 } satisfies CustomerNeedsDomain<{ maxPrice?: number }, ReturnType<typeof interpret>>
 
 export function papelariaConsultation(domain: ReturnType<typeof interpret>): {
@@ -126,9 +128,9 @@ export function papelariaConsultation(domain: ReturnType<typeof interpret>): {
       limitation: 'Sem confirmar o formato obrigatório, não consigo indicar um caderno.',
     }] }
   }
-  if (domain.objective.origin === 'absent') {
+  if (domain.objective.origin === 'absent' || domain.objective.origin === 'ambiguous') {
     return { issues: [{
-      reason: 'missing_purpose', priority: 'selection', attribute: 'purpose',
+      reason: 'missing_purpose', priority: domain.objective.origin === 'ambiguous' ? 'ambiguity' : 'selection', attribute: 'purpose',
       question: 'Para que você vai usar o caderno?',
       limitation: 'Ainda preciso saber para que você quer usar o caderno.',
     }] }

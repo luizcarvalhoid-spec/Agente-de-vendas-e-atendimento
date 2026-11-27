@@ -248,26 +248,26 @@ function sensoryUpdate(message: string, attributes: ReturnType<typeof readAttrib
   }
 }
 
-function interpretHidrasplashNeeds(request: CustomerNeedsRequest<ChatPreferences>) {
+function interpretHidrasplashNeeds(request: CustomerNeedsRequest<ChatPreferences>, comparisonText = '') {
   const preferences = request.preferences ?? {}
   const attributes = readAttributeNeeds(request.message)
+  const rankingText = comparisonText ? `${comparisonText} ${attributes.rankingText}`.trim() : attributes.rankingText
   const previous = historicalUserMessages(request)
   const priorAttributes = previous.map(readAttributeNeeds)
   const historicalCategory = latestHistoricalValue(previous, (message) => declaredProductGoal(message).category)
   const historicalSubcategory = latestHistoricalValue(previous, (message) => declaredProductGoal(message).objective)
   const spokenGoal = declaredProductGoal(request.message)
-  const comparison = /\bcompar(?:a|ar|acao|e)\b/.test(normalize(request.message))
   const currentCategory = preferences.category ?? spokenGoal.category ??
-    (comparison && historicalCategory === undefined ? inferCategory(request.message) : undefined)
+    (historicalCategory === undefined ? inferCategory(comparisonText) : undefined)
   const currentSubcategory = preferences.subcategory ?? spokenGoal.objective ??
-    (comparison && historicalSubcategory === undefined ? inferSubcategory(request.message) : undefined)
+    (historicalSubcategory === undefined ? inferSubcategory(comparisonText) : undefined)
 
   const historyHasSafeScalpContext =
     historicalSubcategory === 'anticaspa' ||
     previous.some((message) =>
       /\bcouro(?: cabeludo)?\b/.test(normalize(message)),
     )
-  const spokenScalp = inferScalpTypes(attributes.rankingText)
+  const spokenScalp = inferScalpTypes(rankingText)
   const contextualScalp = inferEllipticalScalpTypes(request.message, historyHasSafeScalpContext)
   const ingredientExclusion = readIngredientExclusion(attributes.clauses)
   const priorExclusions = priorAttributes.map(({ clauses }) => readIngredientExclusion(clauses))
@@ -296,7 +296,7 @@ function interpretHidrasplashNeeds(request: CustomerNeedsRequest<ChatPreferences
   ])
   const sensory = resolveContextValues(
     previous.map((message, index) => sensoryUpdate(message, priorAttributes[index])),
-    sensoryUpdate(request.message, { ...attributes, rankingText: removeSensoryTerms(attributes.rankingText, suppressed) }),
+    sensoryUpdate(request.message, { ...attributes, rankingText: removeSensoryTerms(rankingText, suppressed) }),
   )
   const effectiveSensory = needValue(sensory)?.filter((term) => !suppressed.includes(term))
   const historicalConcerns = latestHistoricalValue(previous, (message) => inferHairConcerns(readAttributeNeeds(message).rankingText))
@@ -322,7 +322,7 @@ function interpretHidrasplashNeeds(request: CustomerNeedsRequest<ChatPreferences
 
   return {
     category,
-    rankingText: removeSensoryTerms(attributes.rankingText, suppressed),
+    rankingText: removeSensoryTerms(rankingText, suppressed),
     conflictingStructured,
     objective: needFrom(currentSubcategory, historicalSubcategory),
     preferences: {
@@ -332,7 +332,7 @@ function interpretHidrasplashNeeds(request: CustomerNeedsRequest<ChatPreferences
         contextualScalp ?? latestHistoricalScalpTypes(previous),
       ),
       hairConcerns: needFrom(
-        preferences.hairConcerns ?? inferHairConcerns(attributes.rankingText),
+        preferences.hairConcerns ?? inferHairConcerns(rankingText),
         historicalConcerns?.length ? historicalConcerns : undefined,
       ),
       sensory: 'value' in sensory && effectiveSensory?.length

@@ -41,7 +41,7 @@ export interface DomainNeeds {
 
 export interface CustomerNeedsDomain<Preferences extends BudgetPreference, Needs extends DomainNeeds> {
   readonly vocabulary: ProductIntentVocabulary
-  interpret(request: CustomerNeedsRequest<Preferences>): Needs
+  interpret(request: CustomerNeedsRequest<Preferences>, comparisonText?: string): Needs
   isPreferenceFollowUp(message: string): boolean
   goal?(message: string, preferences?: Preferences): CommercialGoal
 }
@@ -183,14 +183,41 @@ function isInformational(message: string, plan: ChatGroundingPlan) {
   )
 }
 
-function contextStatement(message: string, vocabulary: ProductIntentVocabulary, historical = false) {
-  return message.split(/(?<=[.!?])\s+|(?<=;)\s*|,\s*(?=(?:e\s+)?(?:qual|quais|quanto|como|ser[aá] que|se eu)\b)/i)
-    .filter((part) => {
-      const plan = planChatGrounding(part, vocabulary)
-      return !isInformational(part, plan) && !(historical && plan.presentationIntent === 'comparison')
-    })
-    .join(' ')
-    .trim()
+function splitComparisonStatement(part: string) {
+  const text = normalize(part)
+  const hypothetical = /(?:,?\s+)(?:e\s+)?(?:se|caso|sera que|supondo|suponha|(?:com\s+(?:um\s+)?)?orcamento hipotetico)\b/
+  const direct = text.split(hypothetical, 1)[0]?.trim() ?? ''
+  const updateStart = /(?:[,:]\s*(?:e\s+)?|\s+(?:(?:e|com)\s+)?)(?=(?:sem|ate|no maximo|(?:meu\s+)?(?:orcamento|limite)|na verdade|(?:agora\s+)?(?:quero|prefiro|procuro)|nao (?:quero|pode|deve|precisa|recomende|gostei|considere|use|tenho mais limite)|evitar|incompativel com|tem que|precisa|deve|obrigatoriamente|(?:(?:agora|ja)\s+)?pode (?:ter|conter|ser))\b)/g
+  for (const marker of direct.matchAll(updateStart)) {
+    const topic = direct.slice(0, marker.index)
+    const statement = direct.slice(marker.index + marker[0].length)
+    // In a contrast such as “compare com e sem X”, X describes the options.
+    if (statement.startsWith('sem ') && !marker[0].includes(',') &&
+      (/\bcom(?:\s+e)?$/.test(topic) || /\b(?:com|e|versus)\s+(?:o|a|um|uma|outro|outra)\b/.test(statement))) {
+      continue
+    }
+    return { topic, statement }
+  }
+  return { topic: direct, statement: '' }
+}
+
+function contextStatement(message: string, vocabulary: ProductIntentVocabulary) {
+  const statements: string[] = []
+  const comparisonTopics: string[] = []
+  const parts = message.split(/(?<=[.!?])\s+|(?<=;)\s*|,\s*(?=(?:e\s+)?(?:qual|quais|quanto|como|ser[aá] que|se eu)\b)/i)
+  for (const part of parts) {
+    const plan = planChatGrounding(part, vocabulary)
+    if (isInformational(part, plan)) continue
+    if (plan.presentationIntent === 'comparison') {
+      const { topic, statement } = splitComparisonStatement(part)
+      // The topic helps this turn's comparison. Only customer declarations enter the active history.
+      comparisonTopics.push(topic)
+      if (statement) statements.push(statement)
+    } else {
+      statements.push(part)
+    }
+  }
+  return { statement: statements.join(' ').trim(), comparisonText: comparisonTopics.join(' ').trim() }
 }
 
 function goalChanged(goal: CommercialGoal, next: CommercialGoal) {
@@ -217,7 +244,7 @@ function resolveActiveHistory<Preferences extends BudgetPreference, Needs extend
       reset = true
       if (endsSearch(entry.content)) continue
     }
-    const content = contextStatement(entry.content, domain.vocabulary, true)
+    const { statement: content } = contextStatement(entry.content, domain.vocabulary)
     const reply = request.history[index + 1]
     if (!content) {
       // A comparison does not update the goal. Its reply still makes the
@@ -373,7 +400,7 @@ export function interpretCustomerNeeds<Preferences extends BudgetPreference, Nee
     (request.cart.length === 0 && request.preferences === undefined)
     ? messagePlan
     : planChatGrounding(request.message, domain.vocabulary, true)
-  const statement = contextStatement(request.message, domain.vocabulary)
+  const { statement, comparisonText } = contextStatement(request.message, domain.vocabulary)
   const asksForRationale = /^por que\b.*\b(?:sua|essa|esta)\b.*\brecomendacao\b/.test(normalize(request.message))
   const currentPlan: ChatGroundingPlan = !statement && !asksForRationale && rawPlan.presentationIntent === 'recommendation'
     ? { ...rawPlan, presentationIntent: 'text' }
@@ -427,12 +454,15 @@ export function interpretCustomerNeeds<Preferences extends BudgetPreference, Nee
     budget,
     exclusions: { declared, inferred },
     context: { interrupted, changedGoal, unresolvedRejection, recommendationIds },
-    domain: domain.interpret({
-      ...scopedRequest,
-      message: currentBudget.revoked ? '' : statement,
-      history: history.filter(({ role, content }) =>
-        role !== 'user' || !budgetRevocation.test(normalize(content)),
-      ),
-    }),
+    domain: domain.interpret(
+      {
+        ...scopedRequest,
+        message: currentBudget.revoked ? '' : statement,
+        history: history.filter(({ role, content }) =>
+          role !== 'user' || !budgetRevocation.test(normalize(content)),
+        ),
+      },
+      changedGoal ? undefined : comparisonText,
+    ),
   }
 }

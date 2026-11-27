@@ -1114,6 +1114,89 @@ test('product inquiries do not change the filters or the justification of a resu
   }
 })
 
+test('a recommendation resumes with the effective conditions declared during a comparison', async (t) => {
+  const initial = 'Quero shampoo anticaspa para couro oleoso até R$ 80.'
+  const cases = [
+    { name: 'informational comparison', message: 'Compare os produtos 9 e 13.',
+      budget: 80, comparisonType: 'comparison', selected: 13 },
+    { name: 'explicit budget correction', message: 'Compare os produtos 9 e 13, meu limite agora é R$ 47.',
+      budget: 47, comparisonType: 'recommendation', selected: 9, aboveBudget: 13 },
+    { name: 'budget and exclusion', message: 'Compare os produtos 9 e 13, sem zinco PCA e até R$ 50.',
+      budget: 50, comparisonType: 'text', selected: 10, aboveBudget: 11, excludesZinc: true },
+    { name: 'unverifiable requirement', message: 'Compare os produtos 9 e 13, tem que ter fragrância cítrica.',
+      budget: 80, comparisonType: 'text', selected: undefined },
+    { name: 'hypothetical budget', message: 'Compare os produtos 9 e 13 se eu tivesse até R$ 45.',
+      budget: 80, comparisonType: 'comparison', selected: 13 },
+  ]
+  for (const example of cases) {
+    await t.test(example.name, async () => {
+      const contexts: string[] = []
+      const comparedEligibility: Record<number, readonly string[]> = {}
+      const resumedEligibility: Record<number, readonly string[]> = {}
+      const captureEligibility = (target: typeof comparedEligibility) => (input: AgentModelInput) => {
+        for (const message of input.messages) {
+          if (message.role !== 'tool') continue
+          const { product } = JSON.parse(message.content) as {
+            product?: { id: number; eligibility: { reasons: string[] } }
+          }
+          if (product) target[product.id] = product.eligibility.reasons
+        }
+        return assistant('Consultei os produtos do catálogo.')
+      }
+      const service = await buildService(createQueueModel([
+        assistant(null, [detailsCall(13)]), assistant('Primeira opção.'),
+        (input) => {
+          contexts.push(input.messages.at(-1)?.content ?? '')
+          return assistant(null, [detailsCall(9), detailsCall(13)])
+        },
+        captureEligibility(comparedEligibility),
+        (input) => {
+          contexts.push(input.messages.at(-1)?.content ?? '')
+          const ids = example.excludesZinc ? [13, 10, 11] : [9, 13]
+          return assistant(null, ids.map(detailsCall))
+        },
+        captureEligibility(resumedEligibility),
+      ]))
+      const first = await execute(service, { message: initial })
+      assert.equal(first.type, 'recommendation')
+      const compared = await execute(service, {
+        message: example.message, history: conversationHistory([initial, first.message]),
+      })
+      assert.equal(compared.type, example.comparisonType)
+      if (compared.type === 'comparison') assert.deepEqual(compared.productIds, [9, 13])
+      if (compared.type === 'recommendation') assert.deepEqual(compared.productIds, [9])
+      const resumed = await execute(service, {
+        message: 'Também prefiro frescor.',
+        history: conversationHistory([initial, first.message], [example.message, compared.message]),
+      })
+      assert.equal(contexts.length, 2)
+      for (const context of contexts) {
+        assert.match(context, /"subcategory":"anticaspa"/)
+        assert.ok(context.includes(`"maxPrice":${example.budget}`), context)
+        if (example.excludesZinc) assert.match(context, /"incompatibleIngredientIds":\["zinco-pca"\]/)
+        else assert.doesNotMatch(context, /"incompatibleIngredientIds"/)
+      }
+      if (example.excludesZinc) {
+        assert.ok(comparedEligibility[9]?.includes('incompatible-ingredient'))
+        assert.ok(comparedEligibility[13]?.includes('incompatible-ingredient'))
+        assert.ok(resumedEligibility[13]?.includes('incompatible-ingredient'))
+      }
+      if (example.aboveBudget) assert.ok(resumedEligibility[example.aboveBudget]?.includes('above-price-limit'))
+      if (example.selected === undefined) {
+        assert.equal(compared.type === 'text' && compared.reason, 'clarification')
+        assert.equal(resumed.type, 'text')
+        assert.equal(resumed.reason, 'clarification')
+        assert.equal('products' in resumed, false)
+      } else {
+        assert.equal(resumed.type, 'recommendation', JSON.stringify(resumed))
+        assert.deepEqual(resumed.productIds, [example.selected])
+        assert.match(resumed.message, /dentro do limite de R\$/)
+        assert.ok(resumed.message.includes(`R$ ${example.budget},00`))
+      }
+    })
+  }
+})
+
 test('explicit budget revocation restores eligibility while keeping the active preference', async () => {
   const service = await buildService(createQueueModel([
     (input) => {

@@ -147,6 +147,77 @@ test('a comparison does not let an alternative refer to an older recommendation 
   assert.deepEqual(needs.budget, { origin: 'inferred', value: 60 })
 })
 
+test('comparison declarations have the same scope on the current turn and on replay', () => {
+  const initial = 'Quero shampoo anticaspa para couro oleoso até R$ 80.'
+  const read = (message: string, ...turns: string[]) => interpretCustomerNeeds(
+    chatRequestSchema.parse({ message, history: history(initial, ...turns) }), hidrasplashCustomerDomain,
+  )
+  const examples = [
+    ['Compare os produtos 9 e 13.', 80, undefined, undefined],
+    ['Compare um shampoo sem zinco PCA e outro com zinco PCA.', 80, undefined, undefined],
+    ['Compare os produtos 9 e 13, na verdade, meu limite agora é R$ 47.', 47, undefined, undefined],
+    ['Compare os produtos 9 e 13, sem zinco PCA e até R$ 50.', 50, 'zinco pca', undefined],
+    ['Compare os produtos 9 e 13, tem que ter fragrância cítrica.', 80, undefined, 'fragrancia citrica'],
+    ['Compare os produtos 9 e 13 se eu tivesse até R$ 45.', 80, undefined, undefined],
+    ['Compare os produtos 9 e 13, sem zinco PCA e se eu tivesse até R$ 45.', 80, 'zinco pca', undefined],
+    ['Qual a diferença entre shampoo para hidratação e sabonete com até R$ 45?', 80, undefined, undefined],
+  ] as const
+  for (const [comparison, budget, ingredient, requirement] of examples) {
+    const current = read(comparison)
+    const replayed = read('Também prefiro frescor.', comparison)
+    assert.equal(current.plan.presentationIntent, 'comparison', comparison)
+    assert.equal(replayed.plan.presentationIntent, 'recommendation', comparison)
+    assert.deepEqual(current.budget, { origin: budget === 80 ? 'inferred' : 'declared', value: budget }, comparison)
+    for (const [origin, needs] of [['declared', current], ['inferred', replayed]] as const) {
+      assert.equal(needs.context.changedGoal, false, comparison)
+      assert.deepEqual(needs.domain.objective, { origin: 'inferred', value: 'anticaspa' }, comparison)
+      assert.deepEqual(needs.domain.restrictions.ingredientExclusions,
+        ingredient ? { origin, value: [ingredient] } : { origin: 'absent' }, comparison)
+      assert.deepEqual(needs.domain.restrictions.unsupportedRequirement,
+        requirement ? { origin, value: requirement } : { origin: 'absent' }, comparison)
+    }
+    assert.deepEqual(replayed.budget, { origin: 'inferred', value: budget }, comparison)
+  }
+})
+
+test('a comparison can include an explicit rejection or a declared new goal', () => {
+  const initial = 'Quero shampoo anticaspa para couro oleoso até R$ 80.'
+  const newGoal = 'Compare os produtos 9 e 13. Agora quero um sabonete suave.'
+  const read = (message: string, ...turns: string[]) => interpretCustomerNeeds(
+    chatRequestSchema.parse({ message, history: history(initial, ...turns) }), hidrasplashCustomerDomain,
+  )
+  for (const rejection of ['não quero o produto 9', 'não gostei do produto 9', 'não considere o produto 9']) {
+    const comparison = `Compare os produtos 9 e 13, ${rejection}.`
+    assert.deepEqual(read(comparison).exclusions.declared, [9])
+    assert.deepEqual(read('Também prefiro frescor.', comparison).exclusions.inferred, [9])
+  }
+  const changed = read(newGoal)
+  assert.equal(changed.context.changedGoal, true)
+  const replayed = read('Também prefiro frescor.', newGoal)
+  assert.equal(replayed.plan.presentationIntent, 'recommendation')
+  assert.deepEqual(replayed.domain.category, { origin: 'inferred', value: 'sabonetes' })
+  assert.deepEqual(replayed.budget, { origin: 'absent' })
+})
+
+test('stationery preserves a budget and mandatory format stated with a comparison', () => {
+  const initial = 'Quero caderno para estudo com folha pautada até R$ 80.'
+  const comparison = 'Compare os cadernos para desenho com folha lisa, tem que ser formato A5 e até R$ 50.'
+  const read = (message: string, ...turns: string[]) => interpretCustomerNeeds({
+    message, history: history(initial, ...turns), cart: [],
+  }, papelariaCustomerDomain)
+  const current = read(comparison)
+  const replayed = read('Também prefiro folha pontilhada.', comparison)
+  assert.equal(current.plan.presentationIntent, 'comparison')
+  assert.equal(replayed.plan.presentationIntent, 'recommendation')
+  for (const [origin, needs] of [['declared', current], ['inferred', replayed]] as const) {
+    assert.deepEqual(needs.budget, { origin, value: 50 })
+    assert.deepEqual(needs.domain.restrictions.format, { origin, value: 'a5' })
+    assert.deepEqual(needs.domain.objective, { origin: 'inferred', value: 'estudo' })
+  }
+  assert.deepEqual(current.domain.preferences.paper, { origin: 'inferred', value: 'pautada' })
+  assert.deepEqual(replayed.domain.preferences.paper, { origin: 'declared', value: 'pontilhada' })
+})
+
 test('structured exclusions still apply after a new goal and resist contradictory revocation', () => {
   const previous = history('Quero shampoo anticaspa sem hortelã, prefiro frescor.')
   const switched = interpretCustomerNeeds(chatRequestSchema.parse({

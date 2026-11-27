@@ -1,4 +1,4 @@
-import { isClarificationDeferral, normalize, type CustomerNeedsRequest } from './customer-needs.js'
+import { clarificationReply, matchesClarificationQuestion, type CustomerNeedsRequest } from './customer-needs.js'
 import type { ChatGroundingPlan } from './chat-grounding-planner.js'
 
 const priorities = ['safety', 'restriction', 'ambiguity', 'selection', 'preference'] as const
@@ -16,10 +16,29 @@ export type ClarificationDecision =
   | { readonly action: 'search'; readonly selection: ChatGroundingPlan['presentationIntent']; readonly flexible: boolean; readonly question?: ClarificationIssue }
   | { readonly action: 'ask' | 'explain'; readonly issue: ClarificationIssue }
 
-function wasAsked(issue: ClarificationIssue, message: string) {
-  // A reply may contain verified policy text ahead of the question.
-  return issue.question !== undefined &&
-    (message === issue.question || message.endsWith(`\n\n${issue.question}`))
+function latestReplyForIssue(
+  issue: ClarificationIssue,
+  history: CustomerNeedsRequest['history'],
+  message: string,
+) {
+  let state: ReturnType<typeof clarificationReply>
+  for (let index = 1; index < history.length; index += 1) {
+    const entry = history[index]
+    const previous = history[index - 1]
+    if (entry?.role !== 'user') continue
+    const answer = clarificationReply(entry.content)
+    if (answer === 'delegated' && state !== undefined) {
+      state = answer
+      continue
+    }
+    if (answer && previous?.role === 'assistant' && issue.question &&
+      matchesClarificationQuestion(previous.content, issue.question) && state !== 'refused') {
+      state = answer
+    }
+  }
+  const current = clarificationReply(message)
+  if (current === 'delegated' || current === 'refused' || current === 'ended') return current
+  return state === 'refused' ? state : current ?? state
 }
 
 export function decideClarification(input: {
@@ -33,8 +52,8 @@ export function decideClarification(input: {
   const { plan, message, history, issues, selectionQuestion } = input
   const issue = priorities.map((priority) => issues.find((candidate) => candidate.priority === priority))
     .find((candidate) => candidate !== undefined)
-  const deferred = isClarificationDeferral(message)
   if (issue) {
+    const deferred = latestReplyForIssue(issue, history, message)
     return { action: issue.question && !deferred ? 'ask' : 'explain', issue }
   }
   if (plan.groundingRequirement === 'not_required') return { action: 'direct' }
@@ -42,14 +61,9 @@ export function decideClarification(input: {
     return { action: 'search', selection: plan.presentationIntent, flexible: false }
   }
 
-  const questionDeclined = history.some((entry, index) => {
-    const answer = history[index + 1]
-    return entry.role === 'assistant' && wasAsked(selectionQuestion, entry.content) &&
-      answer?.role === 'user' && isClarificationDeferral(answer.content)
-  })
-  if (deferred || questionDeclined) {
-    const declined = /^(?:nao quero|prefiro nao) responder\b/.test(normalize(message))
-    if (input.canChooseWithoutPreference && !declined) {
+  const response = latestReplyForIssue(selectionQuestion, history, message)
+  if (response) {
+    if (input.canChooseWithoutPreference && response !== 'refused' && response !== 'ended') {
       return { action: 'search', selection: 'recommendation', flexible: true }
     }
     return { action: 'explain', issue: selectionQuestion }

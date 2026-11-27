@@ -32,10 +32,14 @@ import {
 } from '../observability/chat-operational-events.js'
 import { hasFaqTopic, type ChatGroundingPlan } from './chat-grounding-planner.js'
 import {
+  clarificationReply,
   explicitRejectedProductIds,
   historicalUserMessages,
   interpretCustomerNeeds,
+  matchesClarificationQuestion,
   normalize,
+  shortBudgetAnswer,
+  shortProductAnswer,
 } from './customer-needs.js'
 import {
   hasSelectionDiscriminator,
@@ -215,6 +219,19 @@ const differentProductReference = new RegExp(
   `\\b(?:outro|outra|(?:${hidrasplashCustomerDomain.quoteProductNouns}) diferente)\\b`,
 )
 
+const priceQuestion = 'De qual produto você quer saber o preço?'
+const comparisonQuestion = 'Quais são os dois produtos que você quer comparar? Informe os dois IDs.'
+const quoteQuestions = {
+  quantity: 'A cotação calcula uma unidade por vez. Qual produto você quer cotar para uma unidade com frete?',
+  multiple: 'Qual dos produtos você quer usar nessa cotação? Informe um único ID de produto.',
+  product: 'Qual produto você quer usar nessa cotação? Informe um único ID de produto.',
+  current: 'Não consegui confirmar essa recomendação com as condições atuais. Qual é o ID do produto que você deseja cotar?',
+}
+
+function isPriceOnly(message: string) {
+  return /^(?:so|apenas) quero saber o preco[.!?]?$/.test(normalize(message))
+}
+
 function isQuoteIntent(message: string) {
   const normalized = normalize(message)
   const asksTotal = /\b(?:total|valor final)\b/.test(normalized)
@@ -227,6 +244,73 @@ function isQuoteIntent(message: string) {
         normalized,
       )))
   )
+}
+
+function referenceQuestion(message: string) {
+  if (matchesClarificationQuestion(message, priceQuestion)) return { kind: 'price', question: priceQuestion } as const
+  if (matchesClarificationQuestion(message, comparisonQuestion)) return { kind: 'comparison', question: comparisonQuestion } as const
+  const quote = Object.values(quoteQuestions).find((question) => matchesClarificationQuestion(message, question))
+  return quote === undefined ? undefined : { kind: 'quote', question: quote } as const
+}
+
+function referenceAnswer(message: string) {
+  const pair = normalize(message).match(/^(?:os )?produtos? (?:id )?(\d{1,6}) (e|ou) (?:(?:o )?produto )?(?:id )?(\d{1,6})[.!]?$/)
+  const single = shortProductAnswer(message)
+  const ids = pair?.[2] === 'e' && pair[1] !== pair[3] ? [Number(pair[1]), Number(pair[3])] :
+    single === undefined ? [] : [single]
+  return {
+    ids,
+    attempted: ids.length > 0 || pair !== null || shortBudgetAnswer(message) !== undefined || clarificationReply(message) !== undefined,
+  }
+}
+
+function resolveReferenceFollowUp(request: ChatRequest, catalog: CatalogRepository) {
+  const answer = referenceAnswer(request.message)
+  if (!answer.attempted || clarificationReply(request.message) === 'ended') return undefined
+  const last = request.history.at(-1)
+  const pending = last?.role === 'assistant' ? referenceQuestion(last.content) : undefined
+  if (!pending) return undefined
+  const count = pending.kind === 'comparison' ? 2 : 1
+
+  // Replay only a contiguous question/answer sequence with an actual user request at its start.
+  for (let index = request.history.length - 2; index >= 0; index -= 2) {
+    const user = request.history[index]
+    const assistant = request.history[index + 1]
+    if (user?.role !== 'user' || assistant?.role !== 'assistant' ||
+      referenceQuestion(assistant.content)?.kind !== pending.kind) break
+    const original = user.content
+    const requested = pending.kind === 'price' ? isPriceOnly(original) :
+      pending.kind === 'comparison'
+        ? hasUnresolvedComparisonReference(original) && explicitComparisonIds(original, catalog).length !== 2
+        : isQuoteIntent(original) &&
+          (quantityReference.test(normalize(original)) || explicitInformationalProductIds(original).length !== 1)
+    if (requested) {
+      const [first, second] = answer.ids
+      if (answer.ids.length === count && first !== undefined) {
+        if (pending.kind === 'price') return { priceId: first } as const
+        if (pending.kind === 'quote') return { message: `Quanto fica o total do produto ${first} com frete?` } as const
+        if (second !== undefined && answer.ids.every((id) => catalog.findById(id) !== undefined)) {
+          return { message: `Compare os produtos ${first} e ${second}. ${original}` } as const
+        }
+      }
+      return { pending } as const
+    }
+    const previous = referenceAnswer(original)
+    if (!previous.attempted || previous.ids.length === count || clarificationReply(original) === 'ended') break
+  }
+  return undefined
+}
+
+function currentPriceResponse(catalog: CatalogRepository, id: number, requestId: string): ChatResponse | undefined {
+  const product = catalog.findById(id)
+  const price = product && priceToCents(product.price)
+  if (!product || price === undefined) return undefined
+  return chatResponseSchema.parse({
+    type: 'text',
+    message: `${product.name}: preço atual de ${formatCommercialCents(price)}.`,
+    sourceIds: [],
+    requestId,
+  })
 }
 
 function contextualQuoteResponse(
@@ -243,7 +327,7 @@ function contextualQuoteResponse(
     return quoteClarification(
       requestId,
       'quantity',
-      'A cotação calcula uma unidade por vez. Qual produto você quer cotar para uma unidade com frete?',
+      quoteQuestions.quantity,
     )
   }
 
@@ -252,7 +336,7 @@ function contextualQuoteResponse(
     return quoteClarification(
       requestId,
       'product',
-      'Qual dos produtos você quer usar nessa cotação? Informe um único ID de produto.',
+      quoteQuestions.multiple,
     )
   }
   const explicitId = explicitIds[0]
@@ -266,7 +350,7 @@ function contextualQuoteResponse(
     return quoteClarification(
       requestId,
       'product',
-      'Qual produto você quer usar nessa cotação? Informe um único ID de produto.',
+      quoteQuestions.product,
     )
   }
 
@@ -298,7 +382,7 @@ function contextualQuoteResponse(
     return quoteClarification(
       requestId,
       'product',
-      'Não consegui confirmar essa recomendação com as condições atuais. Qual é o ID do produto que você deseja cotar?',
+      quoteQuestions.current,
     )
   }
   const quote = composer.quote(product)
@@ -532,19 +616,19 @@ export function createChatService(
         })
         return response
       }
-      const request = chatRequestSchema.parse(rawInput)
+      const received = chatRequestSchema.parse(rawInput)
       if (execution.signal.aborted) {
         throw new ChatServiceError('REQUEST_CANCELLED')
       }
-      for (const item of request.cart) {
+      for (const item of received.cart) {
         if (options.catalog.findById(item.productId) === undefined) {
           throw new ChatServiceError('INVALID_REQUEST')
         }
       }
 
       const clinicalBoundary = profile.presentation?.clinicalBoundary?.(
-        request.message,
-        historicalUserMessages(request),
+        received.message,
+        historicalUserMessages(received),
       )
       if (clinicalBoundary) {
         return completeEarly(
@@ -559,6 +643,23 @@ export function createChatService(
         )
       }
 
+      const followUp = resolveReferenceFollowUp(received, options.catalog)
+      if (followUp?.priceId !== undefined) {
+        return currentPriceResponse(options.catalog, followUp.priceId, execution.requestId) ??
+          chatResponseSchema.parse({
+            type: 'text', reason: 'unable_to_verify', sourceIds: [], requestId: execution.requestId,
+            message: 'Não consegui verificar o preço atual do produto indicado.',
+          })
+      }
+      if (followUp?.pending) {
+        const { kind, question } = followUp.pending
+        return controlledClarification({
+          action: clarificationReply(received.message) ? 'explain' : 'ask',
+          issue: { reason: `${kind}_reference`, priority: 'ambiguity', attribute: 'product', question,
+            limitation: 'Preciso identificar o produto ou os produtos para responder com segurança.' },
+        }, execution.requestId)
+      }
+      const request = followUp?.message ? { ...received, message: followUp.message } : received
       const needs = interpretCustomerNeeds(
         request,
         hidrasplashCustomerDomain,
@@ -601,32 +702,36 @@ export function createChatService(
       ) {
         issues.push({
           reason: 'comparison_reference', priority: 'ambiguity', attribute: 'products',
-          question: 'Quais são os dois produtos que você quer comparar? Informe os dois IDs.',
+          question: comparisonQuestion,
           limitation: 'Preciso identificar os dois produtos para fazer uma comparação.',
         })
       }
-      if (
-        plan.presentationIntent === 'text' &&
-        /^(?:so|apenas) quero saber o preco[.!?]?$/.test(normalize(request.message))
-      ) {
+      if (plan.presentationIntent === 'text' && isPriceOnly(request.message)) {
         const [id] = needs.context.recommendationIds
         if (needs.context.recommendationIds.length === 1 && id !== undefined &&
           !commercial.rejectedProductIds.has(id) && !needs.context.unresolvedRejection) {
-          const product = options.catalog.findById(id)
-          const price = product && priceToCents(product.price)
-          if (product && price !== undefined) {
-            return chatResponseSchema.parse({
-              type: 'text',
-              message: `${product.name}: preço atual de ${formatCommercialCents(price)}.`,
-              sourceIds: [],
-              requestId: execution.requestId,
-            })
-          }
+          const price = currentPriceResponse(options.catalog, id, execution.requestId)
+          if (price) return price
         }
         issues.push({
           reason: 'price_reference', priority: 'ambiguity', attribute: 'product',
-          question: 'De qual produto você quer saber o preço?',
+          question: priceQuestion,
           limitation: 'Preciso identificar o produto para informar o preço.',
+        })
+      }
+      if (shortBudgetAnswer(received.message) !== undefined && !needs.context.budgetAnswerConfirmed &&
+        !issues.some((issue) => issue.attribute === 'budget')) {
+        issues.push({
+          reason: 'numeric_reference', priority: 'ambiguity', attribute: 'number',
+          question: 'Esse número é um limite de preço ou se refere a um produto?',
+          limitation: 'Ainda não consegui identificar o que esse número representa.',
+        })
+      }
+      if (!followUp && referenceAnswer(received.message).ids.some((id) => !needs.exclusions.declared.includes(id))) {
+        issues.push({
+          reason: 'product_purpose', priority: 'ambiguity', attribute: 'product',
+          question: 'O que você quer saber sobre o produto ou os produtos que indicou?',
+          limitation: 'Preciso saber o que você quer consultar sobre esses produtos.',
         })
       }
       const decision = decideClarification({

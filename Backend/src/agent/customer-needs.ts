@@ -95,6 +95,7 @@ export interface CustomerNeeds<Needs extends DomainNeeds> {
     readonly unresolvedRejection: boolean
     readonly recommendationIds: readonly number[]
     readonly history: CustomerNeedsRequest['history']
+    readonly budgetAnswerConfirmed: boolean
   }
   readonly domain: Needs
 }
@@ -129,20 +130,47 @@ function extractBudget(value: string) {
   }
 }
 
-function latestHistoricalBudget(request: CustomerNeedsRequest): Need<number> {
-  let budget: Need<number> = { origin: 'absent' }
-  for (const message of historicalUserMessages(request)) {
-    const next = extractBudget(message)
-    if (next.revoked) budget = { origin: 'absent' }
-    if (next.value !== undefined) budget = { origin: 'inferred', value: next.value }
-    if (next.ambiguous) {
-      budget = {
-        origin: 'ambiguous',
-        conservativeValue: budget.origin === 'ambiguous' ? budget.conservativeValue : needValue(budget),
-      }
-    }
+function updateHistoricalBudget(budget: Need<number>, message: string): Need<number> {
+  const next = extractBudget(message)
+  if (next.revoked) return { origin: 'absent' }
+  if (next.value !== undefined) return { origin: 'inferred', value: next.value }
+  if (next.ambiguous) return {
+    origin: 'ambiguous',
+    conservativeValue: budget.origin === 'ambiguous' ? budget.conservativeValue : needValue(budget),
   }
   return budget
+}
+
+export const budgetQuestion = 'Qual é o valor máximo que você quer gastar no produto?'
+
+export function matchesClarificationQuestion(reply: string, question: string) {
+  return reply === question || reply.endsWith(`\n\n${question}`)
+}
+
+export function shortBudgetAnswer(message: string) {
+  const amount = normalize(message).match(/^(?:r\$\s*)?(\d{1,6}(?:[.,]\d{1,2})?)(?:\s+reais)?[.!]?$/)?.[1]
+  return amount === undefined ? undefined : Number(amount.replace(',', '.'))
+}
+
+function hasBudgetQuestion(
+  budget: Need<number>,
+  reply: CustomerNeedsRequest['history'][number] | undefined,
+  structured?: number,
+) {
+  const previous = needValue(budget)
+  const conflict = budget.origin === 'ambiguous' ||
+    (structured !== undefined && previous !== undefined && previous !== structured)
+  return conflict && reply?.role === 'assistant' &&
+    matchesClarificationQuestion(reply.content, budgetQuestion)
+}
+
+function budgetAnswerStatement(message: string, matchesPendingBudget: boolean) {
+  const amount = matchesPendingBudget ? shortBudgetAnswer(message) : undefined
+  return amount === undefined ? message : `Até R$ ${amount}.`
+}
+
+function isBudgetAnswerAttempt(message: string) {
+  return /^(?:r\$\s*)?\d+(?:[.,]\d+)?(?:\s+reais)?(?:\s+(?:ou|e)\s+(?:r\$\s*)?\d+(?:[.,]\d+)?(?:\s+reais)?)?[.!]?$/.test(normalize(message))
 }
 
 export function historicalUserMessages(request: CustomerNeedsRequest) {
@@ -157,8 +185,14 @@ function endsSearch(message: string) {
   )
 }
 
-export function isClarificationDeferral(message: string) {
-  return /^(?:nao sei(?: dizer| responder)?|tanto faz|nao tenho (?:uma )?preferencia|voce (?:pode escolher|decide)|pode escolher|fica a seu criterio|nao quero responder|prefiro nao responder)[.!]?$/.test(normalize(message))
+export function clarificationReply(message: string) {
+  const text = normalize(message)
+  if (endsSearch(text)) return 'ended'
+  if (/^(?:nao quero|prefiro nao) responder[.!]?$/.test(text)) return 'refused'
+  if (/^nao sei(?: dizer| responder)?[.!]?$/.test(text)) return 'unknown'
+  if (/^(?:tanto faz|nao tenho (?:uma )?preferencia)[.!]?$/.test(text)) return 'indifferent'
+  if (/^(?:voce (?:pode escolher|decide)|pode escolher|fica a seu criterio)[.!]?$/.test(text)) return 'delegated'
+  return undefined
 }
 
 export const rejectedProductQuestion = 'Qual produto você quer deixar de fora? Informe o ID do produto.'
@@ -168,7 +202,7 @@ function changesTopic(message: string) {
 }
 
 export function asksForProductSelection(normalized: string) {
-  return /\b(?:(?:me|voce|pode|poderia) (?:indica[rs]?|recomenda[rs]?)|(?:pode|poderia) me ajudar a escolher)\b/.test(normalized)
+  return /\b(?:(?:me|voce|pode|poderia) (?:indic[ae][rs]?|recomend[ae][rs]?)|(?:pode|poderia) me ajudar a escolher)\b/.test(normalized)
 }
 
 function isInformational(message: string, plan: ChatGroundingPlan) {
@@ -242,17 +276,25 @@ function resolveActiveHistory<Preferences extends BudgetPreference, Needs extend
   let goal: CommercialGoal = {}
   let history: CustomerNeedsRequest<Preferences>['history'][number][] = []
   let reset = false
+  let budget: Need<number> = { origin: 'absent' }
   for (let index = 0; index < request.history.length; index += 1) {
     const entry = request.history[index]
     if (entry?.role !== 'user') continue
     if (endsSearch(entry.content) || changesTopic(entry.content)) {
       history = []
       goal = {}
+      budget = { origin: 'absent' }
       reset = true
       if (endsSearch(entry.content)) continue
     }
-    const { statement: content } = contextStatement(entry.content, domain.vocabulary)
+    const { statement } = contextStatement(entry.content, domain.vocabulary)
+    const pendingBudget = hasBudgetQuestion(budget, request.history[index - 1])
+    const content = budgetAnswerStatement(statement, pendingBudget)
     const reply = request.history[index + 1]
+    if (pendingBudget && content === statement && isBudgetAnswerAttempt(statement)) {
+      if (reply?.role === 'assistant' && matchesClarificationQuestion(reply.content, budgetQuestion)) history.push(reply)
+      continue
+    }
     if (!content) {
       // A comparison does not update the goal. Its reply still makes the
       // previous referent ambiguous if the next turn asks for an alternative.
@@ -265,16 +307,23 @@ function resolveActiveHistory<Preferences extends BudgetPreference, Needs extend
     if (goalChanged(goal, next)) {
       history = []
       goal = {}
+      budget = { origin: 'absent' }
       reset = true
     }
     goal = { category: next.category ?? goal.category, objective: next.objective ?? goal.objective }
+    budget = updateHistoricalBudget(budget, content)
     history.push({ ...entry, content })
     // Assistant content can only suggest a referent for a user's rejection.
     if (reply?.role === 'assistant') history.push(reply)
   }
   const next = domain.goal?.(statement, request.preferences) ?? {}
   const changedGoal = changesTopic(request.message) || goalChanged(goal, next)
-  return { history: changedGoal ? [] : history, changedGoal, reset }
+  return {
+    history: changedGoal ? [] : history,
+    budget: changedGoal ? { origin: 'absent' } as const : budget,
+    changedGoal,
+    reset,
+  }
 }
 
 function isCommercialContinuation(message: string, isPreferenceFollowUp: (message: string) => boolean) {
@@ -283,10 +332,10 @@ function isCommercialContinuation(message: string, isPreferenceFollowUp: (messag
     budget.value !== undefined ||
     budget.ambiguous ||
     budget.revoked ||
-    isClarificationDeferral(message) ||
+    clarificationReply(message) !== undefined ||
     isPreferenceFollowUp(message) ||
     asksForAlternative(message) ||
-    rejectedProductAnswer(message) !== undefined ||
+    shortProductAnswer(message) !== undefined ||
     explicitRejectedProductIds(message).size > 0
   )
 }
@@ -315,6 +364,7 @@ function preserveHistoricalRecommendationIntent(
   vocabulary: ProductIntentVocabulary,
   isPreferenceFollowUp: (message: string) => boolean,
   faqTopic: boolean,
+  answersPendingBudget: boolean,
 ): ChatGroundingPlan {
   if (
     currentPlan.presentationIntent !== 'text' ||
@@ -329,7 +379,7 @@ function preserveHistoricalRecommendationIntent(
   if (currentPlan.groundingRequirement === 'product') {
     return { ...currentPlan, presentationIntent: 'recommendation' }
   }
-  if (!isCommercialContinuation(request.message, isPreferenceFollowUp)) return currentPlan
+  if (!answersPendingBudget && !isCommercialContinuation(request.message, isPreferenceFollowUp)) return currentPlan
   return {
     groundingRequirement: faqTopic ? 'both' : 'product',
     presentationIntent: 'recommendation',
@@ -361,14 +411,14 @@ function rejectsReference(message: string) {
   return /\b(?:nao quero(?: mais)? (?:esse|este|essa|esta)|nao gostei (?:desse|deste|dessa|desta))(?:\s+(?:produto|opcao|item|recomendacao)\b|[.!?,]|$)/.test(normalize(message))
 }
 
-function rejectedProductAnswer(message: string) {
+export function shortProductAnswer(message: string) {
   const id = normalize(message).match(/^(?:(?:e )?o )?produto (?:id )?(\d{1,6})[.!]?$/)?.[1]
   return id === undefined ? undefined : Number(id)
 }
 
 function answeredRejectionQuestion(previous: CustomerNeedsRequest['history'][number] | undefined) {
   return previous?.role === 'assistant' &&
-    (previous.content === rejectedProductQuestion || previous.content.endsWith(`\n\n${rejectedProductQuestion}`))
+    matchesClarificationQuestion(previous.content, rejectedProductQuestion)
 }
 
 function resolveRejectedProducts(
@@ -386,7 +436,7 @@ function resolveRejectedProducts(
     const ids = explicitRejectedProductIds(entry.content)
     const previous = history[index - 1]
     if (unresolvedRejection && answeredRejectionQuestion(previous)) {
-      const answer = rejectedProductAnswer(entry.content)
+      const answer = shortProductAnswer(entry.content)
       if (answer !== undefined) ids.add(answer)
       if (ids.size === 1) unresolvedRejection = false
     }
@@ -399,7 +449,7 @@ function resolveRejectedProducts(
   const declared = explicitRejectedProductIds(statement)
   const previous = history.at(-1)
   if (unresolvedRejection && answeredRejectionQuestion(previous)) {
-    const answer = rejectedProductAnswer(statement)
+    const answer = shortProductAnswer(statement)
     if (answer !== undefined) declared.add(answer)
     if (declared.size === 1) unresolvedRejection = false
   }
@@ -429,27 +479,30 @@ export function interpretCustomerNeeds<Preferences extends BudgetPreference, Nee
     (request.cart.length === 0 && request.preferences === undefined)
     ? messagePlan
     : planChatGrounding(request.message, domain.vocabulary, true)
-  const { statement, comparisonText } = contextStatement(request.message, domain.vocabulary)
+  const { statement: declaredStatement, comparisonText } = contextStatement(request.message, domain.vocabulary)
+  const { history, budget: historicalBudget, changedGoal, reset } =
+    resolveActiveHistory(request, domain, declaredStatement)
+  const pendingBudget = hasBudgetQuestion(historicalBudget, request.history.at(-1), request.preferences?.maxPrice)
+  const statement = budgetAnswerStatement(declaredStatement, pendingBudget)
   const asksForRationale = /^por que\b.*\b(?:sua|essa|esta)\b.*\brecomendacao\b/.test(normalize(request.message))
   const currentPlan: ChatGroundingPlan = !statement && !asksForRationale && rawPlan.presentationIntent === 'recommendation'
     ? { ...rawPlan, presentationIntent: 'text' }
     : rawPlan
-  const { history, changedGoal, reset } = resolveActiveHistory(request, domain, statement)
   const scopedRequest = { ...request, message: statement, history }
   const interrupted = endsSearch(request.message)
   const suppliedIds = request.recommendationContext?.productIds ?? []
   const staleReference = reset && suppliedIds.length === 1 &&
     !history.some(({ role, content }) => role === 'assistant' && resolveReference?.(content) === suppliedIds[0])
   const recommendationIds = changedGoal || interrupted || staleReference ? [] : suppliedIds
+  const needsBudgetClarification = pendingBudget && isBudgetAnswerAttempt(statement)
   const plan: ChatGroundingPlan = interrupted
     ? { presentationIntent: 'text', groundingRequirement: 'not_required' }
     : preserveHistoricalRecommendationIntent(
         scopedRequest, currentPlan, domain.vocabulary,
-        (message) => domain.isPreferenceFollowUp(message), hasFaqTopic(request.message),
+        (message) => domain.isPreferenceFollowUp(message), hasFaqTopic(request.message), needsBudgetClarification,
       )
   const currentBudget = extractBudget(statement)
   const structuredBudget = request.preferences?.maxPrice
-  const historicalBudget = latestHistoricalBudget(scopedRequest)
   const conflicts = structuredBudget !== undefined &&
     (currentBudget.revoked || (currentBudget.value !== undefined && structuredBudget !== currentBudget.value))
   const budget: Need<number> = currentBudget.ambiguous || conflicts
@@ -482,13 +535,16 @@ export function interpretCustomerNeeds<Preferences extends BudgetPreference, Nee
     plan,
     budget,
     exclusions: { declared, inferred },
-    context: { interrupted, changedGoal, unresolvedRejection, recommendationIds, history },
+    context: {
+      interrupted, changedGoal, unresolvedRejection, recommendationIds, history,
+      budgetAnswerConfirmed: statement !== declaredStatement,
+    },
     domain: domain.interpret(
       {
         ...scopedRequest,
-        message: currentBudget.revoked || isClarificationDeferral(statement) ? '' : statement,
+        message: currentBudget.revoked || clarificationReply(statement) ? '' : statement,
         history: history.filter(({ role, content }) =>
-          role !== 'user' || !(budgetRevocation.test(normalize(content)) || isClarificationDeferral(content)),
+          role !== 'user' || !(budgetRevocation.test(normalize(content)) || clarificationReply(content)),
         ),
       },
       changedGoal ? undefined : comparisonText,

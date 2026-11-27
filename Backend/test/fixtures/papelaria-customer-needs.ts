@@ -1,5 +1,5 @@
 import {
-  historicalUserMessages,
+  matchesClarificationQuestion,
   needFrom,
   needValue,
   normalize,
@@ -15,6 +15,7 @@ const formats = ['a4', 'a5', 'a6'] as const
 const papers = ['lisa', 'pautada', 'pontilhada', 'quadriculada'] as const
 type Format = typeof formats[number]
 type Paper = typeof papers[number]
+const requiredFormatQuestion = 'Qual formato é obrigatório para você?'
 
 function attribute<T extends string>(value: string | undefined, allowed: readonly T[]): Need<T> {
   if (value === undefined) return { origin: 'absent' }
@@ -67,8 +68,25 @@ function resolveAttribute<T>(
 }
 
 function interpret(request: CustomerNeedsRequest) {
-  const history = historicalUserMessages(request).map(readTurn)
-  const current = readTurn(request.message)
+  let pendingFormat: Need<Format> = { origin: 'absent' }
+  const read = (message: string, previous?: CustomerNeedsRequest['history'][number]) => {
+    const turn = readTurn(message)
+    const answer = normalize(message).match(/^(?:formato )?(a[456])[.!]?$/)?.[1]
+    if (pendingFormat.origin === 'ambiguous' && answer && previous?.role === 'assistant' &&
+      matchesClarificationQuestion(previous.content, requiredFormatQuestion)) {
+      return { ...turn, preferences: { ...turn.preferences, format: { origin: 'absent' } as const },
+        restrictions: { format: attribute(answer, formats) } }
+    }
+    return turn
+  }
+  const history = request.history.flatMap((entry, index) => {
+    if (entry.role !== 'user') return []
+    const turn = read(entry.content, request.history[index - 1])
+    if (turn.revokeFormat) pendingFormat = { origin: 'absent' }
+    if (turn.restrictions.format.origin !== 'absent') pendingFormat = turn.restrictions.format
+    return [turn]
+  })
+  const current = read(request.message, request.history.at(-1))
   return {
     category: resolveAttribute(history.map(({ category }) => ({ value: needFrom(category) })), { value: needFrom(current.category) }),
     objective: resolveAttribute(history.map(({ objective }) => ({ value: needFrom(objective) })), { value: needFrom(current.objective) }),
@@ -104,7 +122,7 @@ export function papelariaConsultation(domain: ReturnType<typeof interpret>): {
   if (domain.restrictions.format.origin === 'ambiguous') {
     return { issues: [{
       reason: 'format_conflict', priority: 'restriction', attribute: 'format',
-      question: 'Qual formato é obrigatório para você?',
+      question: requiredFormatQuestion,
       limitation: 'Sem confirmar o formato obrigatório, não consigo indicar um caderno.',
     }] }
   }

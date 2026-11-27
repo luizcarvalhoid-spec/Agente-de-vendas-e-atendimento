@@ -10,6 +10,7 @@ import type { ChatGroundingPlan } from './chat-grounding-planner.js'
 import type { ClarificationIssue } from './clarification-strategy.js'
 import {
   asksForProductSelection,
+  budgetQuestion,
   historicalUserMessages,
   needFrom,
   needValue,
@@ -66,11 +67,14 @@ function declaredProductGoal(message: string) {
   const request = text.match(/(?:^|[.;:!]\s*)(?:(?:agora|na verdade,?|em vez disso,?|eu)\s+)*(?:quero|procuro|preciso de|busco|estou procurando)\s+([^.;!?]+)/)?.[1]
   const product = request ?? (asksForProductSelection(text) ? text :
     text.match(/^(?:shampoo|anticaspa|condicionador|mascara|finalizador|sabonete|oleo corporal)\b[^.;!?]*/)?.[0])
-  const category = product ? inferCategory(product) : undefined
+  const categories = new Set(product?.split(/\s+ou\s+/).map(inferCategory).filter((category) => category !== undefined))
+  const ambiguousCategory = categories.size > 1
+  const category = ambiguousCategory ? undefined : [...categories][0]
   const explicitPurpose = /\b(?:agora quero|na verdade,? quero|em vez disso,? quero)\b/.test(text)
   return {
     category,
-    objective: product && (category !== undefined || explicitPurpose)
+    ambiguousCategory,
+    objective: product && !ambiguousCategory && (category !== undefined || explicitPurpose)
       ? inferSubcategory(product)
       : undefined,
   }
@@ -325,6 +329,7 @@ function interpretHidrasplashNeeds(request: CustomerNeedsRequest<ChatPreferences
 
   return {
     category,
+    ambiguousCategory: spokenGoal.ambiguousCategory,
     rankingText: removeSensoryTerms(rankingText, suppressed),
     conflictingStructured: conflictingStructuredAttribute !== undefined,
     conflictingStructuredAttribute,
@@ -372,7 +377,11 @@ export const hidrasplashCustomerDomain = {
   },
   isPreferenceFollowUp(message: string) {
     const attributes = readAttributeNeeds(message)
+    const { category, objective, ambiguousCategory } = declaredProductGoal(message)
     return (
+      ambiguousCategory ||
+      category !== undefined ||
+      objective !== undefined ||
       attributes.clauses.length > 0 ||
       inferSensoryTerms(attributes.rankingText) !== undefined ||
       inferScalpTypes(attributes.rankingText) !== undefined ||
@@ -400,8 +409,8 @@ export function translateHidrasplashNeeds(
   const { budget, domain } = needs
   const category = needValue(domain.category)
   const requestedSubcategory = needValue(domain.objective)
-  const conflictingScope = category !== undefined && requestedSubcategory !== undefined &&
-    !(SUBCATEGORIES_BY_CATEGORY[category] as readonly string[]).includes(requestedSubcategory)
+  const conflictingScope = domain.ambiguousCategory || (category !== undefined && requestedSubcategory !== undefined &&
+    !(SUBCATEGORIES_BY_CATEGORY[category] as readonly string[]).includes(requestedSubcategory))
   const subcategory = conflictingScope ? undefined : requestedSubcategory
   const maxPrice = budget.origin === 'ambiguous' ? budget.conservativeValue : needValue(budget)
   const effectiveSensoryTerms = needValue(domain.preferences.sensory) ?? []
@@ -481,7 +490,7 @@ export function translateHidrasplashNeeds(
   if (budget.origin === 'ambiguous') {
     issues.push({
       reason: 'budget_conflict', priority: 'restriction', attribute: 'budget',
-      question: 'Qual é o valor máximo que você quer gastar no produto?',
+      question: budgetQuestion,
       limitation: 'O limite de preço ainda está em aberto, então não consigo indicar um produto com segurança.',
     })
   } else if (invalidBudget) {
@@ -527,7 +536,15 @@ export function translateHidrasplashNeeds(
 
 type HidrasplashSearchContext = ReturnType<typeof translateHidrasplashNeeds>
 
+function hasCommercialScope(context: HidrasplashSearchContext) {
+  const input = context.searchInput
+  return input.category !== undefined || input.subcategory !== undefined ||
+    input.hairTypes !== undefined || input.scalpTypes !== undefined ||
+    input.hairConcerns !== undefined || input.skinTypes !== undefined || input.bodyConcerns !== undefined
+}
+
 export function hasSelectionDiscriminator(context: HidrasplashSearchContext) {
+  if (!hasCommercialScope(context)) return false
   const input = context.searchInput
   const normalized = normalize(input.query ?? '')
   return (
@@ -553,7 +570,7 @@ export function hidrasplashConsultation(
     return { issues: context.issues }
   }
   const { category, subcategory, hairConcerns } = context.searchInput
-  if (category === undefined && subcategory === undefined) {
+  if (!hasCommercialScope(context)) {
     return { issues: context.issues, selectionQuestion: {
       reason: 'missing_scope', priority: 'selection', attribute: 'category',
       question: 'Que tipo de produto você está procurando?',

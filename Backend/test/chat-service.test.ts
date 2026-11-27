@@ -1354,6 +1354,116 @@ test('a mandatory attribute that can only be ranked softly prevents a recommenda
   assert.equal('products' in response, false)
 })
 
+test('unverified obligations and exclusions return clarification even with authorized products', async (t) => {
+  const detail = toolCall('details', 'get_product_details', { productId: 13 })
+  for (const message of [
+    'Quero shampoo anticaspa para couro oleoso, sem hortelã, até R$ 60.',
+    'Quero shampoo anticaspa até R$ 60, sem hortelã.',
+    'Não quero hortelã. Procuro shampoo anticaspa para couro oleoso.',
+    'Quero shampoo anticaspa. Não pode ter hortelã.',
+    'Quero shampoo anticaspa. Quero frescor, mas sem hortelã.',
+    'Quero shampoo sem um ingrediente desconhecido.',
+    'Quero shampoo anticaspa. Tem que ter hortelã.',
+    'Quero shampoo anticaspa. Precisa conter hortelã.',
+    'Quero shampoo anticaspa. Precisa ser para couro oleoso.',
+  ]) {
+    await t.test(message, async () => {
+      const service = await buildService(createQueueModel([
+        assistant(null, [detail]),
+        assistant('Este shampoo atende a todas as condições.'),
+      ]))
+      const response = await execute(service, { message })
+      assert.equal(response.type, 'text')
+      if (response.type === 'text') assert.equal(response.reason, 'clarification')
+      assert.equal('products' in response, false)
+      assert.doesNotMatch(response.message, /atende a todas|sem hortelã/i)
+    })
+  }
+
+  await t.test('comparison with two authorized products', async () => {
+    const service = await buildService(createQueueModel([
+      assistant(null, [
+        toolCall('other', 'get_product_details', { productId: 9 }),
+        detail,
+      ]),
+      assistant('Os dois têm hortelã.'),
+    ]))
+    const response = await execute(service, {
+      message: 'Compare os produtos 9 e 13. Tem que ter hortelã.',
+    })
+    assert.equal(response.type, 'text')
+    if (response.type === 'text') assert.equal(response.reason, 'clarification')
+    assert.equal('products' in response, false)
+  })
+
+  await t.test('clarification without grounded results from the model', async () => {
+    const service = await buildService(createQueueModel([assistant('Pode confirmar a restrição?')]))
+    const response = await execute(service, {
+      message: 'Quero shampoo anticaspa para couro oleoso, sem hortelã, até R$ 60.',
+    })
+    assert.equal(response.type, 'text')
+    if (response.type === 'text') assert.equal(response.reason, 'clarification')
+    assert.equal('products' in response, false)
+  })
+})
+
+test('only the positive form is a reason to recommend the mint-profile product', async (t) => {
+  for (const [modifier, positive] of [
+    ['Prefiro hortelã.', true],
+    ['Prefiro sem hortelã.', false],
+    ['Prefiro sem fragrância.', false],
+    ['Tanto faz ter hortelã.', false],
+  ] as const) {
+    await t.test(modifier, async () => {
+      const service = await buildService(createQueueModel([
+        (input) => {
+          const current = input.messages.at(-1)?.content ?? ''
+          assert.doesNotMatch(current, /incompatibleIngredientIds/)
+          return assistant(null, [toolCall('details', 'get_product_details', { productId: 13 })])
+        },
+        assistant('Hortelã é materialmente comprovada na formulação.'),
+      ]))
+      const response = await execute(service, {
+        message: `Quero shampoo anticaspa para couro oleoso até R$ 60. ${modifier}`,
+      })
+      assert.equal(response.type, 'recommendation')
+      if (response.type === 'recommendation') assert.deepEqual(response.productIds, [13])
+      assert.equal(/preferência por hortelã/i.test(response.message), positive)
+      assert.doesNotMatch(response.message, /materialmente comprovada|sem hortelã|sem fragrância/i)
+    })
+  }
+})
+
+test('a valid exclusion, the budget and stock independently protect eligibility', async (t) => {
+  for (const [label, modifier, change] of [
+    ['canonical ingredient exclusion in the middle', 'sem cocamidopropil-betaína, até R$ 60.', (product: Product) => product],
+    ['price over budget with a negative preference', 'prefiro sem hortelã, até R$ 60.', (product: Product) => ({ ...product, price: 61, originalPrice: undefined })],
+    ['out of stock with a negative preference', 'prefiro sem hortelã, até R$ 60.', (product: Product) => ({ ...product, stock: 0 })],
+  ] as const) {
+    await t.test(label, async () => {
+      const catalog = await catalogWithProduct13(change)
+      const service = await buildService(createQueueModel([
+        (input) => {
+          const current = input.messages.at(-1)?.content ?? ''
+          assert.match(current, /"maxPrice":60/)
+          assert.match(current, /"requireInStock":true/)
+          if (modifier.startsWith('sem cocamidopropil')) {
+            assert.match(current, /"incompatibleIngredientIds":\["cocamidopropil-betaina"\]/)
+          }
+          return assistant(null, [toolCall('details', 'get_product_details', { productId: 13 })])
+        },
+        assistant('Pode comprar o produto de qualquer forma.'),
+      ]), { catalog })
+      const response = await execute(service, {
+        message: `Quero shampoo anticaspa para couro oleoso, ${modifier}`,
+      })
+      assert.equal(response.type, 'text')
+      assert.equal('products' in response, false)
+      assert.doesNotMatch(response.message, /pode comprar/i)
+    })
+  }
+})
+
 test('unknown cart IDs are rejected before any model call', async () => {
   let called = false
   const service = await buildService({

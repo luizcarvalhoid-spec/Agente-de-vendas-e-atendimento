@@ -125,7 +125,9 @@ test('HidraSplash translates an ingredient restriction without upgrading an ingr
     preferences: { avoidIngredients: ['cocamidopropil betaina'] },
   })
   const needs = interpretCustomerNeeds(input, hidrasplashCustomerDomain)
-  assert.deepEqual(needs.domain.preferences.preferredIngredientExclusion, { origin: 'declared', value: 'fragrancia' })
+  assert.deepEqual(needs.domain.preferences.preferredIngredientExclusions, {
+    origin: 'declared', value: ['fragrancia'],
+  })
   assert.deepEqual(needs.budget, { origin: 'declared', value: 50 })
   const context = translateHidrasplashNeeds(needs, input, index)
   assert.equal(context.needsClarification, false)
@@ -134,6 +136,108 @@ test('HidraSplash translates an ingredient restriction without upgrading an ingr
   assert.equal('scalpTypes' in context.constraints, false)
   const policy = createProductEligibilityPolicy(index, context.constraints)
   assert.deepEqual(index.search(context.searchInput, policy, createAgentToolExecutionContext(new AbortController().signal)), [])
+})
+
+test('negative ingredient clauses retain their force in the beginning, middle or end', async (t) => {
+  const catalog = await loadCatalogRepository()
+  const index = createProductSearchIndex(catalog.listAll())
+  for (const [message, term, required, positive, budget] of [
+    ['Quero shampoo anticaspa para couro oleoso, sem hortelã, até R$ 60.', 'hortela', true, undefined, 60],
+    ['Quero shampoo anticaspa até R$ 60, sem hortelã.', 'hortela', true, undefined, 60],
+    ['Não quero hortelã. Procuro shampoo anticaspa para couro oleoso.', 'hortela', true, undefined, undefined],
+    ['Prefiro sem hortelã.', 'hortela', false, undefined, undefined],
+    ['Não pode ter hortelã.', 'hortela', true, undefined, undefined],
+    ['Quero frescor, mas sem hortelã.', 'hortela', true, 'frescor', undefined],
+    ['Prefiro sem fragrância.', 'fragrancia', false, undefined, undefined],
+    ['Quero shampoo sem um ingrediente desconhecido.', 'um ingrediente desconhecido', true, undefined, undefined],
+  ] as const) {
+    await t.test(message, () => {
+      const input = chatRequestSchema.parse({ message })
+      const needs = interpretCustomerNeeds(input, hidrasplashCustomerDomain)
+      assert.deepEqual(
+        needs.domain.restrictions.ingredientExclusions,
+        required ? { origin: 'declared', value: [term] } : { origin: 'absent' },
+      )
+      assert.deepEqual(
+        needs.domain.preferences.preferredIngredientExclusions,
+        required ? { origin: 'absent' } : { origin: 'declared', value: [term] },
+      )
+      assert.deepEqual(
+        needs.domain.preferences.sensory,
+        positive ? { origin: 'declared', value: [positive] } : { origin: 'absent' },
+      )
+      const context = translateHidrasplashNeeds(needs, input, index)
+      assert.equal(context.constraints.maxPrice, budget)
+      assert.equal(context.constraints.requireInStock, true)
+      assert.equal(context.constraints.incompatibleIngredientIds, undefined)
+      assert.equal(context.needsClarification, required)
+      assert.doesNotMatch(context.searchInput.query ?? '', new RegExp(term))
+    })
+  }
+})
+
+test('positive obligations, prohibitions, preferences and indifference have distinct meanings', async (t) => {
+  const catalog = await loadCatalogRepository()
+  const index = createProductSearchIndex(catalog.listAll())
+  for (const [message, required, excluded, preferred] of [
+    ['Prefiro hortelã.', undefined, undefined, 'hortela'],
+    ['Tem que ter hortelã.', 'hortela', undefined, undefined],
+    ['Precisa conter hortelã.', 'hortela', undefined, undefined],
+    ['Não pode ter hortelã.', undefined, 'hortela', undefined],
+    ['Tanto faz ter hortelã.', undefined, undefined, undefined],
+    ['Não precisa conter hortelã.', undefined, undefined, undefined],
+    ['Tem que ter fragrância cítrica.', 'fragrancia citrica', undefined, undefined],
+    ['Precisa ser para couro oleoso.', 'couro oleoso', undefined, undefined],
+  ] as const) {
+    await t.test(message, () => {
+      const input = chatRequestSchema.parse({ message })
+      const needs = interpretCustomerNeeds(input, hidrasplashCustomerDomain)
+      assert.deepEqual(
+        needs.domain.restrictions.unsupportedRequirement,
+        required ? { origin: 'declared', value: required } : { origin: 'absent' },
+      )
+      assert.deepEqual(
+        needs.domain.restrictions.ingredientExclusions,
+        excluded ? { origin: 'declared', value: [excluded] } : { origin: 'absent' },
+      )
+      assert.deepEqual(
+        needs.domain.preferences.sensory,
+        preferred ? { origin: 'declared', value: [preferred] } : { origin: 'absent' },
+      )
+      const context = translateHidrasplashNeeds(needs, input, index)
+      assert.equal(context.needsClarification, Boolean(required || excluded))
+      assert.equal(context.constraints.incompatibleIngredientIds, undefined)
+      assert.equal(context.searchInput.scalpTypes, undefined)
+    })
+  }
+})
+
+test('an explicit negative or neutral attribute suppresses the same historical sensory preference', () => {
+  for (const message of ['Prefiro sem hortelã.', 'Tanto faz ter hortelã.']) {
+    const input = chatRequestSchema.parse({
+      message,
+      history: [
+        { role: 'user', content: 'Quero shampoo anticaspa, prefiro hortelã e frescor.' },
+        { role: 'assistant', content: 'Entendi.' },
+      ],
+    })
+    const needs = interpretCustomerNeeds(input, hidrasplashCustomerDomain)
+    assert.deepEqual(needs.domain.preferences.sensory, { origin: 'inferred', value: ['frescor'] })
+  }
+})
+
+test('multiple clauses do not join separate exclusions or discard later positive criteria', async () => {
+  const catalog = await loadCatalogRepository()
+  const index = createProductSearchIndex(catalog.listAll())
+  const input = chatRequestSchema.parse({
+    message: 'Quero shampoo anticaspa sem cocamidopropil-betaína e sem zinco PCA, mas quero frescor, até R$ 60.',
+  })
+  const needs = interpretCustomerNeeds(input, hidrasplashCustomerDomain)
+  const context = translateHidrasplashNeeds(needs, input, index)
+  assert.deepEqual(context.constraints.incompatibleIngredientIds, ['cocamidopropil-betaina', 'zinco-pca'])
+  assert.equal(context.needsClarification, false)
+  assert.deepEqual(context.presentation.sensoryTerms, ['frescor'])
+  assert.equal(context.constraints.maxPrice, 60)
 })
 
 test('budget and unknown or incompatible mandatory conditions cannot yield a relaxed search', async () => {

@@ -644,8 +644,14 @@ export function createChatService(
         groundingRequirement: plan.groundingRequirement,
         signal: execution.signal,
       })
+      const faqAnswer = result.grounding.faq === 'found'
+        ? composer.faq(request.message, result.faqSourceIds)
+        : undefined
 
       if (result.status !== 'completed') {
+        if (commercial.needsClarification && result.termination === 'INSUFFICIENT_GROUNDING') {
+          return controlledTextResponse(execution.requestId, result, plan, faqAnswer, true)
+        }
         if (
           consultationQuestion &&
           plan.groundingRequirement === 'product' &&
@@ -665,9 +671,6 @@ export function createChatService(
           execution.requestId,
         )
       }
-      const faqAnswer = result.grounding.faq === 'found'
-        ? composer.faq(request.message, result.faqSourceIds)
-        : undefined
       const mixedFaq = plan.groundingRequirement === 'both' ? faqAnswer : undefined
       const mixedFaqText = mixedFaq?.message ?? (
         plan.groundingRequirement === 'both' && result.grounding.faq === 'not_found'

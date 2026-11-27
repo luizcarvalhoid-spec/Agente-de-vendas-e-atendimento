@@ -1037,6 +1037,83 @@ test('a rejected recommendation stays excluded after a later request for an alte
   if (third.type === 'recommendation') assert.deepEqual(third.productIds, [10])
 })
 
+test('successive requests for an alternative do not recycle previous recommendations', async () => {
+  const initial = 'Quero shampoo anticaspa para couro oleoso e frescor até R$ 60.'
+  const alternative = 'Me mostre outra opção.'
+  const service = await buildService(createQueueModel([
+    assistant(null, [detailsCall(13)]), assistant('Primeira opção.'),
+    assistant(null, [detailsCall(13), detailsCall(9)]), assistant('Alternativa.'),
+    assistant(null, [detailsCall(13), detailsCall(9), detailsCall(10)]), assistant('Nova opção.'),
+  ]))
+  const first = await execute(service, { message: initial })
+  assert.equal(first.type, 'recommendation')
+  assert.deepEqual(first.productIds, [13])
+  const second = await execute(service, {
+    message: alternative,
+    history: conversationHistory([initial, first.message]),
+    recommendationContext: { productIds: [13] },
+  })
+  assert.equal(second.type, 'recommendation')
+  assert.deepEqual(second.productIds, [9])
+  const third = await execute(service, {
+    message: alternative,
+    history: conversationHistory([initial, first.message], [alternative, second.message]),
+    recommendationContext: { productIds: [9] },
+  })
+  assert.equal(third.type, 'recommendation')
+  assert.deepEqual(third.productIds, [10])
+})
+
+test('an ambiguous reference for an alternative never selects one previous product by default', async () => {
+  const service = await buildService(createQueueModel([
+    assistant(null, [detailsCall(13), detailsCall(9), detailsCall(10)]), assistant('Escolhi um produto.'),
+  ]))
+  const response = await execute(service, {
+    message: 'Me mostre outra opção.',
+    history: conversationHistory([
+      'Quero shampoo anticaspa para couro oleoso e frescor até R$ 60.',
+      'Comparei os produtos 9 e 13.',
+    ]),
+    recommendationContext: { productIds: [9, 13] },
+  })
+  assert.equal(response.type, 'text')
+  assert.equal(response.reason, 'clarification')
+  assert.equal('products' in response, false)
+})
+
+test('product inquiries do not change the filters or the justification of a resumed search', async (t) => {
+  const initial = 'Quero shampoo anticaspa sem zinco PCA, até R$ 60.'
+  const questions = [
+    'Esse shampoo também oferece hidratação?',
+    'Sabonete tem fragrância intensa?',
+    'Qual a diferença entre shampoo para hidratação e sabonete?',
+    'Será que até R$ 100 seria suficiente?',
+  ]
+  for (const question of questions) {
+    await t.test(question, async () => {
+      const service = await buildService(createQueueModel([
+        (input) => {
+          const current = input.messages.at(-1)?.content ?? ''
+          assert.match(current, /"subcategory":"anticaspa"/)
+          assert.match(current, /"maxPrice":60/)
+          assert.match(current, /"incompatibleIngredientIds":\["zinco-pca"\]/)
+          return assistant(null, [detailsCall(13), detailsCall(10)])
+        },
+        assistant('Escolhi o candidato verificado.'),
+      ]))
+      const response = await execute(service, {
+        message: 'Também prefiro frescor.',
+        history: conversationHistory([initial, 'Entendi.'], [question, 'Consultei o catálogo.']),
+      })
+      assert.equal(response.type, 'recommendation', JSON.stringify(response))
+      assert.deepEqual(response.productIds, [10])
+      assert.match(response.message, /dentro do limite de R\$ 60,00.*objetivo anticaspa/)
+      assert.doesNotMatch(response.message, /preferência por frescor/)
+      assert.doesNotMatch(response.message, /preferência por experiência intensa/)
+    })
+  }
+})
+
 test('explicit budget revocation restores eligibility while keeping the active preference', async () => {
   const service = await buildService(createQueueModel([
     (input) => {
@@ -1428,6 +1505,74 @@ test('an explicit current product replaces stale recommendation context in a quo
   assert.match(response.message, /R\$ 46,90/)
   assert.match(response.message, /R\$ 59,80/)
   assert.equal(modelCalls, 0)
+})
+
+test('contextual quotes enforce current restrictions without calling the model', async (t) => {
+  const message = 'Quanto fica o total com frete desse shampoo?'
+  const first = 'Quero shampoo anticaspa para couro oleoso e frescor até R$ 60.'
+  const recommendationContext = { productIds: [13] }
+  let modelCalls = 0
+  const service = await buildService(neverCalledModel(() => { modelCalls += 1 }))
+  const updated = (...turns: string[]) => conversationHistory(
+    [first, 'Entendi.'], ...turns.map((turn) => [turn, 'Entendi.'] as const),
+  )
+  const cases = [
+    ['historical budget', message, updated('Na verdade, meu limite agora é R$ 40.')],
+    ['same-turn budget', `Na verdade, meu limite agora é R$ 40. ${message}`, updated()],
+    ['ingredient', message, updated('Sem zinco PCA.')],
+    ['unverifiable requirement', message, updated('Tem que ter fragrância cítrica.')],
+    ['unverifiable ingredient', message, updated('Sem ingrediente imaginário.')],
+    ['prior rejection', message, updated('Não quero o produto 13.')],
+    ['direct change of goal', `Agora quero um sabonete. ${message}`, updated()],
+    ['prior change of goal', message, updated('Agora quero um sabonete.')],
+    ['prior end of goal', message, updated('Deixa pra lá.')],
+  ] as const
+  for (const [name, text, history] of cases) {
+    await t.test(name, async () => {
+      const response = await execute(service, { message: text, history, recommendationContext })
+      assert.equal(response.type, 'text')
+      assert.equal(response.reason, 'clarification')
+      assert.deepEqual(response.sourceIds, [])
+      assert.doesNotMatch(response.message, /R\$|61,80/)
+    })
+  }
+  const hypothetical = await execute(service, {
+    message, history: updated('Será que até R$ 20 seria suficiente?'), recommendationContext,
+  })
+  assert.match(hypothetical.message, /R\$ 61,80/)
+  assert.deepEqual(hypothetical.sourceIds, ['faq-002', 'faq-003'])
+  const explicit = await execute(service, {
+    message: 'Quanto fica o total do produto 13 com frete?',
+    history: updated('Na verdade, meu limite agora é R$ 40.', 'Sem zinco PCA.', 'Agora quero um sabonete.'),
+    preferences: { maxPrice: 40, avoidIngredients: ['zinco-pca'] },
+    recommendationContext,
+  })
+  assert.equal(explicit.type, 'text')
+  assert.match(explicit.message, /R\$ 61,80/)
+  assert.deepEqual(explicit.sourceIds, ['faq-002', 'faq-003'])
+  assert.equal('products' in explicit, false)
+  assert.doesNotMatch(explicit.message, /compatível|recomendaria/i)
+  assert.equal(modelCalls, 0)
+})
+
+test('a new recommendation in the active goal can be quoted after a goal change', async () => {
+  const oldRequest = 'Quero shampoo anticaspa para couro oleoso e frescor até R$ 60.'
+  const newRequest = 'Agora quero um sabonete suave.'
+  const initialHistory = conversationHistory([oldRequest, 'Entendi.'])
+  const service = await buildService(createQueueModel([
+    assistant(null, [detailsCall(15)]), assistant('Encontrei uma opção.'),
+  ]))
+  const recommendation = await execute(service, { message: newRequest, history: initialHistory })
+  assert.equal(recommendation.type, 'recommendation')
+  assert.deepEqual(recommendation.productIds, [15])
+  const quoteService = await buildService(neverCalledModel(() => assert.fail('A cotação deve ser antecipada')))
+  const quote = await execute(quoteService, {
+    message: 'Quanto fica o total com frete desse produto?',
+    history: conversationHistory([oldRequest, 'Entendi.'], [newRequest, recommendation.message]),
+    recommendationContext: { productIds: [15] },
+  })
+  assert.ok(quote.sourceIds.length > 0)
+  assert.match(quote.message, /R\$/)
 })
 
 test('contextual quote revalidates removal, stock, price and required FAQ sources', async (t) => {

@@ -23,9 +23,10 @@ function attribute<T extends string>(value: string | undefined, allowed: readonl
 
 function goal(text: string) {
   const message = normalize(text)
+  const request = message.match(/(?:^|[.;:]\s*)(?:agora\s+)?(?:quero|procuro|preciso de)\s+([^.;!?]*)/)?.[1]
   return {
-    category: /\bcadernos?\b/.test(message) ? 'caderno' as const : undefined,
-    objective: message.match(/\bpara (estudo|desenho|anotacoes)\b/)?.[1],
+    category: request && /\bcadernos?\b/.test(request) ? 'caderno' as const : undefined,
+    objective: request?.match(/\bpara (estudo|desenho|anotacoes)\b/)?.[1],
   }
 }
 

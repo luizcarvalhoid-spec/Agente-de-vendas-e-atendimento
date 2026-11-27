@@ -8,6 +8,7 @@ import {
 import type { ChatPreferences, ChatRequest } from '../contracts/chat.js'
 import type { ChatGroundingPlan } from './chat-grounding-planner.js'
 import {
+  asksForProductSelection,
   historicalUserMessages,
   needFrom,
   needValue,
@@ -27,10 +28,9 @@ import {
 } from './tools/product-tools.js'
 
 function latestHistoricalValue<T>(
-  request: CustomerNeedsRequest<ChatPreferences>,
+  messages: readonly string[],
   infer: (message: string) => T | undefined,
 ) {
-  const messages = historicalUserMessages(request)
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const value = infer(messages[index] ?? '')
     if (value !== undefined) return value
@@ -59,41 +59,19 @@ function inferSubcategory(message: string): ProductSubcategory | undefined {
   return undefined
 }
 
-function relevantHistoricalProductMessages(request: CustomerNeedsRequest<ChatPreferences>) {
-  const messages = historicalUserMessages(request)
-  let start = 0
-  let category: ProductCategory | undefined
-  let subcategory: ProductSubcategory | undefined
-  for (let index = 0; index < messages.length; index += 1) {
-    const message = messages[index] ?? ''
-    const nextCategory = inferCategory(message)
-    const nextSubcategory = inferSubcategory(message)
-    if (
-      (nextCategory !== undefined &&
-        category !== undefined &&
-        nextCategory !== category) ||
-      (nextSubcategory !== undefined &&
-        subcategory !== undefined &&
-        nextSubcategory !== subcategory)
-    ) {
-      start = index
-    }
-    category = nextCategory ?? category
-    subcategory = nextSubcategory ?? subcategory
+function declaredProductGoal(message: string) {
+  const text = normalize(message)
+  const request = text.match(/(?:^|[.;:!]\s*)(?:(?:agora|na verdade,?|em vez disso,?|eu)\s+)*(?:quero|procuro|preciso de|busco|estou procurando)\s+([^.;!?]+)/)?.[1]
+  const product = request ?? (asksForProductSelection(text) ? text :
+    text.match(/^(?:shampoo|anticaspa|condicionador|mascara|finalizador|sabonete|oleo corporal)\b[^.;!?]*/)?.[0])
+  const category = product ? inferCategory(product) : undefined
+  const explicitPurpose = /\b(?:agora quero|na verdade,? quero|em vez disso,? quero)\b/.test(text)
+  return {
+    category,
+    objective: product && (category !== undefined || explicitPurpose)
+      ? inferSubcategory(product)
+      : undefined,
   }
-  return messages.slice(start)
-}
-
-function latestRelevantHistoricalValue<T>(
-  request: CustomerNeedsRequest<ChatPreferences>,
-  infer: (message: string) => T | undefined,
-) {
-  const messages = relevantHistoricalProductMessages(request)
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const value = infer(messages[index] ?? '')
-    if (value !== undefined) return value
-  }
-  return undefined
 }
 
 function inferScalpTypes(message: string): readonly ScalpType[] | undefined {
@@ -117,12 +95,12 @@ function inferEllipticalScalpTypes(
   return match?.[1] ? [match[1] as ScalpType] : undefined
 }
 
-function latestHistoricalScalpTypes(request: CustomerNeedsRequest<ChatPreferences>) {
+function latestHistoricalScalpTypes(messages: readonly string[]) {
   let hasSafeScalpContext = false
   let latest: readonly ScalpType[] | undefined
-  for (const message of relevantHistoricalProductMessages(request)) {
+  for (const message of messages) {
     hasSafeScalpContext ||=
-      inferSubcategory(message) === 'anticaspa' ||
+      declaredProductGoal(message).objective === 'anticaspa' ||
       /\bcouro(?: cabeludo)?\b/.test(normalize(message))
     latest =
       inferScalpTypes(readAttributeNeeds(message).rankingText) ??
@@ -273,29 +251,20 @@ function sensoryUpdate(message: string, attributes: ReturnType<typeof readAttrib
 function interpretHidrasplashNeeds(request: CustomerNeedsRequest<ChatPreferences>) {
   const preferences = request.preferences ?? {}
   const attributes = readAttributeNeeds(request.message)
-  const historicalCategory = latestHistoricalValue(request, inferCategory)
-  const historicalSubcategory = latestRelevantHistoricalValue(
-    request,
-    inferSubcategory,
-  )
-  const currentCategory = preferences.category ?? inferCategory(request.message)
-  const currentSubcategory =
-    preferences.subcategory ?? inferSubcategory(request.message)
-  const categoryChanged =
-    currentCategory !== undefined &&
-    historicalCategory !== undefined &&
-    currentCategory !== historicalCategory
-  const objectiveChanged =
-    currentSubcategory !== undefined &&
-    historicalSubcategory !== undefined &&
-    currentSubcategory !== historicalSubcategory
-  const productGoalChanged = categoryChanged || objectiveChanged
-  const previous = productGoalChanged ? [] : relevantHistoricalProductMessages(request)
+  const previous = historicalUserMessages(request)
   const priorAttributes = previous.map(readAttributeNeeds)
+  const historicalCategory = latestHistoricalValue(previous, (message) => declaredProductGoal(message).category)
+  const historicalSubcategory = latestHistoricalValue(previous, (message) => declaredProductGoal(message).objective)
+  const spokenGoal = declaredProductGoal(request.message)
+  const comparison = /\bcompar(?:a|ar|acao|e)\b/.test(normalize(request.message))
+  const currentCategory = preferences.category ?? spokenGoal.category ??
+    (comparison && historicalCategory === undefined ? inferCategory(request.message) : undefined)
+  const currentSubcategory = preferences.subcategory ?? spokenGoal.objective ??
+    (comparison && historicalSubcategory === undefined ? inferSubcategory(request.message) : undefined)
 
   const historyHasSafeScalpContext =
     historicalSubcategory === 'anticaspa' ||
-    relevantHistoricalProductMessages(request).some((message) =>
+    previous.some((message) =>
       /\bcouro(?: cabeludo)?\b/.test(normalize(message)),
     )
   const spokenScalp = inferScalpTypes(attributes.rankingText)
@@ -330,8 +299,7 @@ function interpretHidrasplashNeeds(request: CustomerNeedsRequest<ChatPreferences
     sensoryUpdate(request.message, { ...attributes, rankingText: removeSensoryTerms(attributes.rankingText, suppressed) }),
   )
   const effectiveSensory = needValue(sensory)?.filter((term) => !suppressed.includes(term))
-  const historicalConcerns = productGoalChanged ? undefined
-    : latestRelevantHistoricalValue(request, (message) => inferHairConcerns(readAttributeNeeds(message).rankingText))
+  const historicalConcerns = latestHistoricalValue(previous, (message) => inferHairConcerns(readAttributeNeeds(message).rankingText))
       ?.filter((concern) =>
         !(spokenScalp?.includes('seco') && concern === 'oleosidade') &&
         !(spokenScalp?.includes('oleoso') && concern === 'ressecamento'),
@@ -339,10 +307,10 @@ function interpretHidrasplashNeeds(request: CustomerNeedsRequest<ChatPreferences
   const conflictingStructured =
     (preferences.scalpTypes !== undefined && spokenScalp !== undefined &&
       !spokenScalp.some((type) => preferences.scalpTypes?.includes(type))) ||
-    (preferences.category !== undefined && inferCategory(request.message) !== undefined &&
-      preferences.category !== inferCategory(request.message)) ||
-    (preferences.subcategory !== undefined && inferSubcategory(request.message) !== undefined &&
-      preferences.subcategory !== inferSubcategory(request.message)) ||
+    (preferences.category !== undefined && spokenGoal.category !== undefined &&
+      preferences.category !== spokenGoal.category) ||
+    (preferences.subcategory !== undefined && spokenGoal.objective !== undefined &&
+      preferences.subcategory !== spokenGoal.objective) ||
     (preferences.avoidIngredients ?? []).some((term) =>
       ingredientExclusion.revoked.some((removed) => attributeKey(term) === attributeKey(removed)),
     )
@@ -356,12 +324,12 @@ function interpretHidrasplashNeeds(request: CustomerNeedsRequest<ChatPreferences
     category,
     rankingText: removeSensoryTerms(attributes.rankingText, suppressed),
     conflictingStructured,
-    objective: needFrom(currentSubcategory, categoryChanged ? undefined : historicalSubcategory),
+    objective: needFrom(currentSubcategory, historicalSubcategory),
     preferences: {
       hairTypes: needFrom(preferences.hairTypes),
       scalpTypes: needFrom(
         preferences.scalpTypes ?? spokenScalp,
-        contextualScalp ?? (productGoalChanged ? undefined : latestHistoricalScalpTypes(request)),
+        contextualScalp ?? latestHistoricalScalpTypes(previous),
       ),
       hairConcerns: needFrom(
         preferences.hairConcerns ?? inferHairConcerns(attributes.rankingText),
@@ -392,9 +360,10 @@ export const hidrasplashCustomerDomain = {
   },
   interpret: interpretHidrasplashNeeds,
   goal(message: string, preferences?: ChatPreferences) {
+    const declared = declaredProductGoal(message)
     return {
-      category: preferences?.category ?? inferCategory(message),
-      objective: preferences?.subcategory ?? inferSubcategory(message),
+      category: preferences?.category ?? declared.category,
+      objective: preferences?.subcategory ?? declared.objective,
     }
   },
   isPreferenceFollowUp(message: string) {
@@ -421,7 +390,7 @@ type HidrasplashNeeds = CustomerNeeds<ReturnType<typeof interpretHidrasplashNeed
 
 export function translateHidrasplashNeeds(
   needs: HidrasplashNeeds,
-  request: Pick<ChatRequest, 'cart'>,
+  request: Pick<ChatRequest, 'cart' | 'message'>,
   productIndex: ProductSearchIndex,
 ) {
   const { budget, domain } = needs
@@ -451,8 +420,9 @@ export function translateHidrasplashNeeds(
       : {}),
   }
 
+  const query = [domain.rankingText, ...effectiveSensoryTerms].join(' ').trim() || request.message
   const searchInput: SearchProductsInput = {
-    query: [domain.rankingText, ...effectiveSensoryTerms].join(' '),
+    query,
     ...(category !== undefined ? { category } : {}),
     ...(subcategory !== undefined ? { subcategory } : {}),
     ...(maxPrice !== undefined ? { maxPrice } : {}),

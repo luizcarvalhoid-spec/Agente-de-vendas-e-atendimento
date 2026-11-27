@@ -1,6 +1,9 @@
 import {
+  historicalUserMessages,
   needFrom,
+  needValue,
   normalize,
+  resolveContextValues,
   type CustomerNeedsDomain,
   type CustomerNeedsRequest,
   type Need,
@@ -18,20 +21,59 @@ function attribute<T extends string>(value: string | undefined, allowed: readonl
   return canonical === undefined ? { origin: 'ambiguous' } : needFrom(canonical)
 }
 
-function interpret(request: CustomerNeedsRequest) {
-  const message = normalize(request.message)
+function goal(text: string) {
+  const message = normalize(text)
+  return {
+    category: /\bcadernos?\b/.test(message) ? 'caderno' as const : undefined,
+    objective: message.match(/\bpara (estudo|desenho|anotacoes)\b/)?.[1],
+  }
+}
+
+function readTurn(text: string) {
+  const message = normalize(text)
   const requiredFormat = message.match(/\b(?:tem que ser|precisa ser|obrigatoriamente) (?:no )?formato (\w+)\b/)?.[1]
   const format = message.match(/\b(?:prefiro|com|no) formato (\w+)\b/)?.[1]
   const paper = message.match(/\bfolhas? (\w+)\b/)?.[1]
-  const purpose = message.match(/\bpara (estudo|desenho|anotacoes)\b/)?.[1]
   return {
-    category: needFrom(/\bcadernos?\b/.test(message) ? 'caderno' as const : undefined),
-    objective: needFrom(purpose),
+    ...goal(text),
     preferences: {
       format: attribute<Format>(requiredFormat === format ? undefined : format, formats),
       paper: attribute<Paper>(paper, papers),
     },
     restrictions: { format: attribute<Format>(requiredFormat, formats) },
+    revokeFormat: !message.includes('?') && /\bpode ser qualquer formato\b/.test(message),
+  }
+}
+
+function resolveAttribute<T>(
+  history: readonly { value: Need<T>; revoke?: boolean }[],
+  current: { value: Need<T>; revoke?: boolean },
+): Need<T> {
+  const update = ({ value, revoke }: typeof current) => ({
+    replace: value.origin !== 'absent' ? [value] : revoke ? [] : undefined,
+  })
+  const resolved = resolveContextValues(history.map(update), update(current))
+  const value = needValue(resolved)?.[0]
+  if (!value || !('value' in resolved)) return { origin: 'absent' }
+  return 'value' in value ? { origin: resolved.origin, value: value.value } : value
+}
+
+function interpret(request: CustomerNeedsRequest) {
+  const history = historicalUserMessages(request).map(readTurn)
+  const current = readTurn(request.message)
+  return {
+    category: resolveAttribute(history.map(({ category }) => ({ value: needFrom(category) })), { value: needFrom(current.category) }),
+    objective: resolveAttribute(history.map(({ objective }) => ({ value: needFrom(objective) })), { value: needFrom(current.objective) }),
+    preferences: {
+      format: resolveAttribute(history.map((turn) => ({ value: turn.preferences.format })), { value: current.preferences.format }),
+      paper: resolveAttribute(history.map((turn) => ({ value: turn.preferences.paper })), { value: current.preferences.paper }),
+    },
+    restrictions: {
+      format: resolveAttribute(
+        history.map((turn) => ({ value: turn.restrictions.format, revoke: turn.revokeFormat })),
+        { value: current.restrictions.format, revoke: current.revokeFormat },
+      ),
+    },
   }
 }
 
@@ -41,5 +83,6 @@ export const papelariaCustomerDomain = {
     requestedProduct: /\bcadernos?\b/,
   },
   interpret,
+  goal,
   isPreferenceFollowUp: (message: string) => /\b(?:folhas?|formato)\b/.test(normalize(message)),
 } satisfies CustomerNeedsDomain<{ maxPrice?: number }, ReturnType<typeof interpret>>

@@ -16,6 +16,7 @@ import type { AgentMessage, AgentModelPort } from './agent-model-port.js'
 import {
   createChatResponseComposer,
   formatCommercialCents,
+  recommendationSubject,
   type FaqComposition,
   type StoreResponseProfile,
 } from './chat-response-composer.js'
@@ -217,6 +218,7 @@ function contextualQuoteResponse(
   requestId: string,
   catalog: CatalogRepository,
   composer: ResponseComposer,
+  rejectedIds: ReadonlySet<number>,
 ): ChatResponse | undefined {
   if (!isQuoteIntent(request.message)) return undefined
 
@@ -235,7 +237,6 @@ function contextualQuoteResponse(
     )
   }
   const explicitId = explicitIds[0]
-  const rejectedIds = explicitRejectedProductIds(request.message)
   const contextualIds = (request.recommendationContext?.productIds ?? []).filter(
     (productId) => !rejectedIds.has(productId),
   )
@@ -545,17 +546,30 @@ export function createChatService(
         )
       }
 
+      const needs = interpretCustomerNeeds(
+        request,
+        hidrasplashCustomerDomain,
+        (message) => recommendationSubject(message, options.catalog.listAll()),
+      )
+      if (needs.context.interrupted) {
+        return chatResponseSchema.parse({
+          type: 'text',
+          message: 'Tudo bem, vou encerrar esta busca.',
+          sourceIds: [],
+          requestId: execution.requestId,
+        })
+      }
       const quoteResponse = contextualQuoteResponse(
         request,
         execution.requestId,
         options.catalog,
         composer,
+        new Set([...needs.exclusions.declared, ...needs.exclusions.inferred]),
       )
       if (quoteResponse) {
         return completeEarly(quoteResponse, 'contextual_quote')
       }
 
-      const needs = interpretCustomerNeeds(request, hidrasplashCustomerDomain)
       const { plan } = needs
       const commercial = translateHidrasplashNeeds(needs, request, options.productIndex)
       if (
@@ -709,7 +723,7 @@ export function createChatService(
       const explicitIds = explicitComparisonIds(
         request.message,
         options.catalog,
-      ).filter((id) => authorizedIds.has(id))
+      ).filter((id) => authorizedIds.has(id) && !commercial.rejectedProductIds.has(id))
 
       let selectedIds: number[] = []
       if (
@@ -742,6 +756,7 @@ export function createChatService(
         const product = options.catalog.findById(id)
         if (
           !product ||
+          commercial.rejectedProductIds.has(id) ||
           !finalPolicy.evaluate(product, finalContext).eligible
         ) {
           return []

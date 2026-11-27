@@ -16,6 +16,7 @@ import type { AgentMessage, AgentModelPort } from './agent-model-port.js'
 import {
   createChatResponseComposer,
   formatCommercialCents,
+  recommendationSubject,
   type FaqComposition,
   type StoreResponseProfile,
 } from './chat-response-composer.js'
@@ -217,6 +218,8 @@ function contextualQuoteResponse(
   requestId: string,
   catalog: CatalogRepository,
   composer: ResponseComposer,
+  recommendationIds: readonly number[],
+  canQuoteRecommendation: (product: Product) => boolean,
 ): ChatResponse | undefined {
   if (!isQuoteIntent(request.message)) return undefined
 
@@ -235,16 +238,12 @@ function contextualQuoteResponse(
     )
   }
   const explicitId = explicitIds[0]
-  const rejectedIds = explicitRejectedProductIds(request.message)
-  const contextualIds = (request.recommendationContext?.productIds ?? []).filter(
-    (productId) => !rejectedIds.has(productId),
-  )
   const rejectsPreviousReference =
     explicitId === undefined &&
     differentProductReference.test(normalize(request.message))
   if (
     rejectsPreviousReference ||
-    (explicitId === undefined && contextualIds.length !== 1)
+    (explicitId === undefined && recommendationIds.length !== 1)
   ) {
     return controlledConsultativeQuestion(
       'Qual produto você quer usar nessa cotação? Informe um único ID de produto.',
@@ -252,7 +251,7 @@ function contextualQuoteResponse(
     )
   }
 
-  const productId = explicitId ?? contextualIds[0]
+  const productId = explicitId ?? recommendationIds[0]
   const product =
     productId === undefined ? undefined : catalog.findById(productId)
   if (!product || product.stock <= 0) {
@@ -275,6 +274,12 @@ function contextualQuoteResponse(
       sourceIds: [],
       requestId,
     })
+  }
+  if (explicitId === undefined && !canQuoteRecommendation(product)) {
+    return controlledConsultativeQuestion(
+      'Não consegui confirmar essa recomendação com as condições atuais. Você pode informar o ID do produto que deseja cotar?',
+      requestId,
+    )
   }
   const quote = composer.quote(product)
   if (!quote) {
@@ -545,19 +550,39 @@ export function createChatService(
         )
       }
 
+      const needs = interpretCustomerNeeds(
+        request,
+        hidrasplashCustomerDomain,
+        (message) => recommendationSubject(message, options.catalog.listAll()),
+      )
+      if (needs.context.interrupted) {
+        return chatResponseSchema.parse({
+          type: 'text',
+          message: 'Tudo bem, vou encerrar esta busca.',
+          sourceIds: [],
+          requestId: execution.requestId,
+        })
+      }
+      const { plan } = needs
+      const commercial = translateHidrasplashNeeds(needs, request, options.productIndex)
+      const policy = createProductEligibilityPolicy(
+        options.productIndex,
+        commercial.constraints,
+      )
       const quoteResponse = contextualQuoteResponse(
         request,
         execution.requestId,
         options.catalog,
         composer,
+        needs.context.recommendationIds,
+        (product) => !commercial.needsClarification &&
+          !commercial.rejectedProductIds.has(product.id) &&
+          policy.evaluate(product, createAgentToolExecutionContext(execution.signal)).eligible,
       )
       if (quoteResponse) {
         return completeEarly(quoteResponse, 'contextual_quote')
       }
 
-      const needs = interpretCustomerNeeds(request, hidrasplashCustomerDomain)
-      const { plan } = needs
-      const commercial = translateHidrasplashNeeds(needs, request, options.productIndex)
       if (
         plan.presentationIntent === 'comparison' &&
         hasUnresolvedComparisonReference(request.message) &&
@@ -572,10 +597,6 @@ export function createChatService(
         )
       }
       const consultationQuestion = consultativeQuestion(plan, commercial)
-      const policy = createProductEligibilityPolicy(
-        options.productIndex,
-        commercial.constraints,
-      )
       const registry = createAgentToolRegistry([
         createSearchProductsTool(options.productIndex, policy),
         createGetProductDetailsTool(options.catalog, policy),
@@ -709,7 +730,7 @@ export function createChatService(
       const explicitIds = explicitComparisonIds(
         request.message,
         options.catalog,
-      ).filter((id) => authorizedIds.has(id))
+      ).filter((id) => authorizedIds.has(id) && !commercial.rejectedProductIds.has(id))
 
       let selectedIds: number[] = []
       if (
@@ -742,6 +763,7 @@ export function createChatService(
         const product = options.catalog.findById(id)
         if (
           !product ||
+          commercial.rejectedProductIds.has(id) ||
           !finalPolicy.evaluate(product, finalContext).eligible
         ) {
           return []

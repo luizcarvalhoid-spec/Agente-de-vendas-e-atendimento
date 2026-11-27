@@ -142,6 +142,20 @@ const shippingFeeQuestion = /\b(?:taxa|valor|preco|cust\w*|quanto fica)\b/
 const unverifiedShipping = 'Não consegui verificar a política de frete com as fontes disponíveis.'
 const unverifiedFaq = 'Não consegui verificar a política solicitada nas fontes disponíveis.'
 
+function recommendationIntroduction(product: Pick<Product, 'name'>) {
+  return `Pelo que você me contou, eu escolheria ${product.name}.`
+}
+
+// A prior reply can identify the subject of an explicit rejection. It is never
+// an authorization or a source of product facts.
+export function recommendationSubject(
+  message: string,
+  products: readonly Pick<Product, 'id' | 'name'>[],
+) {
+  const matches = products.filter((product) => message.startsWith(recommendationIntroduction(product)))
+  return matches.length === 1 ? matches[0]?.id : undefined
+}
+
 export function createChatResponseComposer(
   profile: StoreResponseProfile,
   documents: readonly FaqDocument[],
@@ -199,7 +213,7 @@ export function createChatResponseComposer(
       const detail = explanation
         ? ` Essa opção ${explanation}.`
         : description ? ` A opção tem ${description}.` : ''
-      return `Pelo que você me contou, eu escolheria ${product.name}.${detail} Os detalhes de preço e estoque estão no cartão.${faqAnswer ? `\n\n${faqAnswer}` : ''}`
+      return `${recommendationIntroduction(product)}${detail} Os detalhes de preço e estoque estão no cartão.${faqAnswer ? `\n\n${faqAnswer}` : ''}`
     },
 
     comparison(products: readonly [Product, Product], faqAnswer: string) {

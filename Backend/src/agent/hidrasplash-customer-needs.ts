@@ -1,5 +1,6 @@
 import {
   SUBCATEGORIES_BY_CATEGORY,
+  type Product,
   type ProductCategory,
   type ProductConcern,
   type ProductSubcategory,
@@ -451,15 +452,18 @@ export function translateHidrasplashNeeds(
   needs: HidrasplashNeeds,
   request: Pick<ChatRequest, 'cart' | 'message'>,
   productIndex: ProductSearchIndex,
+  alternative?: Pick<Product, 'id' | 'category' | 'subcategory'> & { readonly maxPrice: number },
 ) {
   const { budget, domain } = needs
-  const category = needValue(domain.category)
+  const category = needValue(domain.category) ?? alternative?.category
   const requestedSubcategory = needValue(domain.objective)
   const invalidScope = category !== undefined && requestedSubcategory !== undefined &&
     !(SUBCATEGORIES_BY_CATEGORY[category] as readonly string[]).includes(requestedSubcategory)
   const conflictingScope = invalidScope || domain.category.origin === 'ambiguous' || domain.objective.origin === 'ambiguous'
-  const subcategory = conflictingScope ? undefined : requestedSubcategory
-  const maxPrice = budget.origin === 'ambiguous' ? budget.conservativeValue : needValue(budget)
+  const subcategory = conflictingScope ? undefined : requestedSubcategory ??
+    (category === alternative?.category ? alternative?.subcategory : undefined)
+  const declaredMaximum = budget.origin === 'ambiguous' ? budget.conservativeValue : needValue(budget)
+  const maxPrice = alternative?.maxPrice ?? declaredMaximum
   const effectiveSensoryTerms = needValue(domain.preferences.sensory) ?? []
   const scalpTypes = needValue(domain.preferences.scalpTypes)
   const hairConcerns = needValue(domain.preferences.hairConcerns)
@@ -580,8 +584,9 @@ export function translateHidrasplashNeeds(
     constraints,
     searchInput,
     toolPreferences: toolPreferences.data,
-    presentation: { searchInput, sensoryTerms: effectiveSensoryTerms },
-    rejectedProductIds: new Set([...needs.exclusions.declared, ...needs.exclusions.inferred]),
+    presentation: { searchInput: { ...searchInput, maxPrice: declaredMaximum }, sensoryTerms: effectiveSensoryTerms },
+    rejectedProductIds: new Set([...needs.exclusions.declared, ...needs.exclusions.inferred,
+      ...(alternative ? [alternative.id] : [])]),
     issues,
     needsClarification: issues.length > 0,
     cart: request.cart,

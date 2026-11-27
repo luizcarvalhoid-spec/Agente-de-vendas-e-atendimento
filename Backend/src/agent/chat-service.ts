@@ -3,6 +3,7 @@ import { toCatalogImageUrl } from '../catalog/catalog-repository.js'
 import type { Product } from '../catalog/product-schema.js'
 import { priceToCents } from '../commercial/demo-commercial-rules.js'
 import {
+  CHAT_MAX_SOURCES,
   chatProductCardSchema,
   chatRequestSchema,
   chatResponseSchema,
@@ -11,7 +12,7 @@ import {
   type ChatResponse,
 } from '../contracts/chat.js'
 import type { FaqDocument } from '../knowledge/faq-document-schema.js'
-import type { FaqSearchIndex } from '../knowledge/faq-search.js'
+import { FAQ_SEARCH_MAX_QUERY_LENGTH, type FaqSearchIndex } from '../knowledge/faq-search.js'
 import type { AgentMessage, AgentModelPort } from './agent-model-port.js'
 import {
   createChatResponseComposer,
@@ -30,17 +31,20 @@ import {
   observeChatOperation,
   type ChatOperationalObserver,
 } from '../observability/chat-operational-events.js'
-import { hasFaqTopic, type ChatGroundingPlan } from './chat-grounding-planner.js'
+import { hasFaqTopic, planChatGrounding, type ChatGroundingPlan } from './chat-grounding-planner.js'
 import {
   clarificationReply,
   explicitRejectedProductIds,
   historicalUserMessages,
   interpretCustomerNeeds,
   matchesClarificationQuestion,
+  needValue,
   normalize,
   shortBudgetAnswer,
   shortProductAnswer,
+  type CustomerNeeds,
 } from './customer-needs.js'
+import { cheaperPriceCeiling, readObjections, resumesSearch } from './objection-strategy.js'
 import {
   hasSelectionDiscriminator,
   hidrasplashConsultation,
@@ -66,7 +70,7 @@ import {
   createSearchProductsTool,
   type ProductSearchIndex,
 } from './tools/product-tools.js'
-import { createSearchFaqTool } from './tools/search-faq-tool.js'
+import { createSearchFaqTool, type SearchFaqTool } from './tools/search-faq-tool.js'
 
 export type ChatServiceErrorCode =
   | 'INVALID_REQUEST'
@@ -220,6 +224,7 @@ const differentProductReference = new RegExp(
 )
 
 const priceQuestion = 'De qual produto você quer saber o preço?'
+const cheaperQuestion = 'Em relação a qual produto você quer uma opção mais barata? Informe um único ID.'
 const comparisonQuestion = 'Quais são os dois produtos que você quer comparar? Informe os dois IDs.'
 const quoteQuestions = {
   quantity: 'A cotação calcula uma unidade por vez. Qual produto você quer cotar para uma unidade com frete?',
@@ -248,6 +253,7 @@ function isQuoteIntent(message: string) {
 
 function referenceQuestion(message: string) {
   if (matchesClarificationQuestion(message, priceQuestion)) return { kind: 'price', question: priceQuestion } as const
+  if (matchesClarificationQuestion(message, cheaperQuestion)) return { kind: 'cheaper', question: cheaperQuestion } as const
   if (matchesClarificationQuestion(message, comparisonQuestion)) return { kind: 'comparison', question: comparisonQuestion } as const
   const quote = Object.values(quoteQuestions).find((question) => matchesClarificationQuestion(message, question))
   return quote === undefined ? undefined : { kind: 'quote', question: quote } as const
@@ -280,6 +286,7 @@ function resolveReferenceFollowUp(request: ChatRequest, catalog: CatalogReposito
       referenceQuestion(assistant.content)?.kind !== pending.kind) break
     const original = user.content
     const requested = pending.kind === 'price' ? isPriceOnly(original) :
+      pending.kind === 'cheaper' ? readObjections([normalize(original)]).cheaper :
       pending.kind === 'comparison'
         ? hasUnresolvedComparisonReference(original) && explicitComparisonIds(original, catalog).length !== 2
         : isQuoteIntent(original) &&
@@ -288,6 +295,7 @@ function resolveReferenceFollowUp(request: ChatRequest, catalog: CatalogReposito
       const [first, second] = answer.ids
       if (answer.ids.length === count && first !== undefined) {
         if (pending.kind === 'price') return { priceId: first } as const
+        if (pending.kind === 'cheaper') return { message: `Tem algo mais barato que o produto ${first}?` } as const
         if (pending.kind === 'quote') return { message: `Quanto fica o total do produto ${first} com frete?` } as const
         if (second !== undefined && answer.ids.every((id) => catalog.findById(id) !== undefined)) {
           return { message: `Compare os produtos ${first} e ${second}. ${original}` } as const
@@ -399,22 +407,12 @@ function contextualQuoteResponse(
   return chatResponseSchema.parse({ type: 'text', ...quote, requestId })
 }
 
-function controlledProductInformation(
-  request: ChatRequest,
-  result: ToolOrchestratorResult,
-  catalog: CatalogRepository,
+function describeProductInformation(
+  message: string,
+  product: Product,
   describeIngredients: NonNullable<StoreResponseProfile['presentation']>['describeIngredients'],
 ): string | undefined {
-  const normalized = normalize(request.message)
-  const productId = explicitInformationalProductId(request.message)
-  if (
-    productId === undefined ||
-    !result.consultedProductIds.includes(productId)
-  ) {
-    return undefined
-  }
-  const product = catalog.findById(productId)
-  if (!product) return undefined
+  const normalized = normalize(message)
 
   if (
     describeIngredients &&
@@ -428,6 +426,127 @@ function controlledProductInformation(
     return `${product.name}: preço atual de ${formatCommercialCents(price)} e estoque atual de ${product.stock} unidade(s).`
   }
   return undefined
+}
+
+function controlledProductInformation(
+  request: ChatRequest,
+  result: ToolOrchestratorResult,
+  catalog: CatalogRepository,
+  describeIngredients: NonNullable<StoreResponseProfile['presentation']>['describeIngredients'],
+) {
+  const id = explicitInformationalProductId(request.message)
+  const product = id !== undefined && result.consultedProductIds.includes(id) ? catalog.findById(id) : undefined
+  return product && describeProductInformation(request.message, product, describeIngredients)
+}
+
+const objectionAcknowledgments = {
+  price: 'Entendo que o preço pesa na decisão.',
+  freight: 'Faz sentido considerar o frete no custo total.',
+  competitor: 'Faz sentido comparar os preços antes de decidir. Não consigo verificar o valor da outra loja.',
+  rationale: 'A indicação deve se apoiar nas características verificáveis do catálogo e nas condições que você informou.',
+  attribute: 'Entendido. Vou levar essa preferência em conta dentro do que o catálogo permite verificar.',
+  hesitation: 'Tudo bem decidir no seu tempo.',
+  pause: 'Tudo bem. Podemos retomar quando você quiser.',
+  stop: 'Tudo bem, vou encerrar esta busca.',
+  product: 'Entendido. Vou deixar esse produto de fora desta busca.',
+} as const
+
+type HidrasplashNeeds = CustomerNeeds<ReturnType<typeof hidrasplashCustomerDomain.interpret>>
+
+function objectionReference(message: string, context: HidrasplashNeeds['context'], catalog: CatalogRepository) {
+  const explicit = explicitInformationalProductIds(message)
+  const ids = explicit.length ? explicit : context.recommendationIds
+  if (ids.length > 1) return undefined
+  const latest = context.history.at(-1)
+  const id = ids[0] ??
+    (latest?.role === 'assistant' ? recommendationSubject(latest.content, catalog.listAll()) : undefined)
+  return id === undefined ? undefined : catalog.findById(id)
+}
+
+function acknowledgeObjection(needs: HidrasplashNeeds, message: string) {
+  const { primary } = needs.objection.interpretation
+  if (primary === 'frustration') {
+    const known = []
+    const budget = needValue(needs.budget)
+    if (budget !== undefined) known.push('O teto informado é ' + formatCommercialCents(Math.round(budget * 100)) + '.')
+    if (!needs.context.unresolvedRejection && (needs.exclusions.declared.length || needs.exclusions.inferred.length)) {
+      known.push('O produto rejeitado fica de fora da busca.')
+    }
+    if (known.length) return ['Vou considerar o que você já informou.', ...known].join(' ')
+    if (/\bja (?:respondi|informei|falei|disse)\b/.test(normalize(message))) {
+      return 'Não consigo recuperar a resposta anterior no trecho da conversa disponível. Vou evitar repetir a pergunta agora.'
+    }
+    return 'Vou ajustar a condução. Você decide como quer seguir.'
+  }
+  if (primary === 'price' && needs.budget.origin === 'declared') {
+    return 'Vou usar o teto de ' + formatCommercialCents(Math.round(needs.budget.value * 100)) + ' que você informou.'
+  }
+  return primary && primary in objectionAcknowledgments
+    ? objectionAcknowledgments[primary as keyof typeof objectionAcknowledgments] : ''
+}
+
+async function composeObjectionInformation(
+  objection: HidrasplashNeeds['objection'],
+  product: Product | undefined,
+  profile: StoreResponseProfile,
+  composer: ResponseComposer,
+  faqTool: SearchFaqTool,
+  acknowledge: string,
+) {
+  const { information, interpretation: { primary } } = objection
+  const statements = [acknowledge]
+  const sourceIds = new Set<string>()
+  let incomplete = false
+  const lookupFaq = async (
+    question: string, selects?: (source: { sourceId: string; title: string }) => boolean, query = question,
+  ) => {
+    const result = await faqTool.execute({ query: query.slice(0, FAQ_SEARCH_MAX_QUERY_LENGTH) })
+    const matches = result.ok ? result.sources.filter((source) => !selects || selects(source)) : []
+    const answer = composer.faq(question, matches.map(({ sourceId }) => sourceId))
+    statements.push(answer.message)
+    for (const id of answer.sourceIds) sourceIds.add(id)
+    incomplete ||= answer.status !== 'complete'
+  }
+  if (primary === 'freight') {
+    await lookupFaq('Qual é o valor do frete padrão e quando há frete grátis?',
+      ({ sourceId }) => sourceId === profile.shipping?.freeShippingFaq.sourceId ||
+        sourceId === profile.shipping?.standardShippingFaq.sourceId, 'frete grátis')
+  }
+  if (primary === 'discount') {
+    await lookupFaq('Existem cupons ou descontos além dos preços do catálogo?',
+      ({ title }) => /\b(?:descontos?|cupom|cupons)\b/.test(normalize(title)))
+    if (sourceIds.size === 0) statements.push('Não consigo confirmar ou aplicar um desconto nesta conversa.')
+  }
+  if ((primary === 'competitor' || primary === 'discount') && product) {
+    const price = priceToCents(product.price)
+    if (price !== undefined) statements.push(product.name + ': preço atual de ' + formatCommercialCents(price) + '.')
+  }
+  if (primary === 'fit' || primary === 'confidence') {
+    const description = product && profile.presentation?.describeProduct?.(product)
+    if (description && product) statements.push('O catálogo descreve ' + product.name + ' com ' + description + '.')
+    statements.push('Posso me apoiar nas características registradas no catálogo. Elas não garantem um resultado individual.')
+    incomplete = true
+  }
+  if (information) {
+    const infoPlan = planChatGrounding(information, hidrasplashCustomerDomain.vocabulary)
+    const facts = infoPlan.groundingRequirement !== 'faq' && product
+      ? describeProductInformation(information, product, profile.presentation?.describeIngredients)
+      : undefined
+    if (hasFaqTopic(information)) {
+      const query = information.replace(/^(?:queria|quero|gostaria de) (?:saber|entender|confirmar)(?: sobre| se)?\s+/i, '')
+      await lookupFaq(information, undefined, query)
+    }
+    if (facts) statements.push(facts)
+    if (!facts && (!hasFaqTopic(information) || /\bproduto (?:id )?\d+\b/.test(normalize(information)))) {
+      statements.push('Não consegui verificar essa informação com os dados disponíveis.')
+      incomplete = true
+    }
+  }
+  return {
+    message: [...new Set(statements.filter(Boolean))].join('\n\n'),
+    incomplete,
+    sourceIds: [...sourceIds].slice(0, CHAT_MAX_SOURCES),
+  }
 }
 
 export function toProductCard(
@@ -665,22 +784,48 @@ export function createChatService(
         hidrasplashCustomerDomain,
         (message) => recommendationSubject(message, options.catalog.listAll()),
       )
-      if (needs.context.interrupted) {
-        return chatResponseSchema.parse({
-          type: 'text',
-          message: 'Tudo bem, vou encerrar esta busca.',
-          sourceIds: [],
-          requestId: execution.requestId,
-        })
+      const { plan, objection } = needs
+      const { primary, cheaper } = objection.interpretation
+      const textResponse = (
+        message: string,
+        details: Pick<Extract<ChatResponse, { type: 'text' }>, 'reason' | 'sourceIds'> = { sourceIds: [] },
+      ) => chatResponseSchema.parse({ type: 'text', message, ...details, requestId: execution.requestId })
+      if (objection.action === 'stop') return textResponse(objectionAcknowledgments.stop)
+      if (objection.action === 'pause') return textResponse(objectionAcknowledgments.pause)
+
+      const shoppingForCheaper = objection.action === 'alternative' && cheaper
+      const priceReference = shoppingForCheaper
+        ? objectionReference(request.message, needs.context, options.catalog) : undefined
+      const price = priceReference && priceToCents(priceReference.price)
+      const budget = needs.budget.origin === 'ambiguous' ? needs.budget.conservativeValue : needValue(needs.budget)
+      const derivedMaximum = price === undefined ? undefined : cheaperPriceCeiling(price, budget)
+      const commercial = translateHidrasplashNeeds(needs, request, options.productIndex,
+        priceReference && derivedMaximum !== undefined ? { ...priceReference, maxPrice: derivedMaximum } : undefined)
+      const acknowledge = acknowledgeObjection(needs, request.message)
+      const rejectionId = shortProductAnswer(received.message)
+      const answeredRejection = rejectionId !== undefined && needs.exclusions.declared.includes(rejectionId)
+      if ((primary === 'product' && objection.action === 'acknowledge') || answeredRejection) {
+        const issue = commercial.issues.find((candidate) => candidate.reason === 'rejection_reference')
+        if (issue) {
+          const decision = decideClarification({ plan, issues: [issue], message: request.message, history: needs.context.history })
+          if (decision.action === 'ask' || decision.action === 'explain') return controlledClarification(decision, execution.requestId)
+        }
+        const originalRejection = needs.context.history.filter(({ role }) => role === 'user').at(-1)
+        if (!answeredRejection || !originalRejection || !readObjections([normalize(originalRejection.content)]).alternative) {
+          return textResponse(objectionAcknowledgments.product)
+        }
       }
-      const { plan } = needs
-      const commercial = translateHidrasplashNeeds(needs, request, options.productIndex)
       const policy = createProductEligibilityPolicy(
         options.productIndex,
         commercial.constraints,
       )
-      const quoteResponse = contextualQuoteResponse(
-        request,
+      const suspended = needs.context.paused || needs.context.interrupted
+      const quoteRequest = suspended && objection.action === 'inform' &&
+        explicitInformationalProductId(objection.information) !== undefined
+        ? { ...request, message: objection.information }
+        : suspended ? undefined : request
+      const quoteResponse = quoteRequest && contextualQuoteResponse(
+        quoteRequest,
         execution.requestId,
         options.catalog,
         composer,
@@ -690,11 +835,39 @@ export function createChatService(
           policy.evaluate(product, createAgentToolExecutionContext(execution.signal)).eligible,
       )
       if (quoteResponse) {
-        return completeEarly(quoteResponse, 'contextual_quote')
+        const response = acknowledge
+          ? chatResponseSchema.parse({ ...quoteResponse, message: [acknowledge, quoteResponse.message].join('\n\n') })
+          : quoteResponse
+        return completeEarly(response, 'contextual_quote')
       }
 
-      const consultation = hidrasplashConsultation(plan, commercial)
+      if (objection.action === 'acknowledge') return textResponse(acknowledge)
+      if (objection.action === 'inform' || objection.action === 'explain') {
+        const product = objectionReference(objection.information || request.message, needs.context, options.catalog)
+        const answer = await composeObjectionInformation(objection, product, profile, composer, faqTool, acknowledge)
+        return textResponse(answer.message || 'Não consegui verificar essa informação com os dados disponíveis.', {
+          ...(answer.incomplete ? { reason: 'unable_to_verify' } : {}), sourceIds: answer.sourceIds,
+        })
+      }
+
+      const consultation = shoppingForCheaper && priceReference && derivedMaximum !== undefined
+        ? { issues: commercial.issues, canChooseWithoutPreference: true }
+        : hidrasplashConsultation(plan, commercial)
       const issues: ClarificationIssue[] = plan.presentationIntent === 'text' ? [] : [...consultation.issues]
+      if (resumesSearch(normalize(request.message)) && consultation.selectionQuestion?.priority === 'selection') {
+        issues.push(consultation.selectionQuestion)
+      }
+      if (shoppingForCheaper && !priceReference) {
+        issues.push({
+          reason: 'cheaper_reference', priority: 'ambiguity', attribute: 'product', question: cheaperQuestion,
+          limitation: 'Preciso identificar o produto para comparar os preços do catálogo.',
+        })
+      } else if (shoppingForCheaper && derivedMaximum === undefined) {
+        issues.push({
+          reason: 'cheaper_price', priority: 'restriction', attribute: 'budget',
+          limitation: 'Não consigo verificar um preço menor em relação a esse produto.',
+        })
+      }
       if (
         plan.presentationIntent === 'comparison' &&
         hasUnresolvedComparisonReference(request.message) &&
@@ -743,7 +916,8 @@ export function createChatService(
       })
       const pending = decision.action === 'ask' || decision.action === 'explain' ? decision : undefined
       if (pending && !hasFaqTopic(request.message)) {
-        const response = controlledClarification(pending, execution.requestId)
+        const response = controlledClarification(pending, execution.requestId,
+          primary === 'product' && needs.context.unresolvedRejection ? '' : acknowledge)
         return pending.issue.reason === 'comparison_reference'
           ? completeEarly(response, 'comparison_clarification')
           : response
@@ -897,7 +1071,7 @@ export function createChatService(
       if (
         decision.action === 'search' &&
         decision.selection === 'recommendation' &&
-        (decision.flexible || uniqueAuthorized || hasSelectionDiscriminator(commercial)) &&
+        (decision.flexible || uniqueAuthorized || hasSelectionDiscriminator(commercial) || shoppingForCheaper) &&
         rankedIds[0] !== undefined
       ) {
         selectedIds = [rankedIds[0]]
@@ -949,7 +1123,7 @@ export function createChatService(
           message: composer.recommendation(
             canonicalProduct,
             commercial.presentation,
-            mixedFaqText,
+            [acknowledge, mixedFaqText].filter(Boolean).join('\n\n'),
           ),
           productIds: [product?.id],
           products: [product],
@@ -981,6 +1155,17 @@ export function createChatService(
           products: [products[0], products[1]],
           sourceIds: mixedSourceIds,
           requestId: execution.requestId,
+        })
+      }
+
+      if (shoppingForCheaper) {
+        const available = eligibleIds.length > 0
+        const message = available
+          ? 'Não consegui verificar uma alternativa mais barata com as condições atuais.'
+          : 'Não encontrei uma alternativa mais barata nas condições informadas.'
+        return textResponse([message, mixedFaqText].filter(Boolean).join('\n\n'), {
+          reason: available || mixedFaq?.status === 'unable_to_verify' ? 'unable_to_verify' : 'not_found',
+          sourceIds: [...mixedSourceIds],
         })
       }
 

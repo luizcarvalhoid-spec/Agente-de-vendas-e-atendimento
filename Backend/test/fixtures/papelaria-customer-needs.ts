@@ -8,6 +8,7 @@ import {
   type CustomerNeedsRequest,
   type Need,
 } from '../../src/agent/customer-needs.js'
+import type { ClarificationIssue } from '../../src/agent/clarification-strategy.js'
 
 // Separate stationery vocabulary. This fixture never uses the cosmetic product schema.
 const formats = ['a4', 'a5', 'a6'] as const
@@ -26,22 +27,28 @@ function goal(text: string) {
   const request = message.match(/(?:^|[.;:]\s*)(?:agora\s+)?(?:quero|procuro|preciso de)\s+([^.;!?]*)/)?.[1]
   return {
     category: request && /\bcadernos?\b/.test(request) ? 'caderno' as const : undefined,
-    objective: request?.match(/\bpara (estudo|desenho|anotacoes)\b/)?.[1],
+    objective: request?.match(/\bpara (estudo|desenho|anotacoes)\b/)?.[1] ??
+      message.match(/^para (estudo|desenho|anotacoes)[.!]?$/)?.[1],
   }
 }
 
 function readTurn(text: string) {
   const message = normalize(text)
-  const requiredFormat = message.match(/\b(?:tem que ser|precisa ser|obrigatoriamente) (?:no )?formato (\w+)\b/)?.[1]
-  const format = message.match(/\b(?:prefiro|com|no) formato (\w+)\b/)?.[1]
+  const requirements = new Set(Array.from(
+    message.matchAll(/\b(?:tem que ser|precisa ser|obrigatoriamente) (?:no )?formato (\w+)\b/g),
+    (match) => match[1],
+  ))
+  const [requiredFormat] = requirements
+  const format = message.match(/\b(?:prefiro|com|no) formato (\w+)\b|^(?:formato )?(a[456])[.!]?$/)
+  const preferredFormat = format?.[1] ?? format?.[2]
   const paper = message.match(/\bfolhas? (\w+)\b/)?.[1]
   return {
     ...goal(text),
     preferences: {
-      format: attribute<Format>(requiredFormat === format ? undefined : format, formats),
+      format: attribute<Format>(requiredFormat === preferredFormat ? undefined : preferredFormat, formats),
       paper: attribute<Paper>(paper, papers),
     },
-    restrictions: { format: attribute<Format>(requiredFormat, formats) },
+    restrictions: { format: requirements.size > 1 ? { origin: 'ambiguous' } as const : attribute<Format>(requiredFormat, formats) },
     revokeFormat: !message.includes('?') && /\bpode ser qualquer formato\b/.test(message),
   }
 }
@@ -85,5 +92,37 @@ export const papelariaCustomerDomain = {
   },
   interpret,
   goal,
-  isPreferenceFollowUp: (message: string) => /\b(?:folhas?|formato)\b/.test(normalize(message)),
+  isPreferenceFollowUp: (message: string) =>
+    /\b(?:folhas?|formato|a[456])\b|^para (?:estudo|desenho|anotacoes)[.!]?$/.test(normalize(message)),
 } satisfies CustomerNeedsDomain<{ maxPrice?: number }, ReturnType<typeof interpret>>
+
+export function papelariaConsultation(domain: ReturnType<typeof interpret>): {
+  readonly issues: readonly ClarificationIssue[]
+  readonly selectionQuestion?: ClarificationIssue
+  readonly canChooseWithoutPreference?: boolean
+} {
+  if (domain.restrictions.format.origin === 'ambiguous') {
+    return { issues: [{
+      reason: 'format_conflict', priority: 'restriction', attribute: 'format',
+      question: 'Qual formato é obrigatório para você?',
+      limitation: 'Sem confirmar o formato obrigatório, não consigo indicar um caderno.',
+    }] }
+  }
+  if (domain.objective.origin === 'absent') {
+    return { issues: [{
+      reason: 'missing_purpose', priority: 'selection', attribute: 'purpose',
+      question: 'Para que você vai usar o caderno?',
+      limitation: 'Ainda preciso saber para que você quer usar o caderno.',
+    }] }
+  }
+  if (needValue(domain.restrictions.format) || needValue(domain.preferences.format)) return { issues: [] }
+  return {
+    issues: [],
+    canChooseWithoutPreference: true,
+    selectionQuestion: {
+      reason: 'format_preference', priority: 'preference', attribute: 'format',
+      question: 'Qual tamanho de caderno você prefere?',
+      limitation: 'Ainda não consigo diferenciar um caderno para você.',
+    },
+  }
+}

@@ -7,12 +7,14 @@ import {
 } from '../catalog/product-schema.js'
 import type { ChatPreferences, ChatRequest } from '../contracts/chat.js'
 import type { ChatGroundingPlan } from './chat-grounding-planner.js'
+import type { ClarificationIssue } from './clarification-strategy.js'
 import {
   asksForProductSelection,
   historicalUserMessages,
   needFrom,
   needValue,
   normalize,
+  rejectedProductQuestion,
   resolveContextValues,
   type CustomerNeeds,
   type CustomerNeedsDomain,
@@ -90,7 +92,7 @@ function inferEllipticalScalpTypes(
 ): readonly ScalpType[] | undefined {
   if (!hasSafeScalpContext) return undefined
   const match = normalize(message).match(
-    /^(?:e|eh|meu couro e|meu couro eh)\s+(oleoso|seco|normal|sensivel)\b/,
+    /^(?:(?:e|eh|meu couro e|meu couro eh)\s+)?(oleoso|seco|normal|sensivel)\b/,
   )
   return match?.[1] ? [match[1] as ScalpType] : undefined
 }
@@ -304,16 +306,17 @@ function interpretHidrasplashNeeds(request: CustomerNeedsRequest<ChatPreferences
         !(spokenScalp?.includes('seco') && concern === 'oleosidade') &&
         !(spokenScalp?.includes('oleoso') && concern === 'ressecamento'),
       )
-  const conflictingStructured =
-    (preferences.scalpTypes !== undefined && spokenScalp !== undefined &&
-      !spokenScalp.some((type) => preferences.scalpTypes?.includes(type))) ||
-    (preferences.category !== undefined && spokenGoal.category !== undefined &&
-      preferences.category !== spokenGoal.category) ||
-    (preferences.subcategory !== undefined && spokenGoal.objective !== undefined &&
-      preferences.subcategory !== spokenGoal.objective) ||
+  const conflictingStructuredAttribute =
     (preferences.avoidIngredients ?? []).some((term) =>
       ingredientExclusion.revoked.some((removed) => attributeKey(term) === attributeKey(removed)),
-    )
+    ) ? 'ingredient' :
+    preferences.category !== undefined && spokenGoal.category !== undefined &&
+      preferences.category !== spokenGoal.category ? 'category' :
+    preferences.subcategory !== undefined && spokenGoal.objective !== undefined &&
+      preferences.subcategory !== spokenGoal.objective ? 'objective' :
+    preferences.scalpTypes !== undefined && spokenScalp !== undefined &&
+      !spokenScalp.some((type) => preferences.scalpTypes?.includes(type)) ? 'scalp' :
+    undefined
   const category: Need<ProductCategory> = preferences.category !== undefined
     ? needFrom(preferences.category)
     : currentCategory !== undefined
@@ -323,7 +326,8 @@ function interpretHidrasplashNeeds(request: CustomerNeedsRequest<ChatPreferences
   return {
     category,
     rankingText: removeSensoryTerms(rankingText, suppressed),
-    conflictingStructured,
+    conflictingStructured: conflictingStructuredAttribute !== undefined,
+    conflictingStructuredAttribute,
     objective: needFrom(currentSubcategory, historicalSubcategory),
     preferences: {
       hairTypes: needFrom(preferences.hairTypes),
@@ -452,20 +456,71 @@ export function translateHidrasplashNeeds(
     ...searchInput,
     query: searchInput.query?.slice(0, PRODUCT_SEARCH_MAX_QUERY_LENGTH),
   })
+  const issues: ClarificationIssue[] = []
+  const invalidBudget = !toolPreferences.success &&
+    toolPreferences.error.issues.some(({ path }) => path[0] === 'maxPrice')
+  if (domain.restrictions.unsupportedRequirement.origin !== 'absent') {
+    issues.push({
+      reason: 'unverified_requirement', priority: 'restriction', attribute: 'required_attribute',
+      limitation: 'Não consegui verificar esse requisito obrigatório no catálogo. Com essa condição, não posso indicar um produto com segurança.',
+    })
+  }
+  if (ingredientResolution.unresolvedTerms.length > 0) {
+    issues.push({
+      reason: 'unverified_exclusion', priority: 'restriction', attribute: 'ingredient',
+      limitation: 'Não consegui confirmar a exclusão desse ingrediente no catálogo. Com essa condição, não posso indicar um produto com segurança.',
+    })
+  }
+  if (domain.conflictingStructuredAttribute === 'ingredient') {
+    issues.push({
+      reason: 'structured_conflict', priority: 'restriction', attribute: 'ingredient',
+      question: 'As informações divergem sobre um ingrediente. Qual ingrediente precisa ficar de fora?',
+      limitation: 'A exclusão de ingrediente ainda está em aberto, então não consigo indicar um produto com segurança.',
+    })
+  }
+  if (budget.origin === 'ambiguous') {
+    issues.push({
+      reason: 'budget_conflict', priority: 'restriction', attribute: 'budget',
+      question: 'Qual é o valor máximo que você quer gastar no produto?',
+      limitation: 'O limite de preço ainda está em aberto, então não consigo indicar um produto com segurança.',
+    })
+  } else if (invalidBudget) {
+    issues.push({
+      reason: 'unverified_budget', priority: 'restriction', attribute: 'budget',
+      limitation: 'Não consegui usar o limite de preço informado para verificar os produtos disponíveis.',
+    })
+  }
+  if (domain.conflictingStructuredAttribute === 'scalp') {
+    issues.push({
+      reason: 'structured_conflict', priority: 'ambiguity', attribute: 'scalp',
+      question: 'Recebi duas informações sobre o seu couro cabeludo. Qual delas descreve melhor o seu caso?',
+      limitation: 'As informações sobre o couro cabeludo são diferentes e preciso dessa confirmação para indicar um produto.',
+    })
+  } else if (conflictingScope || domain.conflictingStructuredAttribute === 'category' ||
+    domain.conflictingStructuredAttribute === 'objective' || (!toolPreferences.success && !invalidBudget)) {
+    const categoryConflict = conflictingScope || domain.conflictingStructuredAttribute === 'category' ||
+      (!toolPreferences.success && !invalidBudget)
+    issues.push({
+      reason: 'scope_conflict', priority: 'ambiguity', attribute: categoryConflict ? 'category' : 'objective',
+      question: categoryConflict ? 'Que tipo de produto você quer nesta busca?' : 'Qual é a finalidade principal do produto nesta busca?',
+      limitation: 'O tipo ou a finalidade do produto ainda está em aberto, então não consigo fazer uma indicação segura.',
+    })
+  }
+  if (needs.context.unresolvedRejection) {
+    issues.push({
+      reason: 'rejection_reference', priority: 'ambiguity', attribute: 'product',
+      question: rejectedProductQuestion,
+      limitation: 'Sem identificar o produto que você quer deixar de fora, não consigo escolher outra opção com segurança.',
+    })
+  }
   return {
     constraints,
     searchInput,
     toolPreferences: toolPreferences.data,
     presentation: { searchInput, sensoryTerms: effectiveSensoryTerms },
     rejectedProductIds: new Set([...needs.exclusions.declared, ...needs.exclusions.inferred]),
-    needsClarification:
-      budget.origin === 'ambiguous' ||
-      needs.context.unresolvedRejection ||
-      domain.conflictingStructured ||
-      conflictingScope ||
-      !toolPreferences.success ||
-      domain.restrictions.unsupportedRequirement.origin !== 'absent' ||
-      ingredientResolution.unresolvedTerms.length > 0,
+    issues,
+    needsClarification: issues.length > 0,
     cart: request.cart,
   }
 }
@@ -487,23 +542,35 @@ export function hasSelectionDiscriminator(context: HidrasplashSearchContext) {
   )
 }
 
-export function consultativeQuestion(
+export function hidrasplashConsultation(
   plan: ChatGroundingPlan,
   context: HidrasplashSearchContext,
-) {
+) : { readonly issues: readonly ClarificationIssue[]; readonly selectionQuestion?: ClarificationIssue; readonly canChooseWithoutPreference?: boolean } {
   if (
     plan.presentationIntent !== 'recommendation' ||
-    plan.groundingRequirement !== 'product' ||
-    context.needsClarification ||
     hasSelectionDiscriminator(context)
   ) {
-    return undefined
+    return { issues: context.issues }
   }
-  if (
-    context.searchInput.subcategory === 'anticaspa' ||
-    context.searchInput.hairConcerns?.includes('caspa')
-  ) {
-    return 'Seu couro cabeludo tende a ser seco, normal, oleoso ou sensível?'
+  const { category, subcategory, hairConcerns } = context.searchInput
+  if (category === undefined && subcategory === undefined) {
+    return { issues: context.issues, selectionQuestion: {
+      reason: 'missing_scope', priority: 'selection', attribute: 'category',
+      question: 'Que tipo de produto você está procurando?',
+      limitation: 'Ainda preciso saber que tipo de produto você procura para indicar uma opção.',
+    } }
   }
-  return 'Qual preferência é mais importante para você nessa escolha: perfil de uso, sensação ou orçamento?'
+  const scalpMatters = subcategory === 'anticaspa' || Boolean(hairConcerns?.includes('caspa'))
+  const forSkin = category === 'sabonetes' || category === 'oleos-corporais'
+  return {
+    issues: context.issues,
+    canChooseWithoutPreference: true,
+    selectionQuestion: {
+      reason: 'selection_preference', priority: 'preference', attribute: scalpMatters ? 'scalp' : 'objective',
+      question: scalpMatters
+        ? 'Seu couro cabeludo tende a ser seco, normal, oleoso ou sensível?'
+        : forSkin ? 'O que você quer priorizar no cuidado da pele?' : 'O que você quer priorizar no cuidado do cabelo?',
+      limitation: 'Com o que você informou até aqui, ainda não consigo diferenciar uma opção com segurança.',
+    },
+  }
 }

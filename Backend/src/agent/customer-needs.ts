@@ -94,6 +94,7 @@ export interface CustomerNeeds<Needs extends DomainNeeds> {
     readonly changedGoal: boolean
     readonly unresolvedRejection: boolean
     readonly recommendationIds: readonly number[]
+    readonly history: CustomerNeedsRequest['history']
   }
   readonly domain: Needs
 }
@@ -151,10 +152,16 @@ export function historicalUserMessages(request: CustomerNeedsRequest) {
 }
 
 function endsSearch(message: string) {
-  return /^(?:deixa pra la|deixe pra la|esquece|encerrar|encerra|cancelar essa busca|cancela essa busca|nao quero mais)(?:\s*(?:[.!]+|por enquanto|obrigad[oa]))*$/.test(
+  return /^(?:deixa pra la|deixe pra la|esquece|encerrar|encerra|cancelar essa busca|cancela essa busca|nao quero mais|nao quero continuar)(?:\s*(?:[.!]+|por enquanto|obrigad[oa]))*$/.test(
     normalize(message),
   )
 }
+
+export function isClarificationDeferral(message: string) {
+  return /^(?:nao sei(?: dizer| responder)?|tanto faz|nao tenho (?:uma )?preferencia|voce (?:pode escolher|decide)|pode escolher|fica a seu criterio|nao quero responder|prefiro nao responder)[.!]?$/.test(normalize(message))
+}
+
+export const rejectedProductQuestion = 'Qual produto você quer deixar de fora? Informe o ID do produto.'
 
 function changesTopic(message: string) {
   return /^(?:mudando de assunto|outro assunto|vamos falar de|agora sobre)\b/.test(normalize(message))
@@ -166,7 +173,7 @@ export function asksForProductSelection(normalized: string) {
 
 function isInformational(message: string, plan: ChatGroundingPlan) {
   const normalized = normalize(message)
-  if (/^(?:sera que|e se|se eu|suponha|tenho duvida se|gostaria de saber|quero (?:saber|entender|confirmar))\b/.test(normalized)) {
+  if (/^(?:sera que|e se|se eu|suponha|tenho duvida se|gostaria de saber|(?:(?:so|apenas) )?quero (?:saber|entender|confirmar))\b/.test(normalized)) {
     return true
   }
   const requestsAlternative = /^(?:me mostre|mostre|quero|pode (?:me )?mostrar)\b/.test(normalized) &&
@@ -276,8 +283,10 @@ function isCommercialContinuation(message: string, isPreferenceFollowUp: (messag
     budget.value !== undefined ||
     budget.ambiguous ||
     budget.revoked ||
+    isClarificationDeferral(message) ||
     isPreferenceFollowUp(message) ||
     asksForAlternative(message) ||
+    rejectedProductAnswer(message) !== undefined ||
     explicitRejectedProductIds(message).size > 0
   )
 }
@@ -352,6 +361,16 @@ function rejectsReference(message: string) {
   return /\b(?:nao quero(?: mais)? (?:esse|este|essa|esta)|nao gostei (?:desse|deste|dessa|desta))(?:\s+(?:produto|opcao|item|recomendacao)\b|[.!?,]|$)/.test(normalize(message))
 }
 
+function rejectedProductAnswer(message: string) {
+  const id = normalize(message).match(/^(?:(?:e )?o )?produto (?:id )?(\d{1,6})[.!]?$/)?.[1]
+  return id === undefined ? undefined : Number(id)
+}
+
+function answeredRejectionQuestion(previous: CustomerNeedsRequest['history'][number] | undefined) {
+  return previous?.role === 'assistant' &&
+    (previous.content === rejectedProductQuestion || previous.content.endsWith(`\n\n${rejectedProductQuestion}`))
+}
+
 function resolveRejectedProducts(
   statement: string,
   history: CustomerNeedsRequest['history'],
@@ -365,16 +384,26 @@ function resolveRejectedProducts(
     const entry = history[index]
     if (entry?.role !== 'user') continue
     const ids = explicitRejectedProductIds(entry.content)
+    const previous = history[index - 1]
+    if (unresolvedRejection && answeredRejectionQuestion(previous)) {
+      const answer = rejectedProductAnswer(entry.content)
+      if (answer !== undefined) ids.add(answer)
+      if (ids.size === 1) unresolvedRejection = false
+    }
     for (const id of ids) inferred.add(id)
     if (ids.size > 0 || !asksForAlternative(entry.content)) continue
-    const previous = history[index - 1]
     const id = previous?.role === 'assistant' ? resolveReference?.(previous.content) : undefined
     if (id === undefined) unresolvedRejection = true
     else inferred.add(id)
   }
   const declared = explicitRejectedProductIds(statement)
+  const previous = history.at(-1)
+  if (unresolvedRejection && answeredRejectionQuestion(previous)) {
+    const answer = rejectedProductAnswer(statement)
+    if (answer !== undefined) declared.add(answer)
+    if (declared.size === 1) unresolvedRejection = false
+  }
   if (!changedGoal && asksForAlternative(statement)) {
-    const previous = history.at(-1)
     const id = recommendationIds.length === 1
       ? recommendationIds[0]
       : recommendationIds.length === 0 && previous?.role === 'assistant'
@@ -453,13 +482,13 @@ export function interpretCustomerNeeds<Preferences extends BudgetPreference, Nee
     plan,
     budget,
     exclusions: { declared, inferred },
-    context: { interrupted, changedGoal, unresolvedRejection, recommendationIds },
+    context: { interrupted, changedGoal, unresolvedRejection, recommendationIds, history },
     domain: domain.interpret(
       {
         ...scopedRequest,
-        message: currentBudget.revoked ? '' : statement,
+        message: currentBudget.revoked || isClarificationDeferral(statement) ? '' : statement,
         history: history.filter(({ role, content }) =>
-          role !== 'user' || !budgetRevocation.test(normalize(content)),
+          role !== 'user' || !(budgetRevocation.test(normalize(content)) || isClarificationDeferral(content)),
         ),
       },
       changedGoal ? undefined : comparisonText,

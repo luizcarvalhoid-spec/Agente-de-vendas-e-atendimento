@@ -36,6 +36,47 @@ test('a historical ambiguous budget stays conservative until a current, valid co
   assert.deepEqual(read('Na verdade, meu limite é R$ 80.').budget, { origin: 'declared', value: 80 })
 })
 
+test('category and purpose pendencies are replayed independently of budget and preferences', () => {
+  const initial = 'Quero shampoo ou sabonete suave.'
+  const read = (message: string, ...turns: string[]) => interpretCustomerNeeds(
+    chatRequestSchema.parse({ message, history: history(...turns) }), hidrasplashCustomerDomain,
+  )
+  const price = read('Até R$ 50.', initial)
+  const sensory = read('Também prefiro frescor.', initial, 'Até R$ 50.')
+  for (const needs of [price, sensory]) {
+    assert.equal(needs.domain.category.origin, 'ambiguous')
+    assert.equal(needs.plan.presentationIntent, 'recommendation')
+  }
+  const confirmed = read('Shampoo.', initial, 'Até R$ 50.', 'Também prefiro frescor.')
+  assert.equal(confirmed.context.changedGoal, false)
+  assert.deepEqual(confirmed.domain.category, { origin: 'inferred', value: 'shampoos' })
+  assert.deepEqual(confirmed.budget, { origin: 'inferred', value: 50 })
+  assert.deepEqual(confirmed.domain.preferences.sensory, { origin: 'inferred', value: ['suave', 'frescor'] })
+
+  const known = 'Quero sabonete suave até R$ 50.'
+  const inquiry = 'E vocês têm shampoo?'
+  assert.deepEqual(read('Também prefiro frescor.', known, inquiry).domain.category, { origin: 'inferred', value: 'sabonetes' })
+  assert.equal(read('Prefiro frescor.', known, initial).domain.category.origin, 'ambiguous')
+  const accepted = read('Shampoo.', known, initial, 'Prefiro frescor.')
+  assert.equal(accepted.context.changedGoal, false)
+  assert.deepEqual(accepted.budget, { origin: 'inferred', value: 50 })
+  const changed = read('Agora quero um óleo corporal.', known, initial, 'Até R$ 50.')
+  assert.equal(changed.context.changedGoal, true)
+  assert.equal(changed.budget.origin, 'absent')
+
+  const ambiguousPurpose = 'Quero condicionador para hidratação ou nutrição, até R$ 50.'
+  const updated = read('Também prefiro frescor.', ambiguousPurpose)
+  assert.equal(updated.domain.objective.origin, 'ambiguous')
+  assert.deepEqual(updated.domain.category, { origin: 'inferred', value: 'condicionadores' })
+  const resolved = read('Hidratação.', ambiguousPurpose, 'Também prefiro frescor.')
+  assert.deepEqual(resolved.domain.objective, { origin: 'declared', value: 'hidratacao' })
+  assert.deepEqual(resolved.budget, { origin: 'inferred', value: 50 })
+
+  const closed = read('Não quero continuar.', initial, 'Até R$ 50.')
+  assert.equal(closed.context.interrupted, true)
+  assert.equal(read('Quero sabonete.', initial, 'Não quero continuar.').budget.origin, 'absent')
+})
+
 test('an explicit budget revocation survives later turns and conflicts with a current structured ceiling', () => {
   const initial = 'Quero shampoo anticaspa para couro oleoso até R$ 40.'
   const revocation = 'Agora sem limite de orçamento.'

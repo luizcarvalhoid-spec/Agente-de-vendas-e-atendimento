@@ -45,7 +45,7 @@ const productSignals = [
   /\b(?:produtos?|kit)\b/,
   /\b(?:preco|custa|custar|pagar|valor|orcamento|limite|caro|barato|bolso)\b/,
   /\b(?:estoque|disponivel|disponibilidade|pronta entrega)\b/,
-  /\b(?:recomenda|recomendacao|indica|indicado|escolher|escolho|combina comigo|melhor opcao)\b/,
+  /\b(?:recomenda|recomendacao|indica|indicado|me recomende|me indique|escolher|escolho|combina comigo|melhor opcao)\b/,
 ]
 
 const faqSignals = [
@@ -63,7 +63,7 @@ const comparisonSignals = [
 ]
 
 const recommendationSignals = [
-  /\b(?:recomenda|recomendacao|indica|indicado|escolher|escolho|melhor opcao)\b/,
+  /\b(?:recomenda|recomendacao|indica|indicado|me recomende|me indique|escolher|escolho|melhor opcao)\b/,
   /\bo que combina comigo\b/,
 ]
 

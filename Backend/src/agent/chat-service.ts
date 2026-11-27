@@ -30,19 +30,28 @@ import {
   observeChatOperation,
   type ChatOperationalObserver,
 } from '../observability/chat-operational-events.js'
-import type { ChatGroundingPlan } from './chat-grounding-planner.js'
+import { hasFaqTopic, type ChatGroundingPlan } from './chat-grounding-planner.js'
 import {
+  clarificationReply,
   explicitRejectedProductIds,
   historicalUserMessages,
   interpretCustomerNeeds,
+  matchesClarificationQuestion,
   normalize,
+  shortBudgetAnswer,
+  shortProductAnswer,
 } from './customer-needs.js'
 import {
-  consultativeQuestion,
   hasSelectionDiscriminator,
+  hidrasplashConsultation,
   hidrasplashCustomerDomain,
   translateHidrasplashNeeds,
 } from './hidrasplash-customer-needs.js'
+import {
+  decideClarification,
+  type ClarificationDecision,
+  type ClarificationIssue,
+} from './clarification-strategy.js'
 import {
   createToolOrchestrator,
   type ToolOrchestratorResult,
@@ -156,17 +165,28 @@ function createConversation(
   ]
 }
 
-function controlledConsultativeQuestion(
-  message: string,
+function controlledClarification(
+  decision: Extract<ClarificationDecision, { issue: ClarificationIssue }>,
   requestId: string,
+  faqText = '',
+  sourceIds: readonly string[] = [],
 ): ChatResponse {
+  const message = decision.action === 'ask' ? decision.issue.question ?? decision.issue.limitation : decision.issue.limitation
   return chatResponseSchema.parse({
     type: 'text',
-    message,
-    reason: 'clarification',
-    sourceIds: [],
+    message: faqText ? `${faqText}\n\n${message}` : message,
+    reason: decision.action === 'ask' ? 'clarification' : 'unable_to_verify',
+    sourceIds,
     requestId,
   })
+}
+
+function quoteClarification(requestId: string, attribute: 'quantity' | 'product', question: string) {
+  return controlledClarification({
+    action: 'ask',
+    issue: { reason: 'quote_reference', priority: 'ambiguity', attribute, question,
+      limitation: 'Não consegui determinar uma cotação com os dados disponíveis.' },
+  }, requestId)
 }
 
 function explicitInformationalProductIds(message: string) {
@@ -199,6 +219,19 @@ const differentProductReference = new RegExp(
   `\\b(?:outro|outra|(?:${hidrasplashCustomerDomain.quoteProductNouns}) diferente)\\b`,
 )
 
+const priceQuestion = 'De qual produto você quer saber o preço?'
+const comparisonQuestion = 'Quais são os dois produtos que você quer comparar? Informe os dois IDs.'
+const quoteQuestions = {
+  quantity: 'A cotação calcula uma unidade por vez. Qual produto você quer cotar para uma unidade com frete?',
+  multiple: 'Qual dos produtos você quer usar nessa cotação? Informe um único ID de produto.',
+  product: 'Qual produto você quer usar nessa cotação? Informe um único ID de produto.',
+  current: 'Não consegui confirmar essa recomendação com as condições atuais. Qual é o ID do produto que você deseja cotar?',
+}
+
+function isPriceOnly(message: string) {
+  return /^(?:so|apenas) quero saber o preco[.!?]?$/.test(normalize(message))
+}
+
 function isQuoteIntent(message: string) {
   const normalized = normalize(message)
   const asksTotal = /\b(?:total|valor final)\b/.test(normalized)
@@ -213,6 +246,73 @@ function isQuoteIntent(message: string) {
   )
 }
 
+function referenceQuestion(message: string) {
+  if (matchesClarificationQuestion(message, priceQuestion)) return { kind: 'price', question: priceQuestion } as const
+  if (matchesClarificationQuestion(message, comparisonQuestion)) return { kind: 'comparison', question: comparisonQuestion } as const
+  const quote = Object.values(quoteQuestions).find((question) => matchesClarificationQuestion(message, question))
+  return quote === undefined ? undefined : { kind: 'quote', question: quote } as const
+}
+
+function referenceAnswer(message: string) {
+  const pair = normalize(message).match(/^(?:os )?produtos? (?:id )?(\d{1,6}) (e|ou) (?:(?:o )?produto )?(?:id )?(\d{1,6})[.!]?$/)
+  const single = shortProductAnswer(message)
+  const ids = pair?.[2] === 'e' && pair[1] !== pair[3] ? [Number(pair[1]), Number(pair[3])] :
+    single === undefined ? [] : [single]
+  return {
+    ids,
+    attempted: ids.length > 0 || pair !== null || shortBudgetAnswer(message) !== undefined || clarificationReply(message) !== undefined,
+  }
+}
+
+function resolveReferenceFollowUp(request: ChatRequest, catalog: CatalogRepository) {
+  const answer = referenceAnswer(request.message)
+  if (!answer.attempted || clarificationReply(request.message) === 'ended') return undefined
+  const last = request.history.at(-1)
+  const pending = last?.role === 'assistant' ? referenceQuestion(last.content) : undefined
+  if (!pending) return undefined
+  const count = pending.kind === 'comparison' ? 2 : 1
+
+  // Replay only a contiguous question/answer sequence with an actual user request at its start.
+  for (let index = request.history.length - 2; index >= 0; index -= 2) {
+    const user = request.history[index]
+    const assistant = request.history[index + 1]
+    if (user?.role !== 'user' || assistant?.role !== 'assistant' ||
+      referenceQuestion(assistant.content)?.kind !== pending.kind) break
+    const original = user.content
+    const requested = pending.kind === 'price' ? isPriceOnly(original) :
+      pending.kind === 'comparison'
+        ? hasUnresolvedComparisonReference(original) && explicitComparisonIds(original, catalog).length !== 2
+        : isQuoteIntent(original) &&
+          (quantityReference.test(normalize(original)) || explicitInformationalProductIds(original).length !== 1)
+    if (requested) {
+      const [first, second] = answer.ids
+      if (answer.ids.length === count && first !== undefined) {
+        if (pending.kind === 'price') return { priceId: first } as const
+        if (pending.kind === 'quote') return { message: `Quanto fica o total do produto ${first} com frete?` } as const
+        if (second !== undefined && answer.ids.every((id) => catalog.findById(id) !== undefined)) {
+          return { message: `Compare os produtos ${first} e ${second}. ${original}` } as const
+        }
+      }
+      return { pending } as const
+    }
+    const previous = referenceAnswer(original)
+    if (!previous.attempted || previous.ids.length === count || clarificationReply(original) === 'ended') break
+  }
+  return undefined
+}
+
+function currentPriceResponse(catalog: CatalogRepository, id: number, requestId: string): ChatResponse | undefined {
+  const product = catalog.findById(id)
+  const price = product && priceToCents(product.price)
+  if (!product || price === undefined) return undefined
+  return chatResponseSchema.parse({
+    type: 'text',
+    message: `${product.name}: preço atual de ${formatCommercialCents(price)}.`,
+    sourceIds: [],
+    requestId,
+  })
+}
+
 function contextualQuoteResponse(
   request: ChatRequest,
   requestId: string,
@@ -224,17 +324,19 @@ function contextualQuoteResponse(
   if (!isQuoteIntent(request.message)) return undefined
 
   if (quantityReference.test(normalize(request.message))) {
-    return controlledConsultativeQuestion(
-      'A cotação calcula uma unidade por vez. Informe um único produto para cotar uma unidade com frete.',
+    return quoteClarification(
       requestId,
+      'quantity',
+      quoteQuestions.quantity,
     )
   }
 
   const explicitIds = explicitInformationalProductIds(request.message)
   if (explicitIds.length > 1) {
-    return controlledConsultativeQuestion(
-      'Qual dos produtos você quer usar nessa cotação? Informe um único ID de produto.',
+    return quoteClarification(
       requestId,
+      'product',
+      quoteQuestions.multiple,
     )
   }
   const explicitId = explicitIds[0]
@@ -245,9 +347,10 @@ function contextualQuoteResponse(
     rejectsPreviousReference ||
     (explicitId === undefined && recommendationIds.length !== 1)
   ) {
-    return controlledConsultativeQuestion(
-      'Qual produto você quer usar nessa cotação? Informe um único ID de produto.',
+    return quoteClarification(
       requestId,
+      'product',
+      quoteQuestions.product,
     )
   }
 
@@ -276,9 +379,10 @@ function contextualQuoteResponse(
     })
   }
   if (explicitId === undefined && !canQuoteRecommendation(product)) {
-    return controlledConsultativeQuestion(
-      'Não consegui confirmar essa recomendação com as condições atuais. Você pode informar o ID do produto que deseja cotar?',
+    return quoteClarification(
       requestId,
+      'product',
+      quoteQuestions.current,
     )
   }
   const quote = composer.quote(product)
@@ -408,18 +512,7 @@ function controlledTextResponse(
   result: ToolOrchestratorResult,
   plan: ChatGroundingPlan,
   faqAnswer: FaqComposition | undefined,
-  needsClarification: boolean,
 ): ChatResponse {
-  if (needsClarification) {
-    const mixedFaq = plan.groundingRequirement === 'both' ? faqAnswer : undefined
-    return chatResponseSchema.parse({
-      type: 'text',
-      message: `Preciso confirmar a restrição comercial informada antes de selecionar um produto.${mixedFaq ? ` Sobre a outra dúvida: ${mixedFaq.message}` : ''}`,
-      reason: 'clarification',
-      sourceIds: mixedFaq?.sourceIds ?? [],
-      requestId,
-    })
-  }
   if (
     plan.groundingRequirement === 'both' &&
     result.grounding.product === 'not_found' &&
@@ -487,7 +580,7 @@ function controlledTextResponse(
   return chatResponseSchema.parse({
     type: 'text',
     message:
-      'Consultei os dados disponíveis, mas não houve uma seleção inequívoca para exibir cartões. Posso refinar a busca com mais uma preferência.',
+      'Consultei os dados disponíveis, mas ainda não consigo indicar um produto com segurança.',
     reason: 'clarification',
     sourceIds: [],
     requestId,
@@ -523,19 +616,19 @@ export function createChatService(
         })
         return response
       }
-      const request = chatRequestSchema.parse(rawInput)
+      const received = chatRequestSchema.parse(rawInput)
       if (execution.signal.aborted) {
         throw new ChatServiceError('REQUEST_CANCELLED')
       }
-      for (const item of request.cart) {
+      for (const item of received.cart) {
         if (options.catalog.findById(item.productId) === undefined) {
           throw new ChatServiceError('INVALID_REQUEST')
         }
       }
 
       const clinicalBoundary = profile.presentation?.clinicalBoundary?.(
-        request.message,
-        historicalUserMessages(request),
+        received.message,
+        historicalUserMessages(received),
       )
       if (clinicalBoundary) {
         return completeEarly(
@@ -550,6 +643,23 @@ export function createChatService(
         )
       }
 
+      const followUp = resolveReferenceFollowUp(received, options.catalog)
+      if (followUp?.priceId !== undefined) {
+        return currentPriceResponse(options.catalog, followUp.priceId, execution.requestId) ??
+          chatResponseSchema.parse({
+            type: 'text', reason: 'unable_to_verify', sourceIds: [], requestId: execution.requestId,
+            message: 'Não consegui verificar o preço atual do produto indicado.',
+          })
+      }
+      if (followUp?.pending) {
+        const { kind, question } = followUp.pending
+        return controlledClarification({
+          action: clarificationReply(received.message) ? 'explain' : 'ask',
+          issue: { reason: `${kind}_reference`, priority: 'ambiguity', attribute: 'product', question,
+            limitation: 'Preciso identificar o produto ou os produtos para responder com segurança.' },
+        }, execution.requestId)
+      }
+      const request = followUp?.message ? { ...received, message: followUp.message } : received
       const needs = interpretCustomerNeeds(
         request,
         hidrasplashCustomerDomain,
@@ -583,20 +693,61 @@ export function createChatService(
         return completeEarly(quoteResponse, 'contextual_quote')
       }
 
+      const consultation = hidrasplashConsultation(plan, commercial)
+      const issues: ClarificationIssue[] = plan.presentationIntent === 'text' ? [] : [...consultation.issues]
       if (
         plan.presentationIntent === 'comparison' &&
         hasUnresolvedComparisonReference(request.message) &&
         explicitComparisonIds(request.message, options.catalog).length !== 2
       ) {
-        return completeEarly(
-          controlledConsultativeQuestion(
-            'Quais são os dois produtos que você quer comparar? Informe os dois IDs.',
-            execution.requestId,
-          ),
-          'comparison_clarification',
-        )
+        issues.push({
+          reason: 'comparison_reference', priority: 'ambiguity', attribute: 'products',
+          question: comparisonQuestion,
+          limitation: 'Preciso identificar os dois produtos para fazer uma comparação.',
+        })
       }
-      const consultationQuestion = consultativeQuestion(plan, commercial)
+      if (plan.presentationIntent === 'text' && isPriceOnly(request.message)) {
+        const [id] = needs.context.recommendationIds
+        if (needs.context.recommendationIds.length === 1 && id !== undefined &&
+          !commercial.rejectedProductIds.has(id) && !needs.context.unresolvedRejection) {
+          const price = currentPriceResponse(options.catalog, id, execution.requestId)
+          if (price) return price
+        }
+        issues.push({
+          reason: 'price_reference', priority: 'ambiguity', attribute: 'product',
+          question: priceQuestion,
+          limitation: 'Preciso identificar o produto para informar o preço.',
+        })
+      }
+      if (shortBudgetAnswer(received.message) !== undefined && !needs.context.budgetAnswerConfirmed &&
+        !issues.some((issue) => issue.attribute === 'budget')) {
+        issues.push({
+          reason: 'numeric_reference', priority: 'ambiguity', attribute: 'number',
+          question: 'Esse número é um limite de preço ou se refere a um produto?',
+          limitation: 'Ainda não consegui identificar o que esse número representa.',
+        })
+      }
+      if (!followUp && referenceAnswer(received.message).ids.some((id) => !needs.exclusions.declared.includes(id))) {
+        issues.push({
+          reason: 'product_purpose', priority: 'ambiguity', attribute: 'product',
+          question: 'O que você quer saber sobre o produto ou os produtos que indicou?',
+          limitation: 'Preciso saber o que você quer consultar sobre esses produtos.',
+        })
+      }
+      const decision = decideClarification({
+        ...consultation,
+        issues,
+        plan,
+        message: request.message,
+        history: needs.context.history,
+      })
+      const pending = decision.action === 'ask' || decision.action === 'explain' ? decision : undefined
+      if (pending && !hasFaqTopic(request.message)) {
+        const response = controlledClarification(pending, execution.requestId)
+        return pending.issue.reason === 'comparison_reference'
+          ? completeEarly(response, 'comparison_clarification')
+          : response
+      }
       const registry = createAgentToolRegistry([
         createSearchProductsTool(options.productIndex, policy),
         createGetProductDetailsTool(options.catalog, policy),
@@ -662,36 +813,13 @@ export function createChatService(
       })
       const result = await orchestrator.run({
         conversation: createConversation(request, commercial),
-        groundingRequirement: plan.groundingRequirement,
+        groundingRequirement: pending ? 'faq' : plan.groundingRequirement,
         signal: execution.signal,
       })
       const faqAnswer = result.grounding.faq === 'found'
         ? composer.faq(request.message, result.faqSourceIds)
         : undefined
 
-      if (result.status !== 'completed') {
-        if (commercial.needsClarification && result.termination === 'INSUFFICIENT_GROUNDING') {
-          return controlledTextResponse(execution.requestId, result, plan, faqAnswer, true)
-        }
-        if (
-          consultationQuestion &&
-          plan.groundingRequirement === 'product' &&
-          result.termination === 'INSUFFICIENT_GROUNDING'
-        ) {
-          return controlledConsultativeQuestion(
-            consultationQuestion,
-            execution.requestId,
-          )
-        }
-        handleNonCompleted(result)
-      }
-
-      if (consultationQuestion) {
-        return controlledConsultativeQuestion(
-          consultationQuestion,
-          execution.requestId,
-        )
-      }
       const mixedFaq = plan.groundingRequirement === 'both' ? faqAnswer : undefined
       const mixedFaqText = mixedFaq?.message ?? (
         plan.groundingRequirement === 'both' && result.grounding.faq === 'not_found'
@@ -699,6 +827,39 @@ export function createChatService(
           : ''
       )
       const mixedSourceIds = mixedFaq?.sourceIds ?? []
+      if (pending && (result.status === 'completed' || result.termination === 'INSUFFICIENT_GROUNDING')) {
+        return controlledClarification(
+          pending,
+          execution.requestId,
+          faqAnswer?.message ?? 'Não consegui verificar a política solicitada nas fontes disponíveis.',
+          faqAnswer?.sourceIds,
+        )
+      }
+      const selectionQuestion = decision.action === 'search' ? decision.question : undefined
+      const missingSelectionScope = selectionQuestion?.priority === 'selection'
+      const rankEligible = () => options.productIndex
+        .search(commercial.searchInput, policy, createAgentToolExecutionContext(execution.signal))
+        .map((candidate) => candidate.id)
+        .filter((id) => !commercial.rejectedProductIds.has(id))
+      const optionalCandidates = selectionQuestion && !missingSelectionScope ? rankEligible() : undefined
+      if (optionalCandidates?.length === 0 && result.grounding.product !== 'not_found' &&
+        (result.status === 'completed' || result.termination === 'INSUFFICIENT_GROUNDING')) {
+        const unavailable = 'Não encontrei um produto elegível nas condições informadas.'
+        return chatResponseSchema.parse({
+          type: 'text',
+          message: mixedFaqText ? `${unavailable}\n\n${mixedFaqText}` : unavailable,
+          reason: mixedFaq?.status === 'unable_to_verify' ? 'unable_to_verify' : 'not_found',
+          sourceIds: mixedSourceIds,
+          requestId: execution.requestId,
+        })
+      }
+      if (selectionQuestion && result.status !== 'completed' && result.termination === 'INSUFFICIENT_GROUNDING' &&
+        (plan.groundingRequirement === 'product' || result.grounding.faq === 'found' || result.grounding.faq === 'not_found')) {
+        return controlledClarification(
+          { action: 'ask', issue: selectionQuestion }, execution.requestId, mixedFaqText, mixedSourceIds,
+        )
+      }
+      if (result.status !== 'completed') handleNonCompleted(result)
       if (plan.presentationIntent === 'text') {
         const productInformation = controlledProductInformation(
           request,
@@ -718,15 +879,15 @@ export function createChatService(
       }
 
       const authorizedIds = new Set(result.recommendationProductIds)
-      const selectionContext = createAgentToolExecutionContext(execution.signal)
-      const rankedIds = options.productIndex
-        .search(commercial.searchInput, policy, selectionContext)
-        .map((candidate) => candidate.id)
-        .filter(
-          (id) =>
-            authorizedIds.has(id) &&
-            !commercial.rejectedProductIds.has(id),
+      const eligibleIds = optionalCandidates ?? rankEligible()
+      const rankedIds = eligibleIds.filter((id) => authorizedIds.has(id))
+      const uniqueAuthorized = optionalCandidates?.length === 1 && rankedIds.length === 1
+      if (selectionQuestion && (missingSelectionScope || eligibleIds.length > 0) &&
+        !uniqueAuthorized && result.grounding.product !== 'not_found') {
+        return controlledClarification(
+          { action: 'ask', issue: selectionQuestion }, execution.requestId, mixedFaqText, mixedSourceIds,
         )
+      }
       const explicitIds = explicitComparisonIds(
         request.message,
         options.catalog,
@@ -734,15 +895,15 @@ export function createChatService(
 
       let selectedIds: number[] = []
       if (
-        !commercial.needsClarification &&
-        plan.presentationIntent === 'recommendation' &&
-        hasSelectionDiscriminator(commercial) &&
+        decision.action === 'search' &&
+        decision.selection === 'recommendation' &&
+        (decision.flexible || uniqueAuthorized || hasSelectionDiscriminator(commercial)) &&
         rankedIds[0] !== undefined
       ) {
         selectedIds = [rankedIds[0]]
       } else if (
-        !commercial.needsClarification &&
-        plan.presentationIntent === 'comparison'
+        decision.action === 'search' &&
+        decision.selection === 'comparison'
       ) {
         selectedIds =
           explicitIds.length === 2
@@ -781,7 +942,6 @@ export function createChatService(
             result,
             plan,
             faqAnswer,
-            commercial.needsClarification,
           )
         }
         return chatResponseSchema.parse({
@@ -809,7 +969,6 @@ export function createChatService(
             result,
             plan,
             faqAnswer,
-            commercial.needsClarification,
           )
         }
         return chatResponseSchema.parse({
@@ -830,7 +989,6 @@ export function createChatService(
         result,
         plan,
         faqAnswer,
-        commercial.needsClarification,
       )
     },
   }

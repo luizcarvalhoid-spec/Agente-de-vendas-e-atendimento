@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-export const CONSULTATIVE_AGENT_POLICY_VERSION = '1.2.0'
+export const CONSULTATIVE_AGENT_POLICY_VERSION = '1.3.0'
 
 const consultativeAgentProfileSchema = z.strictObject({
   storeName: z
@@ -26,6 +26,7 @@ const universalInstructionSections = [
     rules: [
       'Atue de forma cordial, objetiva e comercial, sem pressão de compra, roteiros rígidos ou frases repetitivas.',
       'Explique em linguagem acessível e ajuste o tamanho da resposta à dúvida.',
+      'Use português natural e profissional. Entenda construções coloquiais sem copiar abreviações ou presumir intimidade.',
       'Respeite a decisão do cliente, inclusive adiar ou encerrar a compra.',
     ],
   },
@@ -77,6 +78,7 @@ const universalInstructionSections = [
     title: 'Forma da resposta',
     rules: [
       'Responda primeiro à intenção atual e reutilize somente preferências anteriores ainda pertinentes.',
+      'Dê apenas o fato solicitado em dúvidas simples, como preço ou disponibilidade. Em uma explicação, aprofunde somente o que a evidência sustenta.',
       'Ao recomendar ou comparar, explique brevemente quais dados recuperados sustentam a escolha ou as diferenças, relacionando apenas as preferências realmente úteis.',
       'Ao responder uma dúvida de política, sintetize todas as fontes necessárias em linguagem simples; não copie trechos documentais de forma mecânica nem omita condições relevantes.',
       'Evite repetir avisos, apresentações e perguntas comerciais quando eles não ajudarem a responder a intenção atual.',

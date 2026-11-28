@@ -66,10 +66,22 @@ function inferSubcategory(message: string): ProductSubcategory | undefined {
   return undefined
 }
 
-const categoryQuestion = 'Que tipo de produto você quer nesta busca?'
-const objectiveQuestion = 'Qual é a finalidade principal do produto nesta busca?'
-const scalpQuestion = 'Recebi duas informações sobre o seu couro cabeludo. Qual delas descreve melhor o seu caso?'
-const ingredientQuestion = 'As informações divergem sobre um ingrediente. Qual ingrediente precisa ficar de fora?'
+const categoryQuestion = [
+  'Que tipo de produto você quer nesta busca?',
+  'Qual tipo de produto devo considerar nesta busca?',
+] as const
+const objectiveQuestion = [
+  'Qual é a finalidade principal do produto nesta busca?',
+  'Qual finalidade devo priorizar para esta busca?',
+] as const
+const scalpQuestion = [
+  'Recebi duas informações sobre o seu couro cabeludo. Qual delas descreve melhor o seu caso?',
+  'As descrições do seu couro cabeludo são diferentes. Qual delas devo considerar?',
+] as const
+const ingredientQuestion = [
+  'As informações divergem sobre um ingrediente. Qual ingrediente precisa ficar de fora?',
+  'Qual ingrediente você quer manter fora da busca?',
+] as const
 
 interface CustomerTurn {
   readonly message: string
@@ -104,10 +116,10 @@ function declaredProductGoal(message: string, reply?: string) {
 function inferScalpTypes(message: string): readonly ScalpType[] | undefined {
   const normalized = normalize(message)
   const types: ScalpType[] = []
-  if (/\bcouro(?: cabeludo)? (?:e |eh )?oleoso\b/.test(normalized)) types.push('oleoso')
-  if (/\bcouro(?: cabeludo)? (?:e |eh )?seco\b/.test(normalized)) types.push('seco')
+  if (/\bcouro(?: cabeludo)? (?:e |eh )?(?:(?:muito|mto) )?oleoso\b/.test(normalized)) types.push('oleoso')
+  if (/\bcouro(?: cabeludo)? (?:e |eh )?(?:(?:muito|mto) )?seco\b/.test(normalized)) types.push('seco')
   if (/\bcouro(?: cabeludo)? (?:e |eh )?normal\b/.test(normalized)) types.push('normal')
-  if (/\bcouro(?: cabeludo)? (?:e |eh )?sensivel\b/.test(normalized)) types.push('sensivel')
+  if (/\bcouro(?: cabeludo)? (?:e |eh )?(?:(?:muito|mto) )?sensivel\b/.test(normalized)) types.push('sensivel')
   return types.length > 0 ? types : undefined
 }
 
@@ -117,7 +129,7 @@ function inferEllipticalScalpTypes(
 ): readonly ScalpType[] | undefined {
   if (!hasSafeScalpContext) return undefined
   const match = normalize(message).match(
-    /^(?:(?:e|eh|meu couro e|meu couro eh)\s+)?(oleoso|seco|normal|sensivel)\b/,
+    /^(?:(?:e|eh|meu couro e|meu couro eh)\s+)?(?:(?:muito|mto) )?(oleoso|seco|normal|sensivel)\b/,
   )
   return match?.[1] ? [match[1] as ScalpType] : undefined
 }
@@ -199,10 +211,12 @@ function readAttributeClauses(message: string) {
   return markers.flatMap((marker, index): AttributeClause[] => {
     const [introducer, preference, neutral, requirement] = marker
     const start = marker.index + introducer.length
-    const term = message.slice(start, markers[index + 1]?.index)
+    const captured = message.slice(start, markers[index + 1]?.index)
       .split(attributeBoundary, 1)[0]
       ?.trim()
       .replace(/\s+(?:e|ou|mas)$/, '')
+    const colloquialTiming = /^(?:nao )?pode (?:ter|conter)\s+$/.test(introducer) && /\s+agr$/.test(captured ?? '')
+    const term = colloquialTiming ? captured?.replace(/\s+agr$/, '') : captured
     if (
       !term ||
       /^(?:(?:mais\s+)?(?:o\s+)?produto\s+(?:id\s*)?\d+|(?:mais\s+)?(?:esse|este|essa|esta)\s+(?:produto|opcao)|perguntar|fazer perguntas|restricoes?|preferencias?)\b/.test(term)
@@ -215,13 +229,13 @@ function readAttributeClauses(message: string) {
     if (neutral && !message.includes('?')) {
       if (/^nao (?:precisa|tem que)\b/.test(neutral)) kind = 'release'
       if (
-        /^(?:(?:agora|ja) pode)\b/.test(neutral) ||
+        /^(?:(?:agora|ja) pode)\b/.test(neutral) || colloquialTiming ||
         (/^pode\b/.test(neutral) && /\bmudei de ideia\b/.test(message))
       ) {
         kind = 'allow'
       }
     }
-    return [{ kind, term, start, end: start + term.length }]
+    return [{ kind, term, start, end: start + (captured?.length ?? term.length) }]
   })
 }
 
@@ -255,7 +269,12 @@ function readAttributeNeeds(message: string) {
         (text, { start, end }) => text.slice(0, start) + text.slice(end),
         normalized,
       )
-  return { clauses, rankingText: removeSensoryTerms(rankingText, suppressedSensory), suppressedSensory }
+  const adjusted = removeSensoryTerms(rankingText, suppressedSensory)
+  const beforeNegation = normalize(adjusted)
+  const afterNegation = beforeNegation.replace(
+    /\bcouro(?: cabeludo)? nao (?:e |eh )?(?:(?:muito|mto) )?(?:oleoso|sensivel)\b/g, '',
+  )
+  return { clauses, rankingText: beforeNegation === afterNegation ? adjusted : afterNegation.trim(), suppressedSensory }
 }
 
 const attributeKey = (term: string) => normalize(term).replace(/-/g, ' ').replace(/\s+/g, ' ')
@@ -632,7 +651,7 @@ export function hidrasplashConsultation(
   if (!hasCommercialScope(context)) {
     return { issues: context.issues, selectionQuestion: {
       reason: 'missing_scope', priority: 'selection', attribute: 'category',
-      question: 'Que tipo de produto você está procurando?',
+      question: ['Que tipo de produto você está procurando?', 'Qual tipo de produto você procura?'],
       limitation: 'Ainda preciso saber que tipo de produto você procura para indicar uma opção.',
     } }
   }
@@ -644,7 +663,7 @@ export function hidrasplashConsultation(
     selectionQuestion: {
       reason: 'selection_preference', priority: 'preference', attribute: scalpMatters ? 'scalp' : 'objective',
       question: scalpMatters
-        ? 'Seu couro cabeludo tende a ser seco, normal, oleoso ou sensível?'
+        ? ['Seu couro cabeludo tende a ser seco, normal, oleoso ou sensível?', 'Seu couro cabeludo é seco, normal, oleoso ou sensível?']
         : forSkin ? 'O que você quer priorizar no cuidado da pele?' : 'O que você quer priorizar no cuidado do cabelo?',
       limitation: 'Com o que você informou até aqui, ainda não consigo diferenciar uma opção com segurança.',
     },

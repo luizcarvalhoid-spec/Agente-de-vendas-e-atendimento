@@ -75,6 +75,13 @@ export function hasFaqTopic(message: string) {
   return matchesAny(normalize(message), faqSignals)
 }
 
+export function shortProductFact(message: string) {
+  const text = normalize(message)
+  if (/^(?:(?:qto|quanto) custa|qual (?:e )?o preco|(?:so|apenas) quero saber o preco)$/.test(text)) return 'price'
+  if (/^(?:(?:ainda )?tem estoque(?: (?:mesmo|msm))?|esta disponivel|qual (?:e )?o estoque)$/.test(text)) return 'stock'
+  return undefined
+}
+
 export function planChatGrounding(
   message: string,
   vocabulary: ProductIntentVocabulary,

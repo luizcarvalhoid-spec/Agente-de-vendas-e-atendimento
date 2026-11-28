@@ -15,7 +15,10 @@ const formats = ['a4', 'a5', 'a6'] as const
 const papers = ['lisa', 'pautada', 'pontilhada', 'quadriculada'] as const
 type Format = typeof formats[number]
 type Paper = typeof papers[number]
-const requiredFormatQuestion = 'Qual formato é obrigatório para você?'
+const requiredFormatQuestion = [
+  'Qual formato é obrigatório para você?',
+  'Qual formato o caderno precisa ter?',
+] as const
 
 function attribute<T extends string>(value: string | undefined, allowed: readonly T[]): Need<T> {
   if (value === undefined) return { origin: 'absent' }
@@ -131,7 +134,7 @@ export function papelariaConsultation(domain: ReturnType<typeof interpret>): {
   if (domain.objective.origin === 'absent' || domain.objective.origin === 'ambiguous') {
     return { issues: [{
       reason: 'missing_purpose', priority: domain.objective.origin === 'ambiguous' ? 'ambiguity' : 'selection', attribute: 'purpose',
-      question: 'Para que você vai usar o caderno?',
+      question: ['Para que você vai usar o caderno?', 'Qual é o uso principal do caderno?'],
       limitation: 'Ainda preciso saber para que você quer usar o caderno.',
     }] }
   }
@@ -141,7 +144,7 @@ export function papelariaConsultation(domain: ReturnType<typeof interpret>): {
     canChooseWithoutPreference: true,
     selectionQuestion: {
       reason: 'format_preference', priority: 'preference', attribute: 'format',
-      question: 'Qual tamanho de caderno você prefere?',
+      question: ['Qual tamanho de caderno você prefere?', 'Você tem preferência de tamanho para o caderno?'],
       limitation: 'Ainda não consigo diferenciar um caderno para você.',
     },
   }

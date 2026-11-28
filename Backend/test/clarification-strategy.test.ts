@@ -5,11 +5,13 @@ import { decideClarification, type ClarificationIssue } from '../src/agent/clari
 import { budgetQuestion, clarificationReply, interpretCustomerNeeds, type CustomerNeedsRequest } from '../src/agent/customer-needs.js'
 import { hidrasplashCustomerDomain } from '../src/agent/hidrasplash-customer-needs.js'
 import { papelariaConsultation, papelariaCustomerDomain } from './fixtures/papelaria-customer-needs.js'
+import { createConversationLanguage, type ClarificationPrompt } from '../src/agent/conversation-language.js'
 
 const plan = { presentationIntent: 'recommendation', groundingRequirement: 'product' } as const
-const history = (...turns: readonly (readonly [string, string])[]): CustomerNeedsRequest['history'] =>
+const language = createConversationLanguage()
+const history = (...turns: readonly (readonly [string, ClarificationPrompt])[]): CustomerNeedsRequest['history'] =>
   turns.flatMap(([message, reply]) => [
-    { role: 'user', content: message }, { role: 'assistant', content: reply },
+    { role: 'user', content: message }, { role: 'assistant', content: language.question(reply) },
   ])
 
 test('the universal decision orders issues and explains an unresolvable condition without a question', () => {
@@ -72,13 +74,15 @@ test('short budget answers require a real conflict and replay as confirmed conte
   const initial = 'Quero shampoo anticaspa até R$ 50 ou até R$ 80.'
   const read = (message: string, previous: CustomerNeedsRequest['history']) =>
     interpretCustomerNeeds({ message, history: previous, cart: [] }, hidrasplashCustomerDomain)
-  for (const answer of ['R$ 50.', '50 reais.', '50.', 'Até R$ 50.']) {
-    const current = read(answer, history([initial, budgetQuestion]))
-    assert.deepEqual(current.budget, { origin: 'declared', value: 50 }, answer)
-    assert.equal(current.plan.presentationIntent, 'recommendation')
-    const resumed = read('Também prefiro frescor.', history([initial, budgetQuestion], [answer, 'Anotei o teto.']))
-    assert.deepEqual(resumed.budget, { origin: 'inferred', value: 50 }, answer)
-    assert.equal(resumed.plan.presentationIntent, 'recommendation')
+  for (const question of budgetQuestion) {
+    for (const answer of ['R$ 50.', '50 reais.', '50.', 'Até R$ 50.']) {
+      const current = read(answer, history([initial, question]))
+      assert.deepEqual(current.budget, { origin: 'declared', value: 50 }, answer)
+      assert.equal(current.plan.presentationIntent, 'recommendation')
+      const resumed = read('Também prefiro frescor.', history([initial, question], [answer, 'Anotei o teto.']))
+      assert.deepEqual(resumed.budget, { origin: 'inferred', value: 50 }, answer)
+      assert.equal(resumed.plan.presentationIntent, 'recommendation')
+    }
   }
   assert.equal(read('50 ou 80.', history([initial, budgetQuestion])).budget.origin, 'ambiguous')
   assert.equal(read('50.', history([initial, budgetQuestion], ['50 ou 80.', budgetQuestion])).budget.origin, 'declared')

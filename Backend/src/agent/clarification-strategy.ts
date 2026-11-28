@@ -1,5 +1,6 @@
 import { clarificationReply, matchesClarificationQuestion, type CustomerNeedsRequest } from './customer-needs.js'
 import type { ChatGroundingPlan } from './chat-grounding-planner.js'
+import type { ClarificationPrompt } from './conversation-language.js'
 
 const priorities = ['safety', 'restriction', 'ambiguity', 'selection', 'preference'] as const
 
@@ -7,7 +8,7 @@ export interface ClarificationIssue {
   readonly reason: string
   readonly priority: typeof priorities[number]
   readonly attribute: string
-  readonly question?: string
+  readonly question?: ClarificationPrompt
   readonly limitation: string
 }
 

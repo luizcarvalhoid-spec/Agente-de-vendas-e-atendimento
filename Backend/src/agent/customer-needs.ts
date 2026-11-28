@@ -1,6 +1,7 @@
 import {
   hasFaqTopic,
   planChatGrounding,
+  shortProductFact,
   type ChatGroundingPlan,
   type ProductIntentVocabulary,
 } from './chat-grounding-planner.js'
@@ -8,6 +9,9 @@ import {
   asksForAlternative, asksForCheaper, asksForDiscount, decideObjection, isObjectionClause, readObjections, resumesSearch,
   type Objections,
 } from './objection-strategy.js'
+import { matchesClarificationQuestion } from './conversation-language.js'
+
+export { matchesClarificationQuestion } from './conversation-language.js'
 
 export type Need<T> =
   | { readonly origin: 'declared' | 'inferred'; readonly value: T }
@@ -95,6 +99,7 @@ export function resolveContextValues<T>(
 }
 
 export interface CustomerNeeds<Needs extends DomainNeeds> {
+  readonly explainRecommendation: boolean
   readonly intent: Need<'recommendation' | 'comparison' | 'informational' | 'conversation'>
   readonly plan: ChatGroundingPlan
   readonly budget: Need<number>
@@ -135,11 +140,13 @@ const budgetRevocation = /^(?:agora )?(?:sem limite de orcamento|nao tenho mais 
 function extractBudget(value: string) {
   const normalized = normalize(value)
   const revoked = budgetRevocation.test(normalized)
-  const limitExpression = /\b(?:ate|no maximo|orcamento(?: de)?|limite(?: agora)?(?: e| de)?)\s+(?:r\$\s*)?(-?\d+(?:[.,]\d+)*)/g
+  const limitExpression = /\b(?:ate|no maximo|orcamento(?: de)?|limite(?: agora)?(?: e| de)?)\s+(?:(uns|umas|cerca de)\s+)?(?:r\$\s*)?(-?\d+(?:[.,]\d+)*)/g
   const values = new Set<number>()
-  for (const [, amount] of normalized.matchAll(limitExpression)) {
+  let approximate = false
+  for (const [, approximation, amount] of normalized.matchAll(limitExpression)) {
+    approximate ||= approximation !== undefined
     if (!amount || !/^\d{1,6}(?:[.,]\d{1,2})?$/.test(amount)) {
-      return { value: undefined, ambiguous: true, revoked: false }
+      return { value: undefined, ambiguous: true, revoked: false, approximate }
     }
     values.add(Number(amount.replace(',', '.')))
   }
@@ -148,11 +155,16 @@ function extractBudget(value: string) {
     value: values.size === 1 ? amount : undefined,
     ambiguous: values.size > 1,
     revoked,
+    approximate,
   }
 }
 
 function updateHistoricalBudget(budget: Need<number>, next: ReturnType<typeof extractBudget>): Need<number> {
   if (next.revoked) return { origin: 'absent' }
+  if (next.approximate && next.value !== undefined) {
+    const limit = Math.min(next.value, (budget.origin === 'ambiguous' ? budget.conservativeValue : needValue(budget)) ?? Infinity)
+    return budget.origin === 'ambiguous' ? { origin: 'ambiguous', conservativeValue: limit } : { origin: 'inferred', value: limit }
+  }
   if (next.value !== undefined) return { origin: 'inferred', value: next.value }
   if (next.ambiguous) return {
     origin: 'ambiguous',
@@ -161,11 +173,10 @@ function updateHistoricalBudget(budget: Need<number>, next: ReturnType<typeof ex
   return budget
 }
 
-export const budgetQuestion = 'Qual é o valor máximo que você quer gastar no produto?'
-
-export function matchesClarificationQuestion(reply: string, question: string) {
-  return reply === question || reply.endsWith(`\n\n${question}`)
-}
+export const budgetQuestion = [
+  'Qual é o valor máximo que você quer gastar no produto?',
+  'Qual valor máximo devo considerar para o produto?',
+] as const
 
 export function shortBudgetAnswer(message: string) {
   const amount = normalize(message).match(/^(?:r\$\s*)?(\d{1,6}(?:[.,]\d{1,2})?)(?:\s+reais)?[.!]?$/)?.[1]
@@ -208,12 +219,15 @@ export function clarificationReply(message: string) {
   if (endsSearch(text)) return 'ended'
   if (/^(?:nao quero|prefiro nao) responder[.!]?$/.test(text)) return 'refused'
   if (/^nao sei(?: dizer| responder)?[.!]?$/.test(text)) return 'unknown'
-  if (/^(?:tanto faz|nao tenho (?:uma )?preferencia)[.!]?$/.test(text)) return 'indifferent'
-  if (/^(?:voce (?:pode escolher|decide)|pode escolher|fica a seu criterio)[.!]?$/.test(text)) return 'delegated'
+  if (/^(?:tanto faz(?: (?:mesmo|msm))?|nao tenho (?:uma )?preferencia)[.!]?$/.test(text)) return 'indifferent'
+  if (/^(?:(?:voce )?pode escolher(?: (?:para|pra) mim)?|voce decide|fica a seu criterio)[.!]?$/.test(text)) return 'delegated'
   return undefined
 }
 
-export const rejectedProductQuestion = 'Qual produto você quer deixar de fora? Informe o ID do produto.'
+export const rejectedProductQuestion = [
+  'Qual produto você quer deixar de fora? Informe o ID do produto.',
+  'Qual é o ID do produto que devo deixar de fora?',
+] as const
 
 function changesTopic(message: string) {
   return /^(?:mudando de assunto|outro assunto|vamos falar de|agora sobre)\b/.test(normalize(message))
@@ -225,6 +239,7 @@ export function asksForProductSelection(normalized: string) {
 
 function isInformational(message: string, plan: ChatGroundingPlan) {
   const normalized = normalize(message)
+  if (shortProductFact(message)) return true
   if (/^(?:sera que|e se|se eu|suponha|tenho duvida se|gostaria de saber|(?:(?:so|apenas) )?(?:quero|queria) (?:saber|entender|confirmar))\b/.test(normalized)) {
     return true
   }
@@ -236,7 +251,7 @@ function isInformational(message: string, plan: ChatGroundingPlan) {
   if (requestsSelection || requestsAlternative) return false
   return (
     normalized.endsWith('?') ||
-    /^(?:e )?(?:qual|quais|quanto|como|o que|por que|(?:ainda )?tem estoque|esta disponivel)\b/.test(normalized) ||
+    /^(?:e )?(?:qual|quais|quanto|qto custa|como|o que|por que|(?:ainda )?tem estoque|esta disponivel)\b/.test(normalized) ||
     (plan.presentationIntent === 'text' && hasFaqTopic(message) &&
       !/^(?:prefiro|ate|no maximo|na verdade|meu limite|orcamento)\b/.test(normalized))
   )
@@ -399,8 +414,9 @@ function resolveActiveHistory<Preferences extends BudgetPreference, Needs extend
     // A question paired with a real ceiling can signal missing structured evidence.
     // The question supplies neither a historical value nor enough evidence to bind a short answer.
     if (declaration.value !== undefined || declaration.revoked) {
-      unconfirmedBudget = declaration.value !== undefined && reply?.role === 'assistant' &&
-        matchesClarificationQuestion(reply.content, budgetQuestion)
+      unconfirmedBudget = (declaration.approximate && unconfirmedBudget) ||
+        (declaration.value !== undefined && reply?.role === 'assistant' &&
+          matchesClarificationQuestion(reply.content, budgetQuestion))
     }
     history.push({ ...entry, content })
     // Assistant content can only suggest a referent for a user's rejection.
@@ -507,7 +523,7 @@ function discardsRecommendation(message: string) {
 }
 
 function rejectsReference(message: string) {
-  return /\b(?:nao quero(?: mais)? (?:esse|este|essa|esta)|nao gostei (?:desse|deste|dessa|desta))(?:\s+(?:produto|opcao|item|recomendacao)\b|[.!?,]|$)/.test(normalize(message))
+  return /\b(?:(?:n|nao) curti (?:esse|este|essa|esta)|nao quero(?: mais)? (?:esse|este|essa|esta)|nao gostei (?:desse|deste|dessa|desta))(?:\s+(?:produto|opcao|item|recomendacao)\b|[.!?,;]|$)/.test(normalize(message))
 }
 
 export function shortProductAnswer(message: string) {
@@ -637,21 +653,26 @@ export function interpretCustomerNeeds<Preferences extends BudgetPreference, Nee
       )
   const currentBudget = extractBudget(statement)
   const structuredBudget = request.preferences?.maxPrice
-  const budgetEvidenceMissing = unconfirmedBudget && currentBudget.value === undefined && !currentBudget.revoked &&
+  const historicalCeiling = historicalBudget.origin === 'ambiguous' ? historicalBudget.conservativeValue : needValue(historicalBudget)
+  const statedLimit = currentBudget.approximate && currentBudget.value !== undefined
+    ? Math.min(currentBudget.value, historicalCeiling ?? Infinity)
+    : currentBudget.value
+  const budgetEvidenceMissing = unconfirmedBudget && (currentBudget.value === undefined || currentBudget.approximate) && !currentBudget.revoked &&
     (structuredBudget === undefined || structuredBudget !== needValue(historicalBudget))
   const conflicts = structuredBudget !== undefined &&
     (currentBudget.revoked || (currentBudget.value !== undefined && structuredBudget !== currentBudget.value))
-  const budget: Need<number> = currentBudget.ambiguous || conflicts
+  const budget: Need<number> = currentBudget.ambiguous || conflicts ||
+      (currentBudget.approximate && historicalBudget.origin === 'ambiguous')
     ? {
         origin: 'ambiguous',
         conservativeValue: conflicts
-          ? Math.min(structuredBudget, currentBudget.value ?? structuredBudget)
-          : structuredBudget ?? (historicalBudget.origin === 'ambiguous'
-            ? historicalBudget.conservativeValue
-            : needValue(historicalBudget)),
+          ? Math.min(structuredBudget, statedLimit ?? structuredBudget)
+          : statedLimit ?? structuredBudget ?? historicalCeiling,
       }
-    : structuredBudget !== undefined || currentBudget.value !== undefined
-      ? needFrom(structuredBudget ?? currentBudget.value)
+    : currentBudget.approximate && statedLimit !== undefined
+      ? { origin: 'inferred', value: Math.min(statedLimit, structuredBudget ?? Infinity) }
+    : structuredBudget !== undefined || statedLimit !== undefined
+      ? needFrom(structuredBudget ?? statedLimit)
       : currentBudget.revoked ? { origin: 'absent' } : historicalBudget
   const { declared, inferred, unresolvedRejection } =
     resolveRejectedProducts(statement, history, changedGoal, recommendationIds, resolveReference)
@@ -668,6 +689,7 @@ export function interpretCustomerNeeds<Preferences extends BudgetPreference, Nee
 
   return {
     intent,
+    explainRecommendation: asksForRationale,
     plan,
     budget,
     objection: { interpretation: objections, action: objectionAction, information },

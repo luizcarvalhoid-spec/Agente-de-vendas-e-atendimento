@@ -5,7 +5,7 @@ type Concern =
   | 'freight' | 'discount' | 'competitor' | 'price' | 'fit' | 'confidence' | 'hesitation'
 
 const end = /^(?:deix[ae] (?:pra|para) la|esquece|encerrar|encerra|cancel[ae]r? essa busca|nao quero (?:mais|comprar|continuar(?: comprando)?))(?:\s*(?:[,;.!]+|obrigad[oa]))*$/
-const pause = /^(?:(?:vou|prefiro) pensar(?: melhor| mais)?|talvez depois|agora nao|nao quero (?:mais|continuar|comprar) (?:por enquanto|agora|ainda)|deix[ae] (?:pra|para) la por enquanto)(?:\s*(?:[,;.!]+|obrigad[oa]))*$/
+const pause = /^(?:(?:vou|prefiro) pensar(?: melhor| mais)?|talvez depois|agora nao|(?:blz,? )?vejo depois|nao quero (?:mais|continuar|comprar) (?:por enquanto|agora|ainda)|deix[ae] (?:pra|para) la por enquanto)(?:\s*(?:[,;.!]+|obrigad[oa]|vlw|valeu))*$/
 const resume = /^(?:quero retomar(?: a busca)?|vamos retomar(?: a busca)?|pode continuar(?: a busca)?|quero continuar a busca)[.!?]*$/
 const freight = /\b(?:frete|envio|entrega)\b[^.!?;]*\b(?:car[oa]|cust[oa] muit[oa]|muito (?:alto|alta))\b|\bachei car[oa] (?:o|a) (?:frete|envio|entrega)\b/
 
@@ -16,7 +16,7 @@ const patterns: readonly [Concern, RegExp, 'declared' | 'inferred' | 'ambiguous'
   ['pause', pause, 'declared'],
   ['frustration', /\b(?:voce nao (?:esta|ta) entendendo|ja respondi(?: essa pergunta)?|ja (?:informei|disse|falei) (?:isso|que|o valor|o limite|meu limite)|voce (?:esta|ta) insistindo(?: demais)?)\b/, 'declared'],
   ['rationale', /\bnao (?:gostei|entendi|concordo) (?:da|dessa|desta|com a) (?:justificativa|explicacao)\b/, 'declared'],
-  ['product', /\b(?:nao (?:quero|recomende)(?: mais)? (?:o )?produto|nao gostei do produto) (?:id\s*)?\d{1,6}\b|\b(?:nao quero(?: mais)? (?:esse|este|essa|esta)|nao gostei (?:desse|deste|dessa|desta))(?:\s+(?:produto|opcao|item|recomendacao)\b|[.!?,;]|$)/, 'declared'],
+  ['product', /\b(?:nao (?:quero|recomende)(?: mais)? (?:o )?produto|nao gostei do produto) (?:id\s*)?\d{1,6}\b|\b(?:(?:n|nao) curti (?:esse|este|essa|esta)|nao quero(?: mais)? (?:esse|este|essa|esta)|nao gostei (?:desse|deste|dessa|desta))(?:\s+(?:produto|opcao|item|recomendacao)\b|[.!?,;]|$)/, 'declared'],
   ['attribute', /^(?:tambem )?(?:nao gosto|nao gostei) (?:de|do|da)\s+(?!(?:produto|item|opcao|recomendacao|justificativa|explicacao)\b)/, 'declared'],
   ['freight', freight, 'declared'],
   ['discount', discount, 'inferred'],

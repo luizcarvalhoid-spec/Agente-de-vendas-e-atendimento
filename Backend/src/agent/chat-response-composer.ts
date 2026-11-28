@@ -10,7 +10,10 @@ import {
 import { CHAT_MAX_SOURCES } from '../contracts/chat.js'
 import type { FaqDocument } from '../knowledge/faq-document-schema.js'
 import type { ConsultativeAgentProfile } from './consultative-agent-policy.js'
+import { createConversationLanguage } from './conversation-language.js'
 import type { SearchProductsInput } from './tools/product-tools.js'
+
+export { recommendationSubject } from './conversation-language.js'
 
 export interface CommercialPresentationContext {
   readonly searchInput: SearchProductsInput
@@ -142,20 +145,6 @@ const shippingFeeQuestion = /\b(?:taxa|valor|preco|cust\w*|quanto fica)\b/
 const unverifiedShipping = 'Não consegui verificar a política de frete com as fontes disponíveis.'
 const unverifiedFaq = 'Não consegui verificar a política solicitada nas fontes disponíveis.'
 
-function recommendationIntroduction(product: Pick<Product, 'name'>) {
-  return `Pelo que você me contou, eu escolheria ${product.name}.`
-}
-
-// A prior reply can identify the subject of an explicit rejection. It is never
-// an authorization or a source of product facts.
-export function recommendationSubject(
-  message: string,
-  products: readonly Pick<Product, 'id' | 'name'>[],
-) {
-  const matches = products.filter((product) => message.startsWith(recommendationIntroduction(product)))
-  return matches.length === 1 ? matches[0]?.id : undefined
-}
-
 export function createChatResponseComposer(
   profile: StoreResponseProfile,
   documents: readonly FaqDocument[],
@@ -197,7 +186,10 @@ export function createChatResponseComposer(
   }
 
   return {
-    recommendation(product: Product, context: CommercialPresentationContext, faqAnswer: string) {
+    recommendation(
+      product: Product, context: CommercialPresentationContext, faqAnswer: string,
+      language = createConversationLanguage(), explain = false,
+    ) {
       const reasons = presentation?.recommendationReasons?.(product, context)
       const primary = [...(reasons?.primary ?? [])]
       const price = priceToCents(product.price)
@@ -208,23 +200,24 @@ export function createChatResponseComposer(
           `custa ${formatCommercialCents(price)}, dentro do limite de ${formatCommercialCents(budgetCents)}`,
         )
       }
-      const explanation = joinNatural([...primary, ...(reasons?.secondary ?? [])].slice(0, 3))
+      const explanation = joinNatural([...primary, ...(reasons?.secondary ?? [])].slice(0, explain ? 4 : 3))
       const description = presentation?.describeProduct?.(product)
       const detail = explanation
         ? ` Essa opção ${explanation}.`
         : description ? ` A opção tem ${description}.` : ''
-      return `${recommendationIntroduction(product)}${detail} Os detalhes de preço e estoque estão no cartão.${faqAnswer ? `\n\n${faqAnswer}` : ''}`
+      return language.withSupportingText(language.recommendation(product.name) + detail, faqAnswer)
     },
 
-    comparison(products: readonly [Product, Product], faqAnswer: string) {
-      const details = products.map((product) => {
+    comparison(products: readonly [Product, Product], faqAnswer: string, language = createConversationLanguage()) {
+      const describe = (product: Product) => {
         const description = presentation?.describeProduct?.(product)
         const price = priceToCents(product.price)
         const priceText = price === undefined ? 'está no catálogo' : `custa ${formatCommercialCents(price)}`
         return `${product.name} ${priceText}${description ? ` e tem ${description}` : ''}.`
-      })
-      const notice = presentation?.comparisonNotice
-      return `Veja as duas opções: ${details.join(' ')}${notice ? ` ${notice}` : ''} Os dados completos estão nos cartões.${faqAnswer ? `\n\n${faqAnswer}` : ''}`
+      }
+      return language.withSupportingText(language.comparison(
+        [describe(products[0]), describe(products[1])], presentation?.comparisonNotice,
+      ), faqAnswer)
     },
 
     faq(question: string, retrievedSourceIds: readonly string[]): FaqComposition {

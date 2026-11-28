@@ -17,7 +17,8 @@ test('objections retain their provenance and preserve the priority of customer d
     { origin: 'declared', value: 'price' },
     { origin: 'ambiguous', conservativeValue: 'fit' },
   ])
-  assert.equal(decideObjection(result, options), 'pause')
+  assert.equal(decideObjection(read('Achei caro.', 'Vou pensar melhor.'), options), 'pause')
+  assert.equal(decideObjection(result, options), 'inform')
   assert.equal(decideObjection(result, { ...options, information: true }), 'inform')
   assert.equal(decideObjection(read('Deixa pra lá.', 'Tem algo mais barato?'), options), 'stop')
 })
@@ -39,6 +40,8 @@ test('a fit question, dissatisfaction with a rationale, and a hypothetical reque
   assert.equal(read('Não quero esse produto.').primary, 'product')
   assert.equal(read('Não gosto de fragrância forte.').primary, 'attribute')
   assert.equal(read('Tem algo mais barato?').cheaper, true)
+  assert.equal(read('Também prefiro outra fragrância.').alternative, false)
+  assert.equal(read('Não pode me mostrar outra opção.').alternative, false)
 })
 
 test('price objections and counteroffers replay without changing a declared ceiling', () => {
@@ -111,4 +114,64 @@ test('Papelaria Horizonte applies the same decisions and keeps its mandatory for
   const resumed = interpret({ ...request, history, message: 'Quero retomar a busca.' })
   assert.equal(resumed.plan.presentationIntent, 'recommendation')
   assert.deepEqual(resumed.domain.restrictions.format, { origin: 'inferred', value: 'a5' })
+})
+
+test('Papelaria Horizonte preserves a pause through a condition and factual questions in the same turn', () => {
+  const history: CustomerNeedsRequest['history'] = [
+    { role: 'user', content: 'Quero um caderno para estudo até R$ 60.' },
+    { role: 'assistant', content: 'Entendi.' },
+    { role: 'user', content: 'Vou pensar melhor. Existe algum desconto? Qual é o prazo de entrega?' },
+    { role: 'assistant', content: 'Resposta informativa.' },
+    { role: 'user', content: 'Quero um produto que tem que ser formato A5.' },
+    { role: 'assistant', content: 'Tudo bem.' },
+    { role: 'user', content: 'Até R$ 45.' },
+  ]
+  const interpret = (message: string, past = history) =>
+    interpretCustomerNeeds({ message, history: past, cart: [] }, papelariaCustomerDomain)
+  const mixed = interpret(history[2]!.content, history.slice(0, 2))
+  assert.equal(mixed.context.paused, true)
+  assert.equal(mixed.objection.action, 'inform')
+  assert.deepEqual(mixed.objection.interpretation.topics, ['pause', 'discount'])
+  assert.deepEqual(mixed.objection.information, ['Qual é o prazo de entrega?'])
+  const ambiguous = interpret('Quero um produto que tem que ser formato A6.')
+  assert.equal(ambiguous.objection.action, 'pause')
+  assert.equal(ambiguous.context.paused, true)
+  assert.deepEqual(ambiguous.domain.restrictions.format, { origin: 'declared', value: 'a6' })
+  const stock = interpret('Qual é o estoque dos produtos 1 e 2?')
+  assert.equal(stock.objection.action, 'inform')
+  assert.equal(stock.plan.presentationIntent, 'text')
+  assert.equal(interpret('Também prefiro outra cor.').objection.action, 'pause')
+  assert.equal(interpret('Não me recomende um caderno.').objection.action, 'pause')
+  const newRecommendation = interpret('Pode me indicar um caderno?')
+  assert.equal(newRecommendation.context.paused, false)
+  assert.equal(newRecommendation.plan.presentationIntent, 'recommendation')
+  const resumed = interpret('Quero retomar a busca.')
+  assert.equal(resumed.context.paused, false)
+  assert.deepEqual(resumed.budget, { origin: 'inferred', value: 45 })
+  assert.deepEqual(resumed.domain.restrictions.format, { origin: 'inferred', value: 'a5' })
+  const changed = interpret('Agora quero um caderno para desenho.')
+  assert.equal(changed.context.changedGoal, true)
+  assert.equal(changed.context.paused, false)
+  assert.deepEqual(changed.domain.objective, { origin: 'declared', value: 'desenho' })
+})
+
+test('HidraSplash keeps restrictions and rejection state independently from a request to select', () => {
+  const history: CustomerNeedsRequest['history'] = [
+    { role: 'user', content: 'Quero shampoo anticaspa, para couro oleoso e até R$ 60.' },
+    { role: 'assistant', content: 'Escolha inicial.' },
+    { role: 'user', content: 'Não quero o produto 13.' },
+    { role: 'assistant', content: 'Entendido.' },
+    { role: 'user', content: 'Também prefiro frescor.' },
+  ]
+  const interpret = (message: string) => interpretCustomerNeeds({ message, history, cart: [] }, hidrasplashCustomerDomain)
+  const preference = interpret('Sem zinco PCA.')
+  assert.equal(preference.objection.action, 'acknowledge')
+  assert.equal(preference.context.rejectionHeld, true)
+  assert.deepEqual(preference.exclusions.inferred, [13])
+  assert.deepEqual(preference.domain.restrictions.ingredientExclusions, { origin: 'declared', value: ['zinco pca'] })
+  const alternative = interpret('Me mostre outra opção.')
+  assert.equal(alternative.objection.action, 'alternative')
+  assert.equal(alternative.context.rejectionHeld, false)
+  assert.equal(alternative.context.unresolvedRejection, false)
+  assert.deepEqual(alternative.exclusions.inferred, [13])
 })

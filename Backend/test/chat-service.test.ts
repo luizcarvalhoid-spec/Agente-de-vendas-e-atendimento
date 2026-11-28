@@ -220,6 +220,173 @@ test('HUM-06 handles commercial objections with current prices and verified poli
   assert.equal(calls, 0)
 })
 
+test('HUM-06 review keeps independently verifiable policies and recognizes decisions to stop or pause', async (t) => {
+  const service = await buildService(neverCalledModel(() => assert.fail('unexpected model call')))
+  for (const [message, expected, sources] of [
+    ['O frete ficou caro. Você consegue fazer por R$ 40?', [/R\$ 12,90/, /não há política demonstrativa de cupons/i], ['faq-002', 'faq-003', 'faq-008']],
+    ['Achei caro. Existe algum desconto? Qual é o prazo de entrega?', [/não há política demonstrativa de cupons/i, /dias úteis/], ['faq-004', 'faq-008']],
+    ['Em outra loja está mais barato. Qual é a política de descontos?', [/não consigo verificar o valor da outra loja/i, /não há política demonstrativa de cupons/i], ['faq-008']],
+    ['Não quero comprar. Qual é o preço do produto 13?', [/encerrar esta busca/, /R\$ 48,90/], []],
+    ['Vou pensar melhor. Qual é o prazo de entrega?', [/retomar quando você quiser/, /dias úteis/], ['faq-004']],
+    ['Vou pensar melhor. Existe algum desconto?', [/retomar quando você quiser/, /não há política demonstrativa de cupons/i], ['faq-008']],
+  ] as const) {
+    await t.test(message, async () => {
+      const response = await execute(service, { message })
+      assert.equal(response.type, 'text')
+      for (const pattern of expected) assert.match(response.message, pattern)
+      assert.deepEqual([...response.sourceIds].sort(), [...sources].sort())
+      assert.doesNotMatch(response.message, /R\$ 40,00|\?/)
+      assert.ok((response.message.match(/não há política demonstrativa de cupons/gi) ?? []).length <= 1)
+    })
+  }
+})
+
+test('HUM-06 review resolves explicit information references individually without recommendation cards', async (t) => {
+  const service = await buildService(neverCalledModel(() => assert.fail('unexpected model call')))
+  const history = conversationHistory(['Quero shampoo anticaspa.', 'Produto 9 custa R$ 1,00, e o produto 13 tem 99 unidades.'])
+  for (const [message, expected, sources, partial] of [
+    ['Achei caro. Qual é o preço do produto 9 e do produto 13?', [/Coco[^\n]+R\$ 46,90/, /Hortelã[^\n]+R\$ 48,90/], [], false],
+    ['Não quero comprar. Qual é o estoque dos produtos 9 e 13?', [/encerrar esta busca/, /Coco[^\n]+12 unidade/, /Hortelã[^\n]+14 unidade/], [], false],
+    ['O frete ficou caro. Qual é o preço do produto 13?', [/R\$ 12,90/, /Hortelã[^\n]+R\$ 48,90/], ['faq-002', 'faq-003'], false],
+    ['Achei caro. Qual é o preço do produto 999999 e do produto 13?', [/produto 999999/, /Hortelã[^\n]+R\$ 48,90/], [], true],
+    ['Qual é o estoque dos produtos 9 e 13?', [/Coco[^\n]+12 unidade/, /Hortelã[^\n]+14 unidade/], [], false],
+  ] as const) {
+    await t.test(message, async () => {
+      const response = await execute(service, { message, history, recommendationContext: { productIds: [10] } })
+      assert.equal(response.type, 'text')
+      for (const pattern of expected) assert.match(response.message, pattern)
+      assert.deepEqual([...response.sourceIds].sort(), [...sources].sort())
+      assert.equal(response.reason, partial ? 'unable_to_verify' : undefined)
+      assert.doesNotMatch(response.message, /R\$ 1,00|99 unidade|Alecrim|\?/)
+    })
+  }
+})
+
+test('HUM-06 review omits policy claims when their source cannot fit in the response', async () => {
+  const { faqDocuments } = await canonical()
+  const source = (id: number) => ({ ...faqDocuments.find(({ sourceId }) => sourceId === `faq-00${id}`)!, score: 1 })
+  const service = await buildService(neverCalledModel(() => assert.fail('unexpected model call')), {
+    faqIndex: {
+      size: faqDocuments.length,
+      searchFaq(query) {
+        if (query === 'frete grátis') return [source(2), source(3)]
+        if (query.includes('cupons')) return [source(8)]
+        if (query.includes('prazo')) return [source(4)]
+        if (query.includes('pagamento')) return [source(5), source(7)]
+        return []
+      },
+    },
+  })
+  const result = await execute(service, {
+    message: 'O frete ficou caro. Existe algum desconto? Qual é o prazo de entrega? Como funciona o pagamento?',
+  })
+  assert.equal(result.type, 'text')
+  assert.equal(result.reason, 'unable_to_verify')
+  assert.deepEqual(result.sourceIds, ['faq-002', 'faq-003', 'faq-008', 'faq-004', 'faq-005'])
+  assert.match(result.message, /R\$ 12,90/)
+  assert.match(result.message, /cupons/)
+  assert.match(result.message, /dias úteis/)
+  assert.match(result.message, /ficou sem resposta/)
+  assert.doesNotMatch(result.message, /comprovante/i)
+})
+
+test('HUM-06 review keeps the pause through complementary turns and resumes with the effective filters', async () => {
+  let calls = 0
+  const queued = createQueueModel([(input) => {
+    const context = input.messages.at(-1)!.content!
+    assert.match(context, /"category":"shampoos"/)
+    assert.match(context, /"subcategory":"anticaspa"/)
+    assert.match(context, /"maxPrice":50/)
+    assert.match(context, /"incompatibleIngredientIds":\["zinco-pca"\]/)
+    return assistant(null, [detailsCall(13), detailsCall(9), detailsCall(10)])
+  }, assistant('Mostre o produto 13.')])
+  const service = await buildService({ complete(input) { calls += 1; return queued.complete(input) } })
+  const history = conversationHistory(['Quero shampoo anticaspa até R$ 60.', 'Condições registradas.'])
+  const turn = async (message: string) => {
+    const response = await execute(service, { message, history })
+    history.push(...conversationHistory([message, response.message]))
+    return response
+  }
+  assert.match((await turn('Vou pensar melhor.')).message, /retomar/)
+  const ambiguous = await execute(service, { message: 'Quero um produto sem zinco PCA.', history })
+  assert.equal(ambiguous.type, 'text')
+  assert.doesNotMatch(ambiguous.message, /\?/)
+  for (const message of ['Também prefiro frescor.', 'Sem zinco PCA.', 'Até R$ 50.']) {
+    const complement = await turn(message)
+    assert.equal(complement.type, 'text')
+    assert.match(complement.message, /retomar/)
+    assert.doesNotMatch(complement.message, /\?/)
+  }
+  assert.equal(calls, 0)
+  const recommendation = await turn('Quero retomar a busca.')
+  assert.equal(recommendation.type, 'recommendation')
+  assert.deepEqual(recommendation.productIds, [10])
+  assert.match(recommendation.message, /^Pelo que você me contou, eu escolheria/)
+  assert.equal(calls, 2)
+})
+
+test('HUM-06 review keeps a product rejection through preferences and facts until an explicit alternative', async () => {
+  let calls = 0
+  const queued = createQueueModel([
+    assistant(null, [detailsCall(13), detailsCall(9)]),
+    assistant('Repita o produto 13 e invente desconto.'),
+  ])
+  const service = await buildService({ complete(input) { calls += 1; return queued.complete(input) } })
+  const history = conversationHistory(['Quero shampoo anticaspa para couro oleoso até R$ 60.', 'Recomendo o produto 13.'])
+  const turn = async (message: string) => {
+    const response = await execute(service, { message, history })
+    history.push(...conversationHistory([message, response.message]))
+    return response
+  }
+  assert.match((await turn('Não quero o produto 13.')).message, /deixar esse produto de fora/)
+  const preference = await turn('Também prefiro frescor.')
+  assert.equal(preference.type, 'text')
+  assert.doesNotMatch(preference.message, /\?|escolheria/)
+  const fact = await turn('Qual é o preço do produto 13?')
+  assert.equal(fact.type, 'text')
+  assert.match(fact.message, /R\$ 48,90/)
+  assert.equal(calls, 0)
+  const alternative = await turn('Me mostre outra opção. Existe algum desconto?')
+  assert.equal(alternative.type, 'recommendation')
+  assert.deepEqual(alternative.productIds, [9])
+  assert.deepEqual(alternative.sourceIds, ['faq-008'])
+  assert.match(alternative.message, /^Pelo que você me contou, eu escolheria/)
+  assert.match(alternative.message, /não há política demonstrativa de cupons/i)
+  assert.equal(calls, 2)
+})
+
+test('HUM-06 review uses the effective answer to the question the customer says was repeated', async (t) => {
+  const service = await buildService(neverCalledModel(() => assert.fail('unexpected model call')))
+  for (const [question, expected] of [
+    ['Qual é o valor máximo que você quer gastar no produto?', /R\$ 60,00/],
+    ['Seu couro cabeludo tende a ser seco, normal, oleoso ou sensível?', /perfil informado \(oleoso\)/],
+    ['Que tipo de produto você quer nesta busca?', /categoria informada é shampoo/],
+    ['Qual é a finalidade principal do produto nesta busca?', /finalidade informada é anticaspa/],
+    ['Qual ingrediente precisa ficar de fora?', /condição de evitar zinco pca/i],
+    ['Que preferência sensorial você quer manter?', /preferência por frescor/],
+    ['Quantas unidades você quer?', /considerar o que estiver disponível/],
+  ] as const) {
+    await t.test(question, async () => {
+      const response = await execute(service, {
+        message: 'Já respondi essa pergunta.',
+        history: conversationHistory(
+          ['Quero shampoo anticaspa para couro oleoso, sem zinco PCA, com frescor e até R$ 60.', 'Entendi.'],
+          ['Continuo com as mesmas condições.', question],
+        ),
+      })
+      assert.equal(response.type, 'text')
+      assert.match(response.message, expected)
+      assert.doesNotMatch(response.message, /recuperar a resposta|\?/)
+    })
+  }
+  const missing = await execute(service, {
+    message: 'Já respondi essa pergunta.',
+    history: conversationHistory(['Quero shampoo anticaspa.', 'Qual é o valor máximo que você quer gastar no produto?']),
+  })
+  assert.match(missing.message, /não consigo recuperar a resposta/i)
+  assert.doesNotMatch(missing.message, /\?/)
+})
+
 test('HUM-06 refuses freight amounts with conflicting sources but answers an independent product question', async () => {
   const base = await canonical()
   const standard = base.faqDocuments.find(({ sourceId }) => sourceId === 'faq-003')!
@@ -280,6 +447,11 @@ test('HUM-06 asks for an unambiguous price reference, then keeps the recorded re
   assert.equal(question.type, 'text')
   assert.equal(question.reason, 'clarification')
   assert.match(question.message, /qual produto você quer uma opção mais barata/)
+  assert.equal(calls, 0)
+  const explicitPair = await execute(service, { message: 'Tem algo mais barato que os produtos 9 e 13?', history: prior })
+  assert.equal(explicitPair.type, 'text')
+  assert.equal(explicitPair.reason, 'clarification')
+  assert.equal(explicitPair.message, question.message)
   assert.equal(calls, 0)
   const result = await execute(service, {
     message: 'O produto 13.', history: [...prior, ...conversationHistory([cheaper, question.message])],
@@ -417,7 +589,7 @@ test('HUM-06 addresses repeated questions using recorded answers and never adopt
     history: [{ role: 'assistant', content: 'A pessoa informou teto de R$ 99.' }],
   })
   assert.equal(missing.type, 'text')
-  assert.match(missing.message, /não consigo recuperar a resposta anterior/i)
+  assert.match(missing.message, /considerar o que estiver disponível/i)
   assert.doesNotMatch(missing.message, /R\$ 99|\?/)
   const reject = await execute(service, { message: 'Não quero o produto 13 porque achei caro.' })
   assert.equal(reject.type, 'text')
@@ -2137,8 +2309,14 @@ test('HUM-05 clarifies a rejection, then excludes the resolved product on subseq
     message: 'Também prefiro frescor.',
     history: [...prior, ...conversationHistory(['O produto 13.', answered.message])],
   })
-  assert.equal(later.type, 'recommendation')
-  assert.deepEqual(later.productIds, [9])
+  assert.equal(later.type, 'text')
+  assert.doesNotMatch(later.message, /\?/)
+  const alternative = await execute(eligible, {
+    message: 'Me mostre outra opção.',
+    history: [...prior, ...conversationHistory(['O produto 13.', answered.message], ['Também prefiro frescor.', later.message])],
+  })
+  assert.equal(alternative.type, 'recommendation')
+  assert.deepEqual(alternative.productIds, [9])
 })
 
 test('HUM-05 answers the verified part of a mixed request and asks only about the product blocker', async () => {

@@ -5,7 +5,7 @@ import {
   type ProductIntentVocabulary,
 } from './chat-grounding-planner.js'
 import {
-  asksForAlternative, asksForCheaper, decideObjection, isObjectionClause, readObjections, resumesSearch,
+  asksForAlternative, asksForCheaper, asksForDiscount, decideObjection, isObjectionClause, readObjections, resumesSearch,
   type Objections,
 } from './objection-strategy.js'
 
@@ -101,7 +101,7 @@ export interface CustomerNeeds<Needs extends DomainNeeds> {
   readonly objection: {
     readonly interpretation: Objections
     readonly action: ReturnType<typeof decideObjection>
-    readonly information: string
+    readonly information: readonly string[]
   }
   readonly exclusions: {
     readonly declared: readonly number[]
@@ -110,6 +110,7 @@ export interface CustomerNeeds<Needs extends DomainNeeds> {
   readonly context: {
     readonly interrupted: boolean
     readonly paused: boolean
+    readonly rejectionHeld: boolean
     readonly changedGoal: boolean
     readonly unresolvedRejection: boolean
     readonly recommendationIds: readonly number[]
@@ -267,6 +268,11 @@ function messageParts(message: string) {
     .map((part) => part.trim()).filter(Boolean)
 }
 
+function requestsNewSelection(normalized: string) {
+  return resumesSearch(normalized) ||
+    /^(?:(?:agora|por favor,?|entao)\s+)?(?:(?:me )?(?:indique|recomende)|(?:voce )?(?:pode|poderia) (?:me )?(?:indicar|recomendar|ajudar a escolher))\b/.test(normalized)
+}
+
 function contextStatement(message: string, vocabulary: ProductIntentVocabulary) {
   const statements: string[] = []
   const comparisonTopics: string[] = []
@@ -275,12 +281,13 @@ function contextStatement(message: string, vocabulary: ProductIntentVocabulary) 
   const objections = readObjections(parts.map(normalize))
   for (const part of parts) {
     const normalized = normalize(part)
+    if (asksForDiscount(normalized)) continue
     const plan = planChatGrounding(part, vocabulary)
     const startsWithSelection = /^(?:quero|procuro|preciso de|busco|prefiro|meu limite|na verdade)\b/.test(normalized) ||
       asksForProductSelection(normalized)
     if (isObjectionClause(normalized) && !startsWithSelection &&
       !rejectsReference(part) && explicitRejectedProductIds(part).size === 0) continue
-    if (isInformational(part, plan) && !asksForCheaper(normalized)) {
+    if (isInformational(part, plan) && !asksForCheaper(normalized) && !requestsNewSelection(normalized)) {
       information.push(part)
       continue
     }
@@ -293,15 +300,14 @@ function contextStatement(message: string, vocabulary: ProductIntentVocabulary) 
       statements.push(part)
     }
   }
-  const selects = comparisonTopics.length > 0 || objections.alternative || parts.some((part) => {
+  const resumes = objections.alternative || statements.some((part) => requestsNewSelection(normalize(part)))
+  const selects = comparisonTopics.length > 0 || resumes || statements.some((part) => {
     const normalized = normalize(part)
-    return resumesSearch(normalized) || (statements.includes(part) &&
-      (asksForProductSelection(normalized) ||
-        (/^(?:quero|procuro|preciso de|busco)\b/.test(normalized) &&
-          planChatGrounding(part, vocabulary).presentationIntent === 'recommendation')))
+    return /^(?:quero|procuro|preciso de|busco)\b/.test(normalized) &&
+      planChatGrounding(part, vocabulary).presentationIntent === 'recommendation'
   })
   return { statement: statements.join(' ').trim(), comparisonText: comparisonTopics.join(' ').trim(),
-    information: information.join(' '), objections, selects }
+    information, objections, selects, resumes }
 }
 
 function goalChanged(goal: CommercialGoal, next: CommercialGoal) {
@@ -313,35 +319,58 @@ function goalChanged(goal: CommercialGoal, next: CommercialGoal) {
   return changesAttribute(goal.category, next.category) || changesAttribute(goal.objective, next.objective)
 }
 
+type SearchHold = 'pause' | 'rejection'
+
+function startsNewSelection(goal: CommercialGoal, next: CommercialGoal, selects: boolean) {
+  const hasScope = (next.category && 'value' in next.category) || (next.objective && 'value' in next.objective)
+  return Boolean(hasScope && (next.explicitChange || (selects && goalChanged(goal, next))))
+}
+
+function searchHold(
+  previous: SearchHold | undefined,
+  turn: ReturnType<typeof contextStatement>,
+  changedSelection: boolean,
+): SearchHold | undefined {
+  if (turn.objections.primary === 'pause') return 'pause'
+  if (turn.resumes || changedSelection) return undefined
+  if (turn.objections.topics.includes('product') && !turn.selects) return previous ?? 'rejection'
+  return previous
+}
+
 function resolveActiveHistory<Preferences extends BudgetPreference, Needs extends DomainNeeds>(
   request: CustomerNeedsRequest<Preferences>,
   domain: CustomerNeedsDomain<Preferences, Needs>,
-  statement: string,
+  current: ReturnType<typeof contextStatement>,
 ) {
   let goal: CommercialGoal = {}
   let history: CustomerNeedsRequest<Preferences>['history'][number][] = []
   let reset = false
   let budget: Need<number> = { origin: 'absent' }
   let unconfirmedBudget = false
-  let paused = false
+  let hold: SearchHold | undefined
   for (let index = 0; index < request.history.length; index += 1) {
     const entry = request.history[index]
     if (entry?.role !== 'user') continue
-    if (endsSearch(entry.content) || changesTopic(entry.content)) {
+    const turn = contextStatement(entry.content, domain.vocabulary)
+    const ended = turn.objections.primary === 'stop'
+    if (ended || changesTopic(entry.content)) {
       history = []
       goal = {}
       budget = { origin: 'absent' }
       unconfirmedBudget = false
-      paused = false
       reset = true
-      if (endsSearch(entry.content)) continue
+      if (ended) {
+        hold = undefined
+        continue
+      }
     }
-    const { statement, objections, selects } = contextStatement(entry.content, domain.vocabulary)
-    if (objections.primary === 'pause') paused = true
-    else if (selects) paused = false
+    const { statement } = turn
     const pendingBudget = hasBudgetQuestion(budget, request.history[index - 1])
     const content = budgetAnswerStatement(statement, pendingBudget)
     const reply = request.history[index + 1]
+    const next = domain.goal?.(content, undefined, reply?.role === 'assistant' ? reply.content : undefined) ?? {}
+    const changed = goalChanged(goal, next)
+    hold = searchHold(hold, turn, startsNewSelection(goal, next, turn.selects))
     if ((pendingBudget || unconfirmedBudget) && content === statement && isBudgetAnswerAttempt(statement)) {
       if (reply?.role === 'assistant' && matchesClarificationQuestion(reply.content, budgetQuestion)) history.push(reply)
       continue
@@ -354,13 +383,11 @@ function resolveActiveHistory<Preferences extends BudgetPreference, Needs extend
       }
       continue
     }
-    const next = domain.goal?.(content, undefined, reply?.role === 'assistant' ? reply.content : undefined) ?? {}
-    if (goalChanged(goal, next)) {
+    if (changed) {
       history = []
       goal = {}
       budget = { origin: 'absent' }
       unconfirmedBudget = false
-      paused = false
       reset = true
     }
     goal = {
@@ -379,14 +406,16 @@ function resolveActiveHistory<Preferences extends BudgetPreference, Needs extend
     // Assistant content can only suggest a referent for a user's rejection.
     if (reply?.role === 'assistant') history.push(reply)
   }
-  const next = domain.goal?.(statement, request.preferences) ?? {}
+  const next = domain.goal?.(current.statement, request.preferences) ?? {}
+  const spoken = domain.goal?.(current.statement) ?? {}
   const changedGoal = changesTopic(request.message) || goalChanged(goal, next)
   return {
     history: changedGoal ? [] : history,
     budget: changedGoal ? { origin: 'absent' } as const : budget,
     unconfirmedBudget: !changedGoal && unconfirmedBudget,
     changedGoal,
-    paused: !changedGoal && paused,
+    wasHeld: hold !== undefined,
+    hold: searchHold(hold, current, startsNewSelection(goal, spoken, current.selects)),
     reset,
   }
 }
@@ -513,8 +542,18 @@ function resolveRejectedProducts(
       if (ids.size === 1) unresolvedRejection = false
     }
     for (const id of ids) inferred.add(id)
-    lastRejectionEstablished = ids.size > 0
-    if (ids.size > 0 || !discardsRecommendation(entry.content)) continue
+    if (ids.size > 0) {
+      lastRejectionEstablished = true
+      continue
+    }
+    if (!discardsRecommendation(entry.content)) {
+      const reply = history[index + 1]
+      if (reply?.role === 'assistant' && resolveReference?.(reply.content) !== undefined &&
+        (asksForProductSelection(normalize(entry.content)) || resumesSearch(normalize(entry.content)))) {
+        lastRejectionEstablished = false
+      }
+      continue
+    }
     const id = previous?.role === 'assistant' ? resolveReference?.(previous.content) : undefined
     if (id !== undefined) {
       inferred.add(id)
@@ -522,6 +561,7 @@ function resolveRejectedProducts(
     } else if (!followsKnownRejection || rejectsReference(entry.content)) {
       unresolvedRejection = true
     }
+    if (!rejectsReference(entry.content) || unresolvedRejection) lastRejectionEstablished = false
   }
   const declared = explicitRejectedProductIds(statement)
   const previous = history.at(-1)
@@ -557,13 +597,15 @@ export function interpretCustomerNeeds<Preferences extends BudgetPreference, Nee
     (request.cart.length === 0 && request.preferences === undefined)
     ? messagePlan
     : planChatGrounding(request.message, domain.vocabulary, true)
-  const { statement: declaredStatement, comparisonText, information, objections, selects } =
-    contextStatement(request.message, domain.vocabulary)
-  const { history, budget: historicalBudget, unconfirmedBudget, changedGoal, reset, paused: wasPaused } =
-    resolveActiveHistory(request, domain, declaredStatement)
+  const current = contextStatement(request.message, domain.vocabulary)
+  const { statement: declaredStatement, comparisonText, information, objections, selects } = current
+  const { history, budget: historicalBudget, unconfirmedBudget, changedGoal, reset, hold, wasHeld } =
+    resolveActiveHistory(request, domain, current)
   const interrupted = objections.primary === 'stop'
-  const paused = objections.primary === 'pause' || (wasPaused && !selects)
-  const objectionAction = decideObjection(objections, { paused, selects, information: information !== '' })
+  const paused = hold === 'pause' && !interrupted
+  const rejectionHeld = hold === 'rejection' && !interrupted
+  const objectionAction = decideObjection(objections, { paused, rejectionHeld, selects, information: information.length > 0 })
+  const informationalText = information.join(' ')
   const pendingBudget = hasBudgetQuestion(historicalBudget, request.history.at(-1), request.preferences?.maxPrice)
   const statement = budgetAnswerStatement(declaredStatement, pendingBudget)
   const asksForRationale = /^por que\b.*\b(?:sua|essa|esta)\b.*\brecomendacao\b/.test(normalize(request.message))
@@ -581,12 +623,13 @@ export function interpretCustomerNeeds<Preferences extends BudgetPreference, Nee
     : objectionAction === 'inform' || objectionAction === 'explain'
       ? {
           presentationIntent: 'text',
-          groundingRequirement: objections.primary === 'freight' || objections.primary === 'discount'
-            ? 'faq' : information ? planChatGrounding(information, domain.vocabulary).groundingRequirement : 'not_required',
+          groundingRequirement: objections.topics.includes('freight') || objections.topics.includes('discount')
+            ? 'faq' : informationalText ? planChatGrounding(informationalText, domain.vocabulary).groundingRequirement : 'not_required',
         }
     : objectionAction === 'alternative' && objections.cheaper
-      ? { presentationIntent: 'recommendation', groundingRequirement: hasFaqTopic(information) ? 'both' : 'product' }
-    : resumesSearch(normalize(statement))
+      ? { presentationIntent: 'recommendation', groundingRequirement: hasFaqTopic(informationalText) ? 'both' : 'product' }
+    : resumesSearch(normalize(statement)) ||
+      (wasHeld && current.resumes && !objections.alternative && currentPlan.presentationIntent === 'text')
       ? { presentationIntent: 'recommendation', groundingRequirement: 'product' }
     : preserveHistoricalRecommendationIntent(
         scopedRequest, currentPlan, domain.vocabulary,
@@ -630,7 +673,7 @@ export function interpretCustomerNeeds<Preferences extends BudgetPreference, Nee
     objection: { interpretation: objections, action: objectionAction, information },
     exclusions: { declared, inferred },
     context: {
-      interrupted, paused, changedGoal, unresolvedRejection, recommendationIds, history,
+      interrupted, paused, rejectionHeld, changedGoal, unresolvedRejection, recommendationIds, history,
       budgetAnswerConfirmed: statement !== declaredStatement,
       budgetEvidenceMissing,
     },
